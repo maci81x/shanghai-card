@@ -178,6 +178,17 @@ tr:hover td{background:rgba(255,255,255,.02)}
 .empty{color:var(--mut);font-size:13px;text-align:center;padding:24px}
 .loading{opacity:.5;pointer-events:none}
 
+/* NAV BAR (basso o laterale) */
+#app-nav{display:none;background:var(--bgc);border-top:1px solid var(--brd);position:fixed;bottom:0;left:0;right:0;z-index:50;padding:6px 0 env(safe-area-inset-bottom,6px)}
+#app-nav.visible{display:flex;justify-content:space-around;align-items:center}
+#app-nav.sidebar{flex-direction:column;justify-content:flex-start;gap:4px;top:0;right:auto;bottom:0;left:0;width:72px;border-top:none;border-right:1px solid var(--brd);padding:70px 0 20px}
+.nav-item{display:flex;flex-direction:column;align-items:center;gap:2px;background:none;border:none;color:var(--mut);font-family:inherit;font-size:10px;font-weight:500;padding:6px 12px;cursor:pointer;border-radius:8px;transition:color .2s}
+.nav-item:hover,.nav-item.active{color:var(--gold)}
+.nav-item span.ni{font-size:20px;line-height:1}
+body.nav-bottom .screen .content{padding-bottom:80px}
+body.nav-sidebar .screen .content{padding-left:80px}
+body.nav-sidebar .screen .hdr{padding-left:80px}
+
 /* RESET PIN MODAL */
 #pin-modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:100;align-items:center;justify-content:center;padding:20px}
 #pin-modal-bg.open{display:flex}
@@ -309,35 +320,65 @@ tr:hover td{background:rgba(255,255,255,.02)}
     <button class="btn-ico" onclick="logout()">Esci</button>
   </div>
   <div class="content">
-    <div class="card saldo-card">
-      <div class="saldo-lbl">Saldo disponibile</div>
-      <div class="saldo-val" id="u-balance">€ 0,00</div>
-      <div class="saldo-row">
-        <span id="u-badge" class="badge"></span>
-        <button class="btn-sm" onclick="refreshUser()">↻ Aggiorna</button>
+    <!-- HOME: saldo + ultime tx -->
+    <div id="u-home-sec">
+      <div class="card saldo-card">
+        <div class="saldo-lbl">Saldo disponibile</div>
+        <div class="saldo-val" id="u-balance">€ 0,00</div>
+        <div class="saldo-row">
+          <span id="u-badge" class="badge"></span>
+          <button class="btn-sm" onclick="refreshUser()">↻ Aggiorna</button>
+        </div>
+        <div id="u-qr" style="margin-top:16px;display:flex;flex-direction:column;align-items:center;gap:6px"></div>
+        <div style="font-size:11px;color:var(--mut);margin-top:2px">Mostra al personale per ricariche e acquisti</div>
       </div>
-      <div id="u-qr" style="margin-top:16px;display:flex;flex-direction:column;align-items:center;gap:6px"></div>
-      <div style="font-size:11px;color:var(--mut);margin-top:2px">Mostra al personale per ricariche e acquisti</div>
+      <div id="u-pending-events"></div>
+      <div class="sec-title">Ultime transazioni</div>
+      <div id="u-txlist" class="tx-list"></div>
     </div>
 
-    <div class="sec-title">Ultime transazioni</div>
-    <div id="u-txlist" class="tx-list"></div>
-
-    <div class="tab-wrap">
-      <div class="sec-title">Catalogo</div>
-      <div class="tabs" id="utabs">
-        <button class="tab active" data-p="ut-eventi" onclick="switchTab(this,'utabs')">🎫 Eventi</button>
-        <button class="tab" data-p="ut-gadget" onclick="switchTab(this,'utabs')">🛍️ Gadget</button>
-        <button class="tab" data-p="ut-promo" onclick="switchTab(this,'utabs')">🏷️ Promo</button>
+    <!-- MOVIMENTI con filtri -->
+    <div id="u-mov-sec" style="display:none">
+      <div class="sec-hdr">
+        <div class="sec-title">Movimenti</div>
       </div>
-      <div id="ut-eventi" class="tab-panel active"></div>
-      <div id="ut-gadget" class="tab-panel"></div>
-      <div id="ut-promo" class="tab-panel"></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+        <button class="fbtn active" data-mf="all" onclick="setMovFiltro(this,'tipo')">Tutti</button>
+        <button class="fbtn" data-mf="recharge" onclick="setMovFiltro(this,'tipo')">Ricariche</button>
+        <button class="fbtn" data-mf="purchase" onclick="setMovFiltro(this,'tipo')">Spese</button>
+        <button class="fbtn" data-mf="event_fee" onclick="setMovFiltro(this,'tipo')">Eventi</button>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+        <button class="fbtn active" data-mf="0" onclick="setMovFiltro(this,'days')">Tutti</button>
+        <button class="fbtn" data-mf="7" onclick="setMovFiltro(this,'days')">7gg</button>
+        <button class="fbtn" data-mf="30" onclick="setMovFiltro(this,'days')">30gg</button>
+        <button class="fbtn" data-mf="90" onclick="setMovFiltro(this,'days')">90gg</button>
+      </div>
+      <div id="u-mov-list" class="tx-list"></div>
     </div>
 
-    <div class="sec-title">Ricarica tessera</div>
-    <div id="u-sumup" class="sumup-grid"></div>
-    <div class="sumup-note">Dopo il pagamento SumUp, lo staff accrediterà il saldo sulla tua tessera</div>
+    <!-- CATALOGO: eventi + gadget + promo + sumup -->
+    <div id="u-cat-sec">
+      <div class="tab-wrap">
+        <div class="sec-title">Catalogo</div>
+        <div class="tabs" id="utabs">
+          <button class="tab active" data-p="ut-eventi" onclick="switchTab(this,'utabs')">🎫 Eventi</button>
+          <button class="tab" data-p="ut-gadget" onclick="switchTab(this,'utabs')">🛍️ Gadget</button>
+          <button class="tab" data-p="ut-promo" onclick="switchTab(this,'utabs')">🏷️ Promo</button>
+        </div>
+        <div id="ut-eventi" class="tab-panel active"></div>
+        <div id="ut-gadget" class="tab-panel"></div>
+        <div id="ut-promo" class="tab-panel"></div>
+      </div>
+      <div class="sec-title" style="margin-top:12px">Ricarica tessera</div>
+      <div id="u-sumup" class="sumup-grid"></div>
+      <div class="sumup-note">Dopo il pagamento SumUp, lo staff accrediterà il saldo sulla tua tessera</div>
+    </div>
+
+    <!-- PROFILO -->
+    <div id="u-prof-sec" style="display:none">
+      <div id="u-profile-content"></div>
+    </div>
   </div>
 </div>
 
@@ -561,6 +602,15 @@ tr:hover td{background:rgba(255,255,255,.02)}
   </div>
 </div>
 
+<!-- NAV BAR -->
+<nav id="app-nav">
+  <button class="nav-item active" data-nav="home" onclick="navGo('home')"><span class="ni">🏠</span>Home</button>
+  <button class="nav-item" data-nav="movimenti" onclick="navGo('movimenti')"><span class="ni">📋</span>Movimenti</button>
+  <button class="nav-item" data-nav="eventi" onclick="navGo('eventi')"><span class="ni">🎫</span>Eventi</button>
+  <button class="nav-item" data-nav="profilo" onclick="navGo('profilo')"><span class="ni">👤</span>Profilo</button>
+  <button class="nav-item" id="nav-pos-btn" onclick="toggleNavPos()" title="Sposta nav"><span class="ni">⇅</span></button>
+</nav>
+
 <!-- ===== SCREEN: EVENTO PUBBLICO ===== -->
 <div id="screen-event" class="screen">
   <div class="login-wrap" style="justify-content:flex-start;padding-top:28px">
@@ -595,6 +645,66 @@ tr:hover td{background:rgba(255,255,255,.02)}
 const SB_URL = 'https://kbcrtwqtzuipcsfiyupu.supabase.co';
 const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtiY3J0d3F0enVpcGNzZml5dXB1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1MTc3NzEsImV4cCI6MjA5OTA5Mzc3MX0.BYpoUqhiqREsA7MosC2jnLCkvXbcwjTeBdT7LhRS1UA';
 let db, currentUser = null, staffTarget = null, allAdminUsers = [], staffOps = [];
+
+// ── NAV ───────────────────────────────────────────────────────────────
+function showNav(role) {
+  const nav = document.getElementById('app-nav');
+  // Mostra nav solo per ruolo 'user' (soci); staff/admin hanno propri tab
+  if (role !== 'user') { nav.classList.remove('visible'); return; }
+  nav.classList.add('visible');
+  applyNavPos(localStorage.getItem('sh_navpos') || 'bottom');
+}
+function hideNav() {
+  const nav = document.getElementById('app-nav');
+  nav.classList.remove('visible');
+  document.body.classList.remove('nav-bottom','nav-sidebar');
+}
+function applyNavPos(pos) {
+  const nav = document.getElementById('app-nav');
+  if (pos === 'sidebar') {
+    nav.classList.add('sidebar'); document.body.classList.add('nav-sidebar'); document.body.classList.remove('nav-bottom');
+  } else {
+    nav.classList.remove('sidebar'); document.body.classList.add('nav-bottom'); document.body.classList.remove('nav-sidebar');
+  }
+  document.getElementById('nav-pos-btn').querySelector('.ni').textContent = pos === 'sidebar' ? '⇆' : '⇅';
+}
+function toggleNavPos() {
+  const cur = localStorage.getItem('sh_navpos') || 'bottom';
+  const next = cur === 'bottom' ? 'sidebar' : 'bottom';
+  localStorage.setItem('sh_navpos', next);
+  applyNavPos(next);
+}
+function navGo(section) {
+  document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
+  document.querySelector(`[data-nav="${section}"]`)?.classList.add('active');
+  // Attiva il tab corrispondente nell'area utente
+  if (section === 'home') {
+    document.getElementById('u-home-sec').style.display = '';
+    document.getElementById('u-mov-sec').style.display = 'none';
+    document.getElementById('u-cat-sec').style.display = '';
+    document.getElementById('u-prof-sec').style.display = 'none';
+  } else if (section === 'movimenti') {
+    document.getElementById('u-home-sec').style.display = 'none';
+    document.getElementById('u-mov-sec').style.display = '';
+    document.getElementById('u-cat-sec').style.display = 'none';
+    document.getElementById('u-prof-sec').style.display = 'none';
+    renderMovimentiFiltered();
+  } else if (section === 'eventi') {
+    document.getElementById('u-home-sec').style.display = 'none';
+    document.getElementById('u-mov-sec').style.display = 'none';
+    document.getElementById('u-cat-sec').style.display = '';
+    document.getElementById('u-prof-sec').style.display = 'none';
+    // Attiva tab eventi nel catalogo
+    const evTab = document.querySelector('#utabs [data-p="ut-eventi"]');
+    if (evTab) switchTab(evTab, 'utabs');
+  } else if (section === 'profilo') {
+    document.getElementById('u-home-sec').style.display = 'none';
+    document.getElementById('u-mov-sec').style.display = 'none';
+    document.getElementById('u-cat-sec').style.display = 'none';
+    document.getElementById('u-prof-sec').style.display = '';
+    renderProfile();
+  }
+}
 
 // ── TEMA ──────────────────────────────────────────────────────────────
 function applyTheme(t) {
@@ -687,7 +797,77 @@ function logout() {
   currentUser = null; staffTarget = null;
   sessionStorage.removeItem('sh_u'); sessionStorage.removeItem('sh_r');
   document.getElementById('l-pin').value = '';
+  hideNav();
   showScreen('screen-login');
+}
+
+// ── MOVIMENTI FILTRI ─────────────────────────────────────────────────
+let _movTipo = 'all', _movDays = 0, _allTx = [];
+function setMovFiltro(btn, group) {
+  btn.closest('div').querySelectorAll('.fbtn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  if (group === 'tipo') _movTipo = btn.dataset.mf;
+  else _movDays = parseInt(btn.dataset.mf);
+  renderMovimentiFiltered();
+}
+function renderMovimentiFiltered() {
+  const now = Date.now();
+  const list = _allTx.filter(t => {
+    const tipoOk = _movTipo === 'all' || t.type === _movTipo;
+    const dateOk = _movDays === 0 || (now - new Date(t.created_at).getTime()) < _movDays * 86400000;
+    return tipoOk && dateOk;
+  });
+  const el = document.getElementById('u-mov-list');
+  if (!list.length) { el.innerHTML='<div class="empty">Nessun movimento</div>'; return; }
+  el.innerHTML = list.map(t=>`
+    <div class="tx-row">
+      <span class="tx-ic">${txic(t.type)}</span>
+      <div class="tx-inf"><div class="tx-dsc">${t.description||t.type}</div><div class="tx-dt">${fdt(t.created_at)}</div></div>
+      <div class="tx-amt ${t.amount>=0?'pos':'neg-c'}">${t.amount>=0?'+':''}${eur(t.amount)}</div>
+    </div>`).join('');
+}
+
+// ── PROFILO ───────────────────────────────────────────────────────────
+function renderProfile() {
+  const u = currentUser;
+  document.getElementById('u-profile-content').innerHTML = `
+    <div class="card" style="margin-bottom:12px;text-align:center;padding:24px">
+      <div style="font-size:44px;margin-bottom:8px">👤</div>
+      <div style="font-size:18px;font-weight:700">${u.display_name}</div>
+      <div style="font-family:monospace;font-size:15px;color:var(--gold);margin-top:4px">${u.card_id}</div>
+      <div style="font-size:12px;color:var(--mut);margin-top:4px"><span class="role-badge ru">${u.role}</span></div>
+    </div>
+    <div class="card">
+      <div class="sec-lbl">Dati profilo</div>
+      ${u.email ? `<div class="fg" style="margin-bottom:6px"><label>Email</label><div style="font-size:14px;padding:8px 0">${u.email}</div></div>` : ''}
+      ${u.telefono ? `<div class="fg" style="margin-bottom:6px"><label>Telefono</label><div style="font-size:14px;padding:8px 0">${u.telefono}</div></div>` : ''}
+      ${u.nome ? `<div class="fg" style="margin-bottom:6px"><label>Nome</label><div style="font-size:14px;padding:8px 0">${u.nome} ${u.cognome||''}</div></div>` : ''}
+      <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--brd)">
+        <div class="sec-lbl" style="margin-bottom:10px">Cambia PIN</div>
+        <div class="fg"><label>PIN attuale</label><input id="p-old-pin" type="password" inputmode="numeric" maxlength="6" placeholder="••••"></div>
+        <div class="form-row">
+          <div class="fg"><label>Nuovo PIN</label><input id="p-new-pin" type="password" inputmode="numeric" maxlength="6" placeholder="••••"></div>
+          <div class="fg"><label>Conferma</label><input id="p-new-pin2" type="password" inputmode="numeric" maxlength="6" placeholder="••••"></div>
+        </div>
+        <button class="btn btn-p w100" onclick="userChangePin()">Aggiorna PIN</button>
+      </div>
+    </div>`;
+}
+async function userChangePin() {
+  const oldp = document.getElementById('p-old-pin').value;
+  const newp = document.getElementById('p-new-pin').value;
+  const newp2 = document.getElementById('p-new-pin2').value;
+  if (!oldp) return toast('Inserisci il PIN attuale');
+  if (newp !== newp2) return toast('I nuovi PIN non coincidono');
+  if (newp.length < 4 || !/^\d+$/.test(newp)) return toast('PIN deve essere 4-6 cifre numeriche');
+  // Verifica PIN attuale facendo un login silenzioso
+  const {data: chk} = await db.rpc('login_user', {p_card_id: currentUser.card_id, p_pin: oldp});
+  if (!chk?.ok) return toast('PIN attuale non corretto');
+  // Usa admin_reset_pin passando il proprio card_id (operazione auto-servizio)
+  const {data, error} = await db.rpc('admin_reset_pin', {p_card_id: currentUser.card_id, p_new_pin: newp});
+  if (error || !data.ok) return toast((error&&error.message)||data.error);
+  toast('PIN aggiornato con successo!', 'ok');
+  ['p-old-pin','p-new-pin','p-new-pin2'].forEach(id => document.getElementById(id).value='');
 }
 
 // ── USER AREA ─────────────────────────────────────────────────────────
@@ -695,6 +875,8 @@ async function gotoUser() {
   document.getElementById('u-name').textContent = currentUser.display_name;
   document.getElementById('u-card').textContent = currentUser.card_id;
   showScreen('screen-user');
+  showNav('user');
+  navGo('home');
   renderQR(currentUser.card_id);
   await refreshUser();
   await loadCatalog();
@@ -713,7 +895,9 @@ async function refreshUser() {
   const {data, error} = await db.rpc('get_user_state', {p_user_id: currentUser.id});
   if (error || !data.ok) return toast((error&&error.message)||data.error);
   renderBal(data.balance);
-  renderTx(data.transactions||[]);
+  _allTx = data.transactions || [];
+  renderTx(_allTx.slice(0, 5));
+  renderPendingEvents(data.pending_events || []);
 }
 function renderBal(c) {
   document.getElementById('u-balance').textContent = eur(c);
