@@ -366,10 +366,10 @@ tr:hover td{background:rgba(255,255,255,.02)}
       <div class="card">
         <div class="sec-lbl">Ricarica rapida</div>
         <div class="quick-grid">
-          <button class="btn-amt" onclick="staffRecharge(500)">€5</button>
-          <button class="btn-amt" onclick="staffRecharge(1000)">€10</button>
-          <button class="btn-amt" onclick="staffRecharge(2000)">€20</button>
-          <button class="btn-amt" onclick="staffRecharge(5000)">€50</button>
+          <button class="btn-amt" onclick="staffRecharge(5)">€5</button>
+          <button class="btn-amt" onclick="staffRecharge(10)">€10</button>
+          <button class="btn-amt" onclick="staffRecharge(20)">€20</button>
+          <button class="btn-amt" onclick="staffRecharge(50)">€50</button>
         </div>
         <div class="inp-row" style="margin-top:12px">
           <input id="s-custom" type="number" placeholder="Importo €" min="1" step="0.50" style="flex:1">
@@ -699,7 +699,11 @@ async function buyGadget(id, name, price) {
   modalConfirm(`Acquistare "${name}" per ${eur(price)}?`, async () => {
     const {data, error} = await db.rpc('user_buy_gadget', {p_user_id:currentUser.id, p_gadget_id:id});
     if (error||!data.ok) return toast((error&&error.message)||data.error);
-    toast(`Acquisto ok! Nuovo saldo: ${eur(data.new_balance)}`, 'ok');
+    if (data.promo_code) {
+      toast(`Acquisto ok! Prezzo: ${eur(data.original_price)} — Sconto ${data.promo_code}: -${eur(data.discount)} — Pagato: ${eur(data.charged)}. Saldo: ${eur(data.new_balance)}`, 'ok');
+    } else {
+      toast(`Acquisto ok! Nuovo saldo: ${eur(data.new_balance)}`, 'ok');
+    }
     await refreshUser(); await loadCatalog();
   });
 }
@@ -756,19 +760,19 @@ async function staffLookup() {
   document.getElementById('s-res-bal').textContent  = eur(data.user.balance);
   document.getElementById('s-result').style.display = 'block';
 }
-async function staffRecharge(cents) {
+async function staffRecharge(amount) {
   if (!staffTarget) return toast('Cerca prima una tessera');
-  const {data, error} = await db.rpc('staff_recharge', {p_operator_id:currentUser.id, p_card_id:staffTarget.card_id, p_amount:cents});
+  const {data, error} = await db.rpc('staff_recharge', {p_operator_id:currentUser.id, p_card_id:staffTarget.card_id, p_amount:amount});
   if (error||!data.ok) return toast((error&&error.message)||data.error);
-  toast(`Ricarica ok! ${eur(data.old_balance)} → ${eur(data.new_balance)}`, 'ok');
+  toast(`Ricarica ok! ${eur(staffTarget.balance)} → ${eur(data.new_balance)}`, 'ok');
   document.getElementById('s-res-bal').textContent = eur(data.new_balance);
   staffTarget.balance = data.new_balance;
-  addSOp({type:'recharge', card:staffTarget.card_id, name:staffTarget.display_name, cents, nb:data.new_balance});
+  addSOp({type:'recharge', card:staffTarget.card_id, name:staffTarget.display_name, amount, nb:data.new_balance});
 }
 async function staffRechargeCustom() {
   const v = parseFloat(document.getElementById('s-custom').value);
   if (!v||v<=0) return toast('Importo non valido');
-  await staffRecharge(Math.round(v*100));
+  await staffRecharge(v);
   document.getElementById('s-custom').value = '';
 }
 async function staffCharge() {
@@ -776,15 +780,18 @@ async function staffCharge() {
   const v    = parseFloat(document.getElementById('s-charge-amt').value);
   const desc = document.getElementById('s-charge-desc').value.trim()||'Addebito';
   if (!v||v<=0) return toast('Importo non valido');
-  const cents = Math.round(v*100);
-  modalConfirm(`Addebitare ${eur(cents)} a ${staffTarget.display_name}?`, async () => {
-    const {data, error} = await db.rpc('staff_charge', {p_operator_id:currentUser.id, p_card_id:staffTarget.card_id, p_amount:cents, p_description:desc});
+  modalConfirm(`Addebitare ${eur(v)} a ${staffTarget.display_name}?`, async () => {
+    const {data, error} = await db.rpc('staff_charge', {p_operator_id:currentUser.id, p_card_id:staffTarget.card_id, p_amount:v, p_description:desc});
     if (error||!data.ok) return toast((error&&error.message)||data.error);
-    toast(`Addebito ok! ${eur(data.old_balance)} → ${eur(data.new_balance)}`, 'ok');
+    if (data.promo_code) {
+      toast(`Promo ${data.promo_code}! Originale: ${eur(data.original_amount)} → Sconto: -${eur(data.discount)} → Addebitato: ${eur(data.charged)}`, 'ok');
+    } else {
+      toast(`Addebito ok! ${eur(data.old_balance)} → ${eur(data.new_balance)}`, 'ok');
+    }
     document.getElementById('s-res-bal').textContent = eur(data.new_balance);
     staffTarget.balance = data.new_balance;
     document.getElementById('s-charge-amt').value = '';
-    addSOp({type:'charge', card:staffTarget.card_id, name:staffTarget.display_name, cents:-cents, nb:data.new_balance, desc});
+    addSOp({type:'charge', card:staffTarget.card_id, name:staffTarget.display_name, amount:-v, nb:data.new_balance, desc});
   });
 }
 function addSOp(op) {
@@ -802,7 +809,7 @@ function renderStaffHist() {
     <div class="tx-row">
       <span class="tx-ic">${o.type==='recharge'?'🔄':'🛍️'}</span>
       <div class="tx-inf"><div class="tx-dsc">${o.name} (${o.card})${o.desc?' — '+o.desc:''}</div><div class="tx-dt">${fdt(o.ts)}</div></div>
-      <div class="tx-amt ${o.cents>=0?'pos':'neg-c'}">${o.cents>=0?'+':''}${eur(o.cents)}</div>
+      <div class="tx-amt ${o.amount>=0?'pos':'neg-c'}">${o.amount>=0?'+':''}${eur(o.amount)}</div>
     </div>`).join('');
 }
 
