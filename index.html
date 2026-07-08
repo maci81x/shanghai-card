@@ -459,6 +459,21 @@ body.nav-sidebar .screen .hdr{padding-left:80px}
     <button class="btn-ico" onclick="logout()">Esci</button>
   </div>
   <div class="content">
+    <!-- Admin QR lookup -->
+    <div class="card" style="margin-bottom:12px">
+      <div class="sec-lbl">Cerca socio (tessera o QR)</div>
+      <div class="inp-row">
+        <input id="a-lookup" type="text" placeholder="SH-001" oninput="this.value=this.value.toUpperCase()" style="flex:1">
+        <button class="btn btn-p" onclick="adminLookup()">Cerca</button>
+        <button class="btn btn-g" onclick="toggleAdminScanner()" id="a-scan-btn">📷</button>
+      </div>
+      <div id="a-scanner-wrap" style="display:none;margin-top:12px">
+        <div id="a-scanner-reader" style="border-radius:8px;overflow:hidden"></div>
+        <button class="btn btn-q w100" style="margin-top:8px" onclick="stopAdminScanner()">Chiudi fotocamera</button>
+      </div>
+      <div id="a-lookup-result" style="display:none;margin-top:12px"></div>
+    </div>
+
     <div class="tab-wrap">
       <div class="tabs" id="atabs">
         <button class="tab active" data-p="at-dash" onclick="switchTab(this,'atabs');loadDash()">📊 Dashboard</button>
@@ -985,6 +1000,39 @@ async function registerEvent(id, title) {
     toast(`Iscrizione confermata: ${data.event}`, 'ok');
     await refreshUser();
   });
+}
+
+// ── ADMIN QR SCANNER ─────────────────────────────────────────────────
+let _adminScanner = null;
+function toggleAdminScanner() {
+  const wrap = document.getElementById('a-scanner-wrap');
+  if (wrap.style.display === 'none') {
+    wrap.style.display = 'block';
+    _adminScanner = new Html5Qrcode('a-scanner-reader');
+    _adminScanner.start(
+      {facingMode: 'environment'},
+      {fps: 10, qrbox: {width: 240, height: 240}},
+      text => { stopAdminScanner(); document.getElementById('a-lookup').value = text.toUpperCase(); adminLookup(); },
+      () => {}
+    ).catch(() => { toast('Fotocamera non disponibile'); stopAdminScanner(); });
+  } else { stopAdminScanner(); }
+}
+function stopAdminScanner() {
+  document.getElementById('a-scanner-wrap').style.display = 'none';
+  if (_adminScanner) { _adminScanner.stop().catch(()=>{}).finally(() => { _adminScanner.clear(); _adminScanner = null; }); }
+}
+async function adminLookup() {
+  const card = document.getElementById('a-lookup').value.trim().toUpperCase();
+  if (!card) return toast('Inserisci il codice tessera');
+  const {data, error} = await db.rpc('staff_lookup', {p_card_id: card});
+  const el = document.getElementById('a-lookup-result');
+  if (error || !data.ok) { el.style.display='none'; return toast((error&&error.message)||data.error); }
+  el.style.display = 'block';
+  el.innerHTML = `<div class="card card-gold" style="margin-bottom:0">
+    <div class="res-name">${data.user.display_name}</div>
+    <div class="res-sub">${data.user.card_id}</div>
+    <div class="res-bal">${eur(data.user.balance)}</div>
+  </div>`;
 }
 
 // ── STAFF AREA ────────────────────────────────────────────────────────
