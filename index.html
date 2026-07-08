@@ -349,6 +349,11 @@ tr:hover td{background:rgba(255,255,255,.02)}
       <div class="inp-row">
         <input id="s-lookup" type="text" placeholder="SH-001" oninput="this.value=this.value.toUpperCase()" style="flex:1">
         <button class="btn btn-p" onclick="staffLookup()">Cerca</button>
+        <button class="btn btn-g" onclick="toggleScanner()" id="s-scan-btn">📷</button>
+      </div>
+      <div id="s-scanner-wrap" style="display:none;margin-top:12px">
+        <div id="s-scanner-reader" style="border-radius:8px;overflow:hidden"></div>
+        <button class="btn btn-q w100" style="margin-top:8px" onclick="stopScanner()">Chiudi fotocamera</button>
       </div>
     </div>
 
@@ -515,6 +520,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script>
 const SB_URL = 'https://kbcrtwqtzuipcsfiyupu.supabase.co';
 const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtiY3J0d3F0enVpcGNzZml5dXB1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1MTc3NzEsImV4cCI6MjA5OTA5Mzc3MX0.BYpoUqhiqREsA7MosC2jnLCkvXbcwjTeBdT7LhRS1UA';
@@ -707,6 +713,33 @@ async function registerEvent(id, title) {
 }
 
 // ── STAFF AREA ────────────────────────────────────────────────────────
+let _scanner = null;
+function toggleScanner() {
+  const wrap = document.getElementById('s-scanner-wrap');
+  if (wrap.style.display === 'none') {
+    wrap.style.display = 'block';
+    _scanner = new Html5Qrcode('s-scanner-reader');
+    _scanner.start(
+      {facingMode: 'environment'},
+      {fps: 10, qrbox: {width: 240, height: 240}},
+      text => {
+        stopScanner();
+        document.getElementById('s-lookup').value = text.toUpperCase();
+        staffLookup();
+      },
+      () => {}
+    ).catch(() => { toast('Fotocamera non disponibile'); stopScanner(); });
+  } else {
+    stopScanner();
+  }
+}
+function stopScanner() {
+  const wrap = document.getElementById('s-scanner-wrap');
+  wrap.style.display = 'none';
+  if (_scanner) {
+    _scanner.stop().catch(()=>{}).finally(() => { _scanner.clear(); _scanner = null; });
+  }
+}
 function gotoStaff() {
   document.getElementById('s-name').textContent = currentUser.display_name;
   showScreen('screen-staff');
