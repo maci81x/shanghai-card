@@ -174,6 +174,14 @@ tr:hover td{background:rgba(255,255,255,.02)}
 /* MISC */
 .empty{color:var(--mut);font-size:13px;text-align:center;padding:24px}
 .loading{opacity:.5;pointer-events:none}
+
+/* REGISTER */
+.gdpr-box{background:#111;border:1px solid var(--brd);border-radius:8px;padding:12px;max-height:130px;overflow-y:auto;font-size:11px;color:var(--mut);margin-bottom:14px;line-height:1.6}
+.cb-row{display:flex;align-items:flex-start;gap:10px;margin-bottom:10px;font-size:13px;line-height:1.4}
+.cb-row input[type=checkbox]{width:18px;height:18px;flex-shrink:0;margin-top:2px;accent-color:var(--gold);cursor:pointer}
+.reg-link{color:var(--gold);text-decoration:none;font-weight:600}
+.reg-link:hover{text-decoration:underline}
+.success-code{font-family:monospace;font-size:36px;font-weight:700;color:var(--gold);background:#111;padding:16px;border-radius:8px;margin-bottom:16px;text-align:center;letter-spacing:.08em}
 </style>
 </head>
 <body>
@@ -205,7 +213,9 @@ tr:hover td{background:rgba(255,255,255,.02)}
 
 <!-- ===== SCREEN: LOGIN ===== -->
 <div id="screen-login" class="screen active">
-  <div class="login-wrap">
+
+  <!-- Vista LOGIN -->
+  <div id="login-view" class="login-wrap">
     <div class="logo-block">
       <svg height="80" style="display:block"><use href="#drago"/></svg>
       <div class="logo-title">Shanghai Card</div>
@@ -217,16 +227,67 @@ tr:hover td{background:rgba(255,255,255,.02)}
       </div>
       <div class="fg">
         <label>PIN</label>
-        <input id="l-pin" type="password" inputmode="numeric" maxlength="4" placeholder="••••">
+        <input id="l-pin" type="password" inputmode="numeric" maxlength="6" placeholder="••••">
       </div>
       <div class="login-btns">
         <button class="btn btn-p" onclick="doLogin('user')">Socio</button>
         <button class="btn btn-g" onclick="doLogin('staff')">Staff</button>
         <button class="btn btn-q" onclick="doLogin('admin')">Admin</button>
       </div>
+      <div style="text-align:center;margin-top:16px;font-size:13px;color:var(--mut)">Non hai una card? <a href="#" class="reg-link" onclick="showRegister();return false">Registrati</a></div>
     </div>
     <div class="logo-sub">Associazione il Dragone — Rione Shanghai</div>
   </div>
+
+  <!-- Vista REGISTRAZIONE -->
+  <div id="register-view" class="login-wrap" style="display:none;justify-content:flex-start;padding-top:28px">
+    <div class="logo-block">
+      <svg height="56" style="display:block"><use href="#drago"/></svg>
+      <div class="logo-title" style="font-size:19px">Registrati al Rione Shanghai</div>
+      <div class="logo-sub">Crea la tua card contradaiola digitale</div>
+    </div>
+
+    <div class="card" id="reg-form-area" style="width:100%;max-width:400px">
+      <div class="form-row">
+        <div class="fg"><label>Nome *</label><input id="r-nome" type="text" placeholder="Mario" autocomplete="given-name"></div>
+        <div class="fg"><label>Cognome *</label><input id="r-cognome" type="text" placeholder="Rossi" autocomplete="family-name"></div>
+      </div>
+      <div class="fg"><label>Codice Fiscale *</label><input id="r-cf" type="text" placeholder="RSSMRA85A01H501Z" maxlength="16" oninput="this.value=this.value.toUpperCase()" autocomplete="off"></div>
+      <div class="fg"><label>Email *</label><input id="r-email" type="email" placeholder="mario@email.it" autocomplete="email"></div>
+      <div class="fg"><label>Telefono</label><input id="r-tel" type="tel" placeholder="+39 333 1234567" autocomplete="tel"></div>
+      <div class="form-row">
+        <div class="fg"><label>PIN * (4-6 cifre)</label><input id="r-pin" type="password" inputmode="numeric" maxlength="6" placeholder="••••"></div>
+        <div class="fg"><label>Conferma PIN *</label><input id="r-pin2" type="password" inputmode="numeric" maxlength="6" placeholder="••••"></div>
+      </div>
+      <div class="gdpr-box">
+        <strong>Informativa Privacy (art. 13 GDPR)</strong><br><br>
+        <strong>Titolare:</strong> Associazione il Dragone di Castellina Scalo — Rione Shanghai, Castellina Scalo, Monteriggioni (SI).<br><br>
+        <strong>Finalità:</strong> gestione attività associativa, eventi, tessera prepagata digitale, comunicazioni ai soci.<br><br>
+        <strong>Base giuridica:</strong> consenso dell'interessato (art. 6.1.a GDPR).<br><br>
+        <strong>Dati trattati:</strong> nome, cognome, codice fiscale, email, telefono, storico transazioni card.<br><br>
+        <strong>Conservazione:</strong> durata del rapporto associativo + 10 anni per obblighi fiscali.<br><br>
+        <strong>Diritti:</strong> accesso, rettifica, cancellazione, portabilità, opposizione (artt. 15-22 GDPR).<br><br>
+        <strong>Contatto:</strong> rioneshanghai@gmail.com
+      </div>
+      <div class="cb-row"><input type="checkbox" id="r-gdpr1"><label for="r-gdpr1"><strong>Acconsento</strong> al trattamento dei miei dati per la gestione delle attività del Rione Shanghai <strong>(obbligatorio)</strong></label></div>
+      <div class="cb-row"><input type="checkbox" id="r-gdpr2"><label for="r-gdpr2">Dichiaro di aver letto l'informativa privacy GDPR <strong>(obbligatorio)</strong></label></div>
+      <div class="cb-row"><input type="checkbox" id="r-gdpr3"><label for="r-gdpr3">Acconsento a ricevere comunicazioni su eventi e promozioni <em>(facoltativo)</em></label></div>
+      <div class="cb-row" style="margin-bottom:18px"><input type="checkbox" id="r-gdpr4"><label for="r-gdpr4">Acconsento all'utilizzo di mie immagini/video a fini promozionali <em>(facoltativo)</em></label></div>
+      <button id="reg-btn" class="btn btn-p w100" onclick="doRegister()">Crea la mia card</button>
+    </div>
+
+    <div id="reg-success" class="card" style="display:none;width:100%;max-width:400px;text-align:center;padding:32px 20px">
+      <div style="font-size:40px;margin-bottom:12px">🎉</div>
+      <div style="font-size:16px;font-weight:700;color:var(--gold);margin-bottom:6px">Tessera creata!</div>
+      <div style="font-size:13px;color:var(--mut);margin-bottom:16px">Il tuo codice tessera è:</div>
+      <div id="reg-success-code" class="success-code"></div>
+      <div style="font-size:12px;color:var(--mut);margin-bottom:20px">Conserva questo codice e il PIN scelto. Usali per accedere.</div>
+      <button class="btn btn-p w100" onclick="showLogin()">Accedi con la mia card</button>
+    </div>
+
+    <div style="text-align:center;margin-top:14px;font-size:13px;color:var(--mut)">Hai già una card? <a href="#" class="reg-link" onclick="showLogin();return false">Accedi</a></div>
+  </div>
+
 </div>
 
 <!-- ===== SCREEN: USER ===== -->
@@ -825,6 +886,54 @@ async function createGadget() {
   document.getElementById('fg-form').style.display='none';
   loadAGest();
 }
+// ── REGISTRAZIONE ────────────────────────────────────────────────────
+function showRegister() {
+  document.getElementById('login-view').style.display = 'none';
+  document.getElementById('register-view').style.display = '';
+  document.getElementById('reg-form-area').style.display = 'block';
+  document.getElementById('reg-success').style.display = 'none';
+}
+function showLogin() {
+  document.getElementById('register-view').style.display = 'none';
+  document.getElementById('login-view').style.display = '';
+}
+async function doRegister() {
+  const nome    = document.getElementById('r-nome').value.trim();
+  const cognome = document.getElementById('r-cognome').value.trim();
+  const cf      = document.getElementById('r-cf').value.trim();
+  const email   = document.getElementById('r-email').value.trim();
+  const tel     = document.getElementById('r-tel').value.trim();
+  const pin     = document.getElementById('r-pin').value;
+  const pin2    = document.getElementById('r-pin2').value;
+  const gdpr1   = document.getElementById('r-gdpr1').checked;
+  const gdpr2   = document.getElementById('r-gdpr2').checked;
+  const gdpr3   = document.getElementById('r-gdpr3').checked;
+  const gdpr4   = document.getElementById('r-gdpr4').checked;
+
+  if (!nome || !cognome || !cf || !email) return toast('Compila tutti i campi obbligatori (*)');
+  if (pin !== pin2) return toast('I PIN non coincidono');
+  if (pin.length < 4 || pin.length > 6 || !/^\d+$/.test(pin)) return toast('Il PIN deve essere di 4-6 cifre numeriche');
+  if (!gdpr1 || !gdpr2) return toast('Accetta i consensi obbligatori per continuare');
+
+  const btn = document.getElementById('reg-btn');
+  btn.disabled = true; btn.textContent = 'Creazione in corso…';
+
+  const {data, error} = await db.rpc('public_register', {
+    p_nome: nome, p_cognome: cognome, p_codice_fiscale: cf,
+    p_email: email, p_telefono: tel || null, p_pin: pin,
+    p_gdpr_trattamento: gdpr1, p_gdpr_privacy: gdpr2,
+    p_gdpr_comunicazioni: gdpr3, p_gdpr_immagini: gdpr4
+  });
+
+  btn.disabled = false; btn.textContent = 'Crea la mia card';
+  if (error || !data.ok) return toast((error && error.message) || data.error);
+
+  document.getElementById('reg-form-area').style.display = 'none';
+  document.getElementById('reg-success-code').textContent = data.card_id;
+  document.getElementById('reg-success').style.display = 'block';
+  toast('Tessera creata con successo!', 'ok');
+}
+
 async function createPromo() {
   const code  = document.getElementById('fp-code').value.trim().toUpperCase();
   const desc  = document.getElementById('fp-desc').value.trim();
