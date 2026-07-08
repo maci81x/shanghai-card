@@ -608,7 +608,7 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 // ── UTILITIES ────────────────────────────────────────────────────────
-const eur = c => '€ ' + (Number(c||0)/100).toFixed(2).replace('.',',');
+const eur = c => '€ ' + Number(c||0).toFixed(2).replace('.',',');
 const fdt = iso => { if(!iso) return '—'; const d=new Date(iso); return d.toLocaleDateString('it-IT',{day:'2-digit',month:'2-digit',year:'2-digit'})+' '+d.toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'}); };
 const txic = t => ({recharge:'🔄',purchase:'🛍️',event_fee:'🎫',refund:'↩️'}[t]||'•');
 
@@ -700,8 +700,8 @@ async function refreshUser() {
 function renderBal(c) {
   document.getElementById('u-balance').textContent = eur(c);
   const b = document.getElementById('u-badge');
-  if (c >= 1000) { b.textContent='● Ottimo'; b.className='badge bg'; }
-  else if (c >= 500) { b.textContent='● Basso'; b.className='badge by'; }
+  if (c >= 10) { b.textContent='● Ottimo'; b.className='badge bg'; }
+  else if (c >= 5) { b.textContent='● Basso'; b.className='badge by'; }
   else { b.textContent='● Critico'; b.className='badge br'; }
 }
 function renderTx(txs) {
@@ -1050,7 +1050,7 @@ async function createGadget() {
   const stock = parseInt(document.getElementById('fg-stock').value)||0;
   const img   = document.getElementById('fg-img').value.trim();
   if (!name||!price) return toast('Inserisci nome e prezzo');
-  const {data, error} = await db.rpc('admin_create_gadget', {p_name:name, p_description:desc||null, p_price:Math.round(price*100), p_stock:stock, p_image_url:img||null});
+  const {data, error} = await db.rpc('admin_create_gadget', {p_name:name, p_description:desc||null, p_price:price, p_stock:stock, p_image_url:img||null});
   if (error||!data.ok) return toast((error&&error.message)||data.error);
   toast('Gadget creato!', 'ok');
   ['fg-name','fg-desc','fg-price','fg-stock','fg-img'].forEach(id=>document.getElementById(id).value='');
