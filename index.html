@@ -535,6 +535,32 @@ tr:hover td{background:rgba(255,255,255,.02)}
   </div>
 </div>
 
+<!-- ===== SCREEN: EVENTO PUBBLICO ===== -->
+<div id="screen-event" class="screen">
+  <div class="login-wrap" style="justify-content:flex-start;padding-top:28px">
+    <div class="logo-block">
+      <svg height="56" style="display:block"><use href="#drago"/></svg>
+      <div class="logo-title" style="font-size:19px" id="ev-title">Evento</div>
+    </div>
+    <div class="card" style="width:100%;max-width:440px">
+      <div id="ev-info"></div>
+    </div>
+    <div class="card" id="ev-reg-area" style="width:100%;max-width:440px;display:none">
+      <div class="sec-lbl">Registra i partecipanti</div>
+      <div id="ev-guests-list"></div>
+      <button class="btn btn-q w100" style="margin-bottom:10px" onclick="addGuestRow()">+ Aggiungi persona</button>
+      <div id="ev-total" style="font-size:13px;color:var(--mut);text-align:center;margin-bottom:12px"></div>
+      <button id="ev-reg-btn" class="btn btn-p w100" onclick="submitGuests()">Registra</button>
+    </div>
+    <div id="ev-reg-success" class="card" style="display:none;width:100%;max-width:440px;text-align:center;padding:28px 20px">
+      <div style="font-size:36px;margin-bottom:10px">✅</div>
+      <div style="font-size:15px;font-weight:700;color:var(--gold);margin-bottom:8px">Registrazione confermata!</div>
+      <div id="ev-reg-msg" style="font-size:13px;color:var(--mut)"></div>
+    </div>
+    <div style="text-align:center;margin-top:14px;font-size:13px;color:var(--mut)">Sei socio del Rione? <a href="?" class="reg-link">Accedi</a> per iscriverti con la tua card</div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
@@ -551,6 +577,11 @@ window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('modal-ok').addEventListener('click', () => { const cb = window._mcb; modalCancel(); cb && cb(); });
   document.getElementById('l-pin').addEventListener('keydown', e => { if(e.key==='Enter') doLogin('user'); });
   document.getElementById('s-lookup').addEventListener('keydown', e => { if(e.key==='Enter') staffLookup(); });
+
+  // Rilevamento landing evento pubblica
+  const eventSlug = new URLSearchParams(window.location.search).get('event');
+  if (eventSlug) { loadPublicEvent(eventSlug); return; }
+
   const saved = sessionStorage.getItem('sh_u');
   const role  = sessionStorage.getItem('sh_r');
   if (saved && role) { currentUser = JSON.parse(saved); route(role); }
@@ -992,6 +1023,90 @@ async function createGadget() {
   document.getElementById('fg-form').style.display='none';
   loadAGest();
 }
+// ── LANDING EVENTO PUBBLICO ───────────────────────────────────────────
+let _publicEvent = null;
+async function loadPublicEvent(slug) {
+  showScreen('screen-event');
+  const {data, error} = await db.rpc('get_public_event', {p_slug: slug});
+  if (error || !data.ok) {
+    document.getElementById('ev-info').innerHTML = `<div class="empty">Evento non trovato o non disponibile</div>`;
+    return;
+  }
+  _publicEvent = data.event;
+  document.getElementById('ev-title').textContent = _publicEvent.title;
+  const dateStr = _publicEvent.event_date ? new Date(_publicEvent.event_date).toLocaleString('it-IT',{weekday:'long',day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'}) : '—';
+  const spotsHtml = _publicEvent.spots_left !== null
+    ? `<div style="margin-top:8px"><span class="badge ${_publicEvent.spots_left>0?'bg':'br'}">${_publicEvent.spots_left>0?_publicEvent.spots_left+' posti disponibili':'Sold out'}</span></div>`
+    : '';
+  document.getElementById('ev-info').innerHTML = `
+    <div style="font-size:15px;font-weight:700;margin-bottom:6px">${_publicEvent.title}</div>
+    ${_publicEvent.description?`<div style="font-size:13px;color:var(--mut);margin-bottom:8px">${_publicEvent.description}</div>`:''}
+    <div style="font-size:13px;margin-bottom:3px">📅 ${dateStr}</div>
+    ${_publicEvent.location?`<div style="font-size:13px;margin-bottom:3px">📍 ${_publicEvent.location}</div>`:''}
+    <div style="font-size:15px;font-weight:700;color:var(--gold);margin-top:10px">${_publicEvent.price>0?eur(_publicEvent.price):'Evento gratuito'}</div>
+    ${spotsHtml}
+  `;
+  if (_publicEvent.spots_left === null || _publicEvent.spots_left > 0) {
+    document.getElementById('ev-reg-area').style.display = 'block';
+    document.getElementById('ev-guests-list').innerHTML = '';
+    addGuestRow();
+  }
+}
+function addGuestRow() {
+  const list = document.getElementById('ev-guests-list');
+  const idx = list.children.length;
+  const div = document.createElement('div');
+  div.className = 'card';
+  div.style.cssText = 'margin-bottom:10px;padding:14px';
+  div.innerHTML = `
+    <div style="font-size:12px;color:var(--mut);font-weight:600;margin-bottom:10px;text-transform:uppercase">Persona ${idx+1}</div>
+    <div class="form-row">
+      <div class="fg"><label>Nome *</label><input type="text" class="g-nome" placeholder="Mario"></div>
+      <div class="fg"><label>Cognome *</label><input type="text" class="g-cognome" placeholder="Rossi"></div>
+    </div>
+    <div class="form-row">
+      <div class="fg"><label>Email</label><input type="email" class="g-email" placeholder="email@..."></div>
+      <div class="fg"><label>Telefono</label><input type="tel" class="g-tel" placeholder="+39 333..."></div>
+    </div>
+    ${idx>0?`<button class="btn-ico" style="margin-top:4px" onclick="this.closest('div.card').remove();updateEvTotal()">✕ Rimuovi</button>`:''}
+  `;
+  list.appendChild(div);
+  div.querySelectorAll('input').forEach(i => i.addEventListener('input', updateEvTotal));
+  updateEvTotal();
+}
+function updateEvTotal() {
+  const n = document.getElementById('ev-guests-list').children.length;
+  const el = document.getElementById('ev-total');
+  if (_publicEvent && _publicEvent.price > 0) {
+    el.innerHTML = `Totale per ${n} ${n===1?'persona':'persone'}: <strong style="color:var(--gold)">${eur(_publicEvent.price * n)}</strong>`;
+    if (_publicEvent.sumup_link) {
+      el.innerHTML += ` <a href="${_publicEvent.sumup_link}" target="_blank" rel="noopener" class="reg-link" style="display:block;margin-top:6px">💳 Paga ora con SumUp</a>`;
+    }
+  } else {
+    el.textContent = `${n} ${n===1?'partecipante':'partecipanti'}`;
+  }
+}
+async function submitGuests() {
+  const rows = document.querySelectorAll('#ev-guests-list > div');
+  const guests = [];
+  for (const row of rows) {
+    const nome    = row.querySelector('.g-nome')?.value.trim();
+    const cognome = row.querySelector('.g-cognome')?.value.trim();
+    if (!nome || !cognome) return toast('Nome e cognome obbligatori per ogni persona');
+    guests.push({nome, cognome, email: row.querySelector('.g-email')?.value.trim()||null, telefono: row.querySelector('.g-tel')?.value.trim()||null});
+  }
+  if (!guests.length) return toast('Aggiungi almeno una persona');
+  const btn = document.getElementById('ev-reg-btn');
+  btn.disabled = true; btn.textContent = 'Registrazione…';
+  const {data, error} = await db.rpc('register_event_guests', {p_event_id: _publicEvent.id, p_guests: guests});
+  btn.disabled = false; btn.textContent = 'Registra';
+  if (error || !data.ok) return toast((error&&error.message)||data.error);
+  document.getElementById('ev-reg-area').style.display = 'none';
+  document.getElementById('ev-reg-msg').textContent = data.message + (_publicEvent.price>0?' Se non hai ancora pagato, usa il link sopra.':'');
+  document.getElementById('ev-reg-success').style.display = 'block';
+  toast('Registrazione confermata!', 'ok');
+}
+
 // ── REGISTRAZIONE ────────────────────────────────────────────────────
 function showRegister() {
   document.getElementById('login-view').style.display = 'none';
