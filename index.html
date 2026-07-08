@@ -252,6 +252,30 @@ body.nav-sidebar .screen .hdr{padding-left:80px}
 :root.light .promo-code{color:#0A0A0A}
 :root.light th{background:#F4F4F4}
 :root.light tr:hover td{background:rgba(0,0,0,.03)}
+
+/* RESPONSIVE — touch targets + mobile layout */
+.btn-sm{min-height:40px}
+.btn-ico{min-height:44px;padding:9px 14px}
+.tab{min-height:44px}
+.stab{min-height:44px;padding:10px 4px}
+.fbtn{min-height:36px;padding:7px 12px}
+.nav-item{min-height:44px}
+@media(max-width:480px){
+  .quick-grid{grid-template-columns:repeat(2,1fr)}
+  .form-row{grid-template-columns:1fr}
+  .inp-row{flex-direction:column}
+  .inp-row button,.inp-row a.btn{width:100%}
+  .sumup-grid{grid-template-columns:1fr}
+  .content{padding:12px;gap:12px}
+  .saldo-val{font-size:40px}
+  .u-hero-greet{font-size:18px}
+  .modal-box{padding:22px 18px}
+  .hdr{padding:10px 14px}
+}
+@media(min-width:640px){
+  .content{padding:24px;gap:20px}
+  .login-card{max-width:400px}
+}
 </style>
 </head>
 <body>
