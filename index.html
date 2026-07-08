@@ -419,6 +419,19 @@ tr:hover td{background:rgba(255,255,255,.02)}
       <!-- DASHBOARD -->
       <div id="at-dash" class="tab-panel active">
         <div id="a-kpi" class="kpi-grid"></div>
+        <div style="margin-top:16px">
+          <div class="sec-hdr">
+            <div class="sec-title">Andamento transazioni</div>
+            <div class="filter-row">
+              <button class="fbtn" data-days="7"  onclick="loadChart(this)">7gg</button>
+              <button class="fbtn active" data-days="30" onclick="loadChart(this)">30gg</button>
+              <button class="fbtn" data-days="60" onclick="loadChart(this)">60gg</button>
+            </div>
+          </div>
+          <div style="background:var(--bgc);border:1px solid var(--brd);border-radius:var(--r);padding:12px">
+            <canvas id="dash-chart" height="160"></canvas>
+          </div>
+        </div>
       </div>
 
       <!-- UTENTI -->
@@ -521,6 +534,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script>
 const SB_URL = 'https://kbcrtwqtzuipcsfiyupu.supabase.co';
 const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtiY3J0d3F0enVpcGNzZml5dXB1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1MTc3NzEsImV4cCI6MjA5OTA5Mzc3MX0.BYpoUqhiqREsA7MosC2jnLCkvXbcwjTeBdT7LhRS1UA';
@@ -814,6 +828,39 @@ function renderStaffHist() {
 }
 
 // ── ADMIN AREA ────────────────────────────────────────────────────────
+let _chart = null;
+async function loadChart(btn) {
+  if (btn) {
+    document.querySelectorAll('#at-dash .fbtn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  }
+  const days = parseInt((btn || document.querySelector('#at-dash .fbtn.active')).dataset.days || 30);
+  const {data} = await db.rpc('admin_transaction_stats', {p_days: days});
+  if (!data || !data.length) return;
+  const labels   = data.map(d => { const dt=new Date(d.giorno); return dt.toLocaleDateString('it-IT',{day:'2-digit',month:'2-digit'}); });
+  const ricariche = data.map(d => Number(d.ricariche)||0);
+  const spese     = data.map(d => Number(d.spese)||0);
+  const ctx = document.getElementById('dash-chart').getContext('2d');
+  if (_chart) _chart.destroy();
+  _chart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        {label:'Ricariche', data: ricariche, backgroundColor:'rgba(34,197,94,0.7)', borderColor:'#22C55E', borderWidth:1},
+        {label:'Spese',     data: spese,     backgroundColor:'rgba(239,68,68,0.7)',  borderColor:'#EF4444', borderWidth:1}
+      ]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { labels: { color:'#F0E6C8', font:{size:12} } } },
+      scales: {
+        x: { ticks: { color:'#888', font:{size:11} }, grid: { color:'#2A2A2A' } },
+        y: { ticks: { color:'#888', font:{size:11}, callback: v => '€'+v }, grid: { color:'#2A2A2A' } }
+      }
+    }
+  });
+}
 function gotoAdmin() {
   document.getElementById('a-name').textContent = currentUser.display_name;
   showScreen('screen-admin');
@@ -822,6 +869,7 @@ function gotoAdmin() {
 async function loadDash() {
   const {data} = await db.rpc('admin_dashboard');
   if (!data) return;
+  loadChart(null);
   const kpis = [
     {ic:'👥', v:data.total_users,          l:'Soci attivi'},
     {ic:'🏪', v:data.total_staff,          l:'Staff attivi'},
