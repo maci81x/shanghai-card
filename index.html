@@ -443,6 +443,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
             <button class="fbtn" data-role="staff" onclick="filterUsers(this)">Staff</button>
             <button class="fbtn" data-role="admin" onclick="filterUsers(this)">Admin</button>
           </div>
+          <button class="btn-sm" onclick="exportCSVUsers()">📥 CSV</button>
           <button class="btn-sm p" onclick="toggleEl('nu-form')">+ Nuovo</button>
         </div>
         <div id="nu-form" class="card" style="display:none;margin-bottom:12px">
@@ -462,6 +463,9 @@ tr:hover td{background:rgba(255,255,255,.02)}
 
       <!-- TRANSAZIONI -->
       <div id="at-tx" class="tab-panel">
+        <div style="text-align:right;margin-bottom:10px">
+          <button class="btn-sm" onclick="exportCSVTx()">📥 CSV</button>
+        </div>
         <div id="a-tx-list"></div>
       </div>
 
@@ -1034,6 +1038,30 @@ async function doRegister() {
   document.getElementById('reg-success-code').textContent = data.card_id;
   document.getElementById('reg-success').style.display = 'block';
   toast('Tessera creata con successo!', 'ok');
+}
+
+// ── EXPORT CSV ────────────────────────────────────────────────────────
+function downloadCSV(rows, filename) {
+  if (!rows || !rows.length) return toast('Nessun dato da esportare');
+  const bom = '﻿';
+  const keys = Object.keys(rows[0]);
+  const lines = [keys.join(';')].concat(rows.map(r => keys.map(k => '"' + String(r[k]??'').replace(/"/g,'""') + '"').join(';')));
+  const blob = new Blob([bom + lines.join('\r\n')], {type:'text/csv;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url; a.download=filename; a.click();
+  URL.revokeObjectURL(url);
+}
+async function exportCSVUsers() {
+  const {data, error} = await db.rpc('admin_export_all');
+  if (error) return toast(error.message);
+  const today = new Date().toISOString().slice(0,10);
+  downloadCSV(data.users, `shanghai_card_utenti_${today}.csv`);
+}
+async function exportCSVTx() {
+  const {data, error} = await db.rpc('admin_export_all');
+  if (error) return toast(error.message);
+  const today = new Date().toISOString().slice(0,10);
+  downloadCSV(data.transactions, `shanghai_card_transazioni_${today}.csv`);
 }
 
 async function createPromo() {
