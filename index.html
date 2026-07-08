@@ -308,6 +308,8 @@ tr:hover td{background:rgba(255,255,255,.02)}
         <span id="u-badge" class="badge"></span>
         <button class="btn-sm" onclick="refreshUser()">↻ Aggiorna</button>
       </div>
+      <div id="u-qr" style="margin-top:16px;display:flex;flex-direction:column;align-items:center;gap:6px"></div>
+      <div style="font-size:11px;color:var(--mut);margin-top:2px">Mostra al personale per ricariche e acquisti</div>
     </div>
 
     <div class="sec-title">Ultime transazioni</div>
@@ -512,6 +514,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
 <script>
 const SB_URL = 'https://kbcrtwqtzuipcsfiyupu.supabase.co';
 const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtiY3J0d3F0enVpcGNzZml5dXB1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1MTc3NzEsImV4cCI6MjA5OTA5Mzc3MX0.BYpoUqhiqREsA7MosC2jnLCkvXbcwjTeBdT7LhRS1UA';
@@ -599,8 +602,19 @@ async function gotoUser() {
   document.getElementById('u-name').textContent = currentUser.display_name;
   document.getElementById('u-card').textContent = currentUser.card_id;
   showScreen('screen-user');
+  renderQR(currentUser.card_id);
   await refreshUser();
   await loadCatalog();
+}
+function renderQR(cardId) {
+  try {
+    const qr = qrcode(0, 'M');
+    qr.addData(cardId);
+    qr.make();
+    document.getElementById('u-qr').innerHTML = qr.createImgTag(4, 8);
+    const img = document.querySelector('#u-qr img');
+    if (img) { img.style.borderRadius='8px'; img.style.background='#fff'; img.style.padding='6px'; }
+  } catch(e) { document.getElementById('u-qr').innerHTML = ''; }
 }
 async function refreshUser() {
   const {data, error} = await db.rpc('get_user_state', {p_user_id: currentUser.id});
