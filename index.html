@@ -1320,7 +1320,10 @@ async function loadAGest() {
         <div style="font-weight:700;margin-bottom:4px">${e.title}</div>
         <div style="font-size:12px;color:var(--mut)">${e.event_date?fdt(e.event_date):'—'} · ${e.location||'—'} · ${e.price>0?eur(e.price):'Gratuito'} · ${e.max_participants||'∞'} posti</div>
         ${e.slug&&e.public_registration?`<div style="font-size:11px;margin-top:6px">🔗 <a href="?event=${e.slug}" target="_blank" class="reg-link">?event=${e.slug}</a></div>`:''}
-        <div style="margin-top:10px"><button class="btn-sm" onclick="toggleEventGuests('${e.id}',this)">👥 Vedi iscritti</button></div>
+        <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn-sm" onclick="toggleEventGuests('${e.id}','${e.title.replace(/'/g,"\\'")}',this)">👥 Iscritti</button>
+          <button class="btn-sm" onclick="exportEventCSV('${e.id}','${e.title.replace(/'/g,"\\'")}')">📥 CSV</button>
+        </div>
         <div id="guests-${e.id}" style="display:none;margin-top:10px"></div>
       </div>`).join('');
   }
@@ -1524,24 +1527,53 @@ async function doResetPin() {
 }
 
 // ── EVENTI OSPITI ────────────────────────────────────────────────────
-async function toggleEventGuests(eventId, btn) {
+async function toggleEventGuests(eventId, eventTitle, btn) {
   const el = document.getElementById('guests-' + eventId);
-  if (el.style.display !== 'none') { el.style.display='none'; btn.textContent='👥 Vedi iscritti'; return; }
+  if (el.style.display !== 'none') { el.style.display='none'; btn.textContent='👥 Iscritti'; return; }
   el.style.display = 'block';
   btn.textContent = '⏳ Carico…';
-  const {data, error} = await db.rpc('admin_list_event_guests', {p_event_id: eventId});
+  const {data, error} = await db.rpc('admin_list_event_registrations', {p_event_id: eventId});
   btn.textContent = '👥 Nascondi';
   if (error) { el.innerHTML=`<div class="empty">${error.message}</div>`; return; }
-  const guests = Array.isArray(data) ? data : [];
-  if (!guests.length) { el.innerHTML='<div class="empty">Nessun ospite esterno registrato</div>'; return; }
-  el.innerHTML = `<div class="tbl-wrap"><table><thead><tr><th>Nome</th><th>Cognome</th><th>Email</th><th>Tel</th><th>Pagato</th></tr></thead><tbody>`
-    + guests.map(g=>`<tr>
-        <td>${g.nome}</td><td>${g.cognome}</td>
-        <td style="font-size:12px">${g.email||'—'}</td>
-        <td style="font-size:12px">${g.telefono||'—'}</td>
-        <td style="color:${g.paid?'var(--grn)':'var(--mut)'}">${g.paid?'✓':'—'}</td>
-      </tr>`).join('')
-    + `</tbody></table></div><div class="sumup-note">${guests.length} ospiti esterni</div>`;
+  const soci = data.soci || [];
+  const ospiti = data.ospiti || [];
+  const total = data.total || 0;
+  const statusColor = s => s==='saldato_credito'||s==='saldato_sumup'||s==='saldato_contanti' ? 'var(--grn)' : s==='da_saldare' ? 'var(--gold)' : 'var(--mut)';
+  const statusLabel = s => ({da_saldare:'Da saldare',saldato_credito:'Credito',saldato_sumup:'SumUp',saldato_contanti:'Contanti',annullato:'Annullato'}[s]||s);
+  let html = `<div style="font-size:12px;color:var(--mut);margin-bottom:8px">${total} iscritti totali</div>`;
+  if (soci.length) {
+    html += `<div class="sec-lbl" style="margin-bottom:6px">Soci (${soci.length})</div>`;
+    html += `<div class="tbl-wrap"><table><thead><tr><th>Tessera</th><th>Nome</th><th>Importo</th><th>Stato</th><th>Operatore</th></tr></thead><tbody>`
+      + soci.map(r=>`<tr>
+          <td class="mono">${r.card_id}</td>
+          <td>${r.display_name}</td>
+          <td>${eur(r.amount)}</td>
+          <td style="color:${statusColor(r.payment_status)}">${statusLabel(r.payment_status)}</td>
+          <td style="font-size:11px">${r.operatore||'—'}</td>
+        </tr>`).join('')
+      + `</tbody></table></div>`;
+  }
+  if (ospiti.length) {
+    html += `<div class="sec-lbl" style="margin:10px 0 6px">Ospiti esterni (${ospiti.length})</div>`;
+    html += `<div class="tbl-wrap"><table><thead><tr><th>Nome</th><th>Cognome</th><th>Tel</th><th>Importo</th><th>Stato</th></tr></thead><tbody>`
+      + ospiti.map(g=>`<tr>
+          <td>${g.nome}</td><td>${g.cognome}</td>
+          <td style="font-size:12px">${g.telefono||'—'}</td>
+          <td>${eur(g.amount)}</td>
+          <td style="color:${statusColor(g.payment_status)}">${statusLabel(g.payment_status)}</td>
+        </tr>`).join('')
+      + `</tbody></table></div>`;
+  }
+  if (!soci.length && !ospiti.length) html += '<div class="empty">Nessun iscritto</div>';
+  el.innerHTML = html;
+}
+async function exportEventCSV(eventId, eventTitle) {
+  const {data, error} = await db.rpc('admin_export_event_csv', {p_event_id: eventId});
+  if (error) return toast(error.message);
+  const rows = Array.isArray(data) ? data : [];
+  const today = new Date().toISOString().slice(0,10);
+  const safeName = (eventTitle||'evento').replace(/[^a-zA-Z0-9]/g,'_').toLowerCase();
+  downloadCSV(rows, `iscritti_${safeName}_${today}.csv`);
 }
 
 // ── EXPORT CSV ────────────────────────────────────────────────────────
