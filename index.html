@@ -175,6 +175,10 @@ tr:hover td{background:rgba(255,255,255,.02)}
 .empty{color:var(--mut);font-size:13px;text-align:center;padding:24px}
 .loading{opacity:.5;pointer-events:none}
 
+/* RESET PIN MODAL */
+#pin-modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:100;align-items:center;justify-content:center;padding:20px}
+#pin-modal-bg.open{display:flex}
+
 /* REGISTER */
 .gdpr-box{background:#111;border:1px solid var(--brd);border-radius:8px;padding:12px;max-height:130px;overflow-y:auto;font-size:11px;color:var(--mut);margin-bottom:14px;line-height:1.6}
 .cb-row{display:flex;align-items:flex-start;gap:10px;margin-bottom:10px;font-size:13px;line-height:1.4}
@@ -490,6 +494,10 @@ tr:hover td{background:rgba(255,255,255,.02)}
                 <div class="fg"><label>Max posti (0=∞)</label><input id="fe-maxp" type="number" min="0" placeholder="0"></div>
                 <div class="fg"><label>Prezzo €</label><input id="fe-price" type="number" min="0" step="0.50" placeholder="0.00"></div>
               </div>
+              <div class="form-row">
+                <div class="fg"><label>Link SumUp (opz.)</label><input id="fe-sumup" type="url" placeholder="https://..."></div>
+                <div class="fg" style="display:flex;align-items:center;gap:8px;padding-top:22px"><input type="checkbox" id="fe-public" style="width:18px;height:18px;accent-color:var(--gold)"><label for="fe-public">Reg. pubblica</label></div>
+              </div>
               <button class="btn btn-p w100" onclick="createEvent()">Crea Evento</button>
             </div>
             <div id="gs-ev-list"></div>
@@ -531,6 +539,18 @@ tr:hover td{background:rgba(255,255,255,.02)}
           </div>
         </div>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL RESET PIN -->
+<div id="pin-modal-bg">
+  <div class="modal-box">
+    <div class="modal-msg">Reset PIN per <strong id="pin-modal-card"></strong></div>
+    <div class="fg"><label>Nuovo PIN (4-6 cifre)</label><input id="pin-modal-val" type="password" inputmode="numeric" maxlength="6" placeholder="••••"></div>
+    <div class="modal-btns" style="margin-top:14px">
+      <button class="btn btn-q" onclick="closePinModal()">Annulla</button>
+      <button class="btn btn-neg" onclick="doResetPin()">Salva</button>
     </div>
   </div>
 </div>
@@ -932,13 +952,17 @@ function renderAUsers(role) {
   const el = document.getElementById('a-users-list');
   const us = role==='all' ? allAdminUsers : allAdminUsers.filter(u=>u.role===role);
   if (!us.length) { el.innerHTML='<div class="empty">Nessun utente</div>'; return; }
-  el.innerHTML = `<div class="tbl-wrap"><table><thead><tr><th>Tessera</th><th>Nome</th><th>Ruolo</th><th>Saldo</th><th>Stato</th></tr></thead><tbody>`
+  el.innerHTML = `<div class="tbl-wrap"><table><thead><tr><th>Tessera</th><th>Nome</th><th>Ruolo</th><th>Saldo</th><th>Stato</th><th></th></tr></thead><tbody>`
     + us.map(u=>`<tr>
         <td class="mono">${u.card_id}</td>
-        <td>${u.display_name}</td>
+        <td>
+          <div>${u.display_name}</div>
+          ${(u.email||u.nome)?`<div style="font-size:11px;color:var(--mut)">${[u.nome&&u.cognome?u.nome+' '+u.cognome:'',u.email].filter(Boolean).join(' · ')}</div>`:''}
+        </td>
         <td><span class="role-badge r${u.role[0]}">${u.role}</span></td>
         <td class="${u.balance>0?'pos':''}">${eur(u.balance)}</td>
         <td style="font-size:11px;color:${u.active?'var(--grn)':'var(--neg)'}">${u.active?'attivo':'disattivo'}</td>
+        <td><button class="btn-sm" onclick="openPinModal('${u.card_id}')">🔑</button></td>
       </tr>`).join('')
     + '</tbody></table></div>';
 }
@@ -976,11 +1000,17 @@ async function loadAGest() {
   const gadList = document.getElementById('gs-gad-list');
   const proList = document.getElementById('gs-pro-list');
   const evs = data.events||[];
-  evList.innerHTML = evs.length
-    ? `<div class="tbl-wrap"><table><thead><tr><th>Titolo</th><th>Data</th><th>Luogo</th><th>Prezzo</th><th>Posti</th></tr></thead><tbody>`
-        + evs.map(e=>`<tr><td>${e.title}</td><td class="dt-cell">${e.event_date?fdt(e.event_date):'—'}</td><td>${e.location||'—'}</td><td>${e.price>0?eur(e.price):'Gratuito'}</td><td>${e.max_participants||'∞'}</td></tr>`).join('')
-        + '</tbody></table></div>'
-    : '<div class="empty">Nessun evento</div>';
+  if (!evs.length) { evList.innerHTML='<div class="empty">Nessun evento</div>'; }
+  else {
+    evList.innerHTML = evs.map(e=>`
+      <div class="card" style="margin-bottom:10px">
+        <div style="font-weight:700;margin-bottom:4px">${e.title}</div>
+        <div style="font-size:12px;color:var(--mut)">${e.event_date?fdt(e.event_date):'—'} · ${e.location||'—'} · ${e.price>0?eur(e.price):'Gratuito'} · ${e.max_participants||'∞'} posti</div>
+        ${e.slug&&e.public_registration?`<div style="font-size:11px;margin-top:6px">🔗 <a href="?event=${e.slug}" target="_blank" class="reg-link">?event=${e.slug}</a></div>`:''}
+        <div style="margin-top:10px"><button class="btn-sm" onclick="toggleEventGuests('${e.id}',this)">👥 Vedi iscritti</button></div>
+        <div id="guests-${e.id}" style="display:none;margin-top:10px"></div>
+      </div>`).join('');
+  }
   const gads = data.gadgets||[];
   gadList.innerHTML = gads.length
     ? `<div class="tbl-wrap"><table><thead><tr><th>Nome</th><th>Prezzo</th><th>Stock</th></tr></thead><tbody>`
@@ -995,17 +1025,21 @@ async function loadAGest() {
     : '<div class="empty">Nessuna promo</div>';
 }
 async function createEvent() {
-  const title = document.getElementById('fe-title').value.trim();
-  const desc  = document.getElementById('fe-desc').value.trim();
-  const date  = document.getElementById('fe-date').value;
-  const loc   = document.getElementById('fe-loc').value.trim();
-  const maxp  = parseInt(document.getElementById('fe-maxp').value)||null;
-  const price = parseFloat(document.getElementById('fe-price').value)||0;
+  const title  = document.getElementById('fe-title').value.trim();
+  const desc   = document.getElementById('fe-desc').value.trim();
+  const date   = document.getElementById('fe-date').value;
+  const loc    = document.getElementById('fe-loc').value.trim();
+  const maxp   = parseInt(document.getElementById('fe-maxp').value)||null;
+  const price  = parseFloat(document.getElementById('fe-price').value)||0;
+  const pub    = document.getElementById('fe-public').checked;
+  const sumup  = document.getElementById('fe-sumup').value.trim();
   if (!title) return toast('Inserisci il titolo');
-  const {data, error} = await db.rpc('admin_create_event', {p_title:title, p_description:desc||null, p_event_date:date?new Date(date).toISOString():null, p_location:loc||null, p_max_participants:maxp, p_price:Math.round(price*100)});
+  const {data, error} = await db.rpc('admin_create_event', {p_title:title, p_description:desc||null, p_event_date:date?new Date(date).toISOString():null, p_location:loc||null, p_max_participants:maxp, p_price:price, p_public_registration:pub, p_sumup_link:sumup||null});
   if (error||!data.ok) return toast((error&&error.message)||data.error);
-  toast('Evento creato!', 'ok');
-  ['fe-title','fe-desc','fe-date','fe-loc','fe-maxp','fe-price'].forEach(id=>document.getElementById(id).value='');
+  if (pub && data.public_link) toast(`Evento creato! Link: ${data.public_link}`, 'ok');
+  else toast('Evento creato!', 'ok');
+  ['fe-title','fe-desc','fe-date','fe-loc','fe-maxp','fe-price','fe-sumup'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('fe-public').checked = false;
   document.getElementById('fe-form').style.display='none';
   loadAGest();
 }
@@ -1153,6 +1187,48 @@ async function doRegister() {
   document.getElementById('reg-success-code').textContent = data.card_id;
   document.getElementById('reg-success').style.display = 'block';
   toast('Tessera creata con successo!', 'ok');
+}
+
+// ── RESET PIN ────────────────────────────────────────────────────────
+let _pinCard = null;
+function openPinModal(cardId) {
+  _pinCard = cardId;
+  document.getElementById('pin-modal-card').textContent = cardId;
+  document.getElementById('pin-modal-val').value = '';
+  document.getElementById('pin-modal-bg').classList.add('open');
+}
+function closePinModal() {
+  document.getElementById('pin-modal-bg').classList.remove('open');
+  _pinCard = null;
+}
+async function doResetPin() {
+  const pin = document.getElementById('pin-modal-val').value.trim();
+  if (!pin || pin.length < 4 || pin.length > 6 || !/^\d+$/.test(pin)) return toast('PIN deve essere 4-6 cifre');
+  const {data, error} = await db.rpc('admin_reset_pin', {p_card_id: _pinCard, p_new_pin: pin});
+  if (error || !data.ok) return toast((error&&error.message)||data.error);
+  toast(data.message, 'ok');
+  closePinModal();
+}
+
+// ── EVENTI OSPITI ────────────────────────────────────────────────────
+async function toggleEventGuests(eventId, btn) {
+  const el = document.getElementById('guests-' + eventId);
+  if (el.style.display !== 'none') { el.style.display='none'; btn.textContent='👥 Vedi iscritti'; return; }
+  el.style.display = 'block';
+  btn.textContent = '⏳ Carico…';
+  const {data, error} = await db.rpc('admin_list_event_guests', {p_event_id: eventId});
+  btn.textContent = '👥 Nascondi';
+  if (error) { el.innerHTML=`<div class="empty">${error.message}</div>`; return; }
+  const guests = Array.isArray(data) ? data : [];
+  if (!guests.length) { el.innerHTML='<div class="empty">Nessun ospite esterno registrato</div>'; return; }
+  el.innerHTML = `<div class="tbl-wrap"><table><thead><tr><th>Nome</th><th>Cognome</th><th>Email</th><th>Tel</th><th>Pagato</th></tr></thead><tbody>`
+    + guests.map(g=>`<tr>
+        <td>${g.nome}</td><td>${g.cognome}</td>
+        <td style="font-size:12px">${g.email||'—'}</td>
+        <td style="font-size:12px">${g.telefono||'—'}</td>
+        <td style="color:${g.paid?'var(--grn)':'var(--mut)'}">${g.paid?'✓':'—'}</td>
+      </tr>`).join('')
+    + `</tbody></table></div><div class="sumup-note">${guests.length} ospiti esterni</div>`;
 }
 
 // ── EXPORT CSV ────────────────────────────────────────────────────────
