@@ -11,7 +11,10 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
-:root{--bg:#0A0A0A;--bgc:#1A1A1A;--brd:#2A2A2A;--red:#C41E3A;--gold:#C9A84C;--txt:#F0E6C8;--mut:#888;--grn:#22C55E;--neg:#EF4444;--r:12px}
+/* DARK (default) */
+:root{--bg:#0A0A0A;--bgc:#1A1A1A;--brd:#2A2A2A;--red:#C41E3A;--gold:#C9A84C;--txt:#F0E6C8;--mut:#888;--grn:#22C55E;--neg:#EF4444;--r:12px;--shadow:0 2px 8px rgba(0,0,0,.4)}
+/* LIGHT */
+:root.light{--bg:#F5F0E8;--bgc:#FFFFFF;--brd:#E0D8CC;--red:#C41E3A;--gold:#B8943C;--txt:#1A1A1A;--mut:#6B6355;--grn:#16A34A;--neg:#DC2626;--shadow:0 2px 8px rgba(0,0,0,.12)}
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
 body{background:var(--bg);color:var(--txt);font-family:'Inter',system-ui,sans-serif;font-size:14px;line-height:1.5}
@@ -302,6 +305,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
       <div class="hdr-name" id="u-name"></div>
       <div class="hdr-sub" id="u-card"></div>
     </div>
+    <button class="btn-ico" onclick="toggleTheme()" id="theme-btn" title="Cambia tema">🌙</button>
     <button class="btn-ico" onclick="logout()">Esci</button>
   </div>
   <div class="content">
@@ -345,6 +349,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
       <div class="hdr-name" style="color:var(--gold)">CASSA</div>
       <div class="hdr-sub" id="s-name"></div>
     </div>
+    <button class="btn-ico" onclick="toggleTheme()" id="theme-btn" title="Cambia tema">🌙</button>
     <button class="btn-ico" onclick="logout()">Esci</button>
   </div>
   <div class="content">
@@ -409,6 +414,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
       <div class="hdr-name" style="color:var(--gold)">AMMINISTRAZIONE</div>
       <div class="hdr-sub" id="a-name"></div>
     </div>
+    <button class="btn-ico" onclick="toggleTheme()" id="theme-btn" title="Cambia tema">🌙</button>
     <button class="btn-ico" onclick="logout()">Esci</button>
   </div>
   <div class="content">
@@ -590,8 +596,20 @@ const SB_URL = 'https://kbcrtwqtzuipcsfiyupu.supabase.co';
 const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtiY3J0d3F0enVpcGNzZml5dXB1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1MTc3NzEsImV4cCI6MjA5OTA5Mzc3MX0.BYpoUqhiqREsA7MosC2jnLCkvXbcwjTeBdT7LhRS1UA';
 let db, currentUser = null, staffTarget = null, allAdminUsers = [], staffOps = [];
 
+// ── TEMA ──────────────────────────────────────────────────────────────
+function applyTheme(t) {
+  document.documentElement.classList.toggle('light', t === 'light');
+  document.querySelectorAll('#theme-btn').forEach(b => b.textContent = t === 'light' ? '☀️' : '🌙');
+}
+function toggleTheme() {
+  const next = document.documentElement.classList.contains('light') ? 'dark' : 'light';
+  localStorage.setItem('sh_theme', next);
+  applyTheme(next);
+}
+
 // ── INIT ──────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
+  applyTheme(localStorage.getItem('sh_theme') || 'dark');
   db = window.supabase.createClient(SB_URL, SB_KEY);
   staffOps = JSON.parse(localStorage.getItem('s_ops') || '[]');
   document.getElementById('modal-ok').addEventListener('click', () => { const cb = window._mcb; modalCancel(); cb && cb(); });
