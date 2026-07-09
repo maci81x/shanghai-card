@@ -187,6 +187,8 @@ function logout() {
 // ── MOVIMENTI FILTRI ─────────────────────────────────────────────────
 let _movTipo = 'all', _movDays = 0, _allTx = [];
 let _pendingEvents = [], _myEventIds = new Set(), _eventsCache = [], _promoCache = [];
+let _staffTxAll = [], _staffTxTipo = 'all', _staffTxDays = 0;
+let _adminTxAll = [], _adminTxTipo = 'all', _adminTxDays = 0, _adminTxSearch = '';
 function setMovFiltro(btn, group) {
   btn.closest('div').querySelectorAll('.fbtn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
@@ -583,11 +585,32 @@ async function staffLookup() {
 }
 async function loadStaffUserTx(cardId) {
   const wrap = document.getElementById('s-tx-wrap');
-  const list = document.getElementById('s-tx-list');
   const {data, error} = await db.rpc('staff_get_user_transactions', {p_operator_id: currentUser.id, p_card_id: cardId});
   if (error || !data || !data.ok || !data.transactions.length) { wrap.style.display='none'; return; }
+  _staffTxAll = data.transactions;
+  _staffTxTipo = 'all'; _staffTxDays = 0;
+  // reset filter buttons
+  wrap.querySelectorAll('.fbtn').forEach(b => b.classList.toggle('active', b.dataset.mf==='all'||b.dataset.mf==='0'));
   wrap.style.display = 'block';
-  list.innerHTML = data.transactions.map(t => `
+  _renderStaffTx();
+}
+function setStaffTxFilter(btn, group) {
+  btn.closest('div').querySelectorAll('.fbtn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  if (group === 'tipo') _staffTxTipo = btn.dataset.mf;
+  else _staffTxDays = parseInt(btn.dataset.mf);
+  _renderStaffTx();
+}
+function _renderStaffTx() {
+  const now = Date.now();
+  const list = _staffTxAll.filter(t => {
+    const tipoOk = _staffTxTipo === 'all' || t.type === _staffTxTipo;
+    const dateOk = _staffTxDays === 0 || (now - new Date(t.created_at).getTime()) < _staffTxDays * 86400000;
+    return tipoOk && dateOk;
+  });
+  const el = document.getElementById('s-tx-list');
+  if (!list.length) { el.innerHTML='<div class="empty">Nessuna transazione</div>'; return; }
+  el.innerHTML = list.map(t => `
     <div class="tx-row">
       <span class="tx-ic">${txic(t.type)}</span>
       <div class="tx-inf">
@@ -839,39 +862,7 @@ async function toggleStaffEventGuests(eventId, eventTitle, btn) {
   const {data, error} = await db.rpc('admin_list_event_registrations', {p_event_id: eventId});
   btn.textContent = '👥 Nascondi';
   if (error) { el.innerHTML=`<div class="empty">${error.message}</div>`; return; }
-  const soci = data.soci || [], ospiti = data.ospiti || [];
-  const statusColor = s => s==='saldato_credito'||s==='saldato_sumup'||s==='saldato_contanti' ? 'var(--grn)' : s==='da_saldare' ? 'var(--gold)' : 'var(--mut)';
-  const statusLabel = s => ({da_saldare:'Da saldare',saldato_credito:'Credito',saldato_sumup:'SumUp',saldato_contanti:'Contanti',annullato:'Annullato',gratuito:'Gratuito'}[s]||s);
-  let html = `<div style="font-size:12px;color:var(--mut);margin-bottom:8px">${(data.total||0)} iscritti</div>`;
-  if (soci.length) {
-    html += `<div class="sec-lbl" style="margin-bottom:6px">Soci (${soci.length})</div>`;
-    html += `<div class="tbl-wrap"><table><thead><tr><th>Tessera</th><th>Nome</th><th>Importo</th><th>Stato</th><th>Presenza</th></tr></thead><tbody>`
-      + soci.map(r=>`<tr>
-          <td class="mono">${r.card_id}</td>
-          <td>${_esc(r.display_name||'')}</td>
-          <td>${eur(r.amount)}</td>
-          <td style="color:${statusColor(r.payment_status)}">${statusLabel(r.payment_status)}</td>
-          <td>${r.checked_in
-            ? `<span style="color:var(--grn);font-weight:700">✅</span>`
-            : `<button class="btn-sm" onclick="adminCheckinReg('${r.registration_id}',this)">Check-in</button>`}</td>
-        </tr>`).join('')
-      + `</tbody></table></div>`;
-  }
-  if (ospiti.length) {
-    html += `<div class="sec-lbl" style="margin:10px 0 6px">Ospiti (${ospiti.length})</div>`;
-    html += `<div class="tbl-wrap"><table><thead><tr><th>Nome</th><th>Cognome</th><th>Tel</th><th>Stato</th><th>Presenza</th></tr></thead><tbody>`
-      + ospiti.map(g=>`<tr>
-          <td>${_esc(g.nome)}</td><td>${_esc(g.cognome)}</td>
-          <td style="font-size:12px">${g.telefono||'—'}</td>
-          <td style="color:${statusColor(g.payment_status)}">${statusLabel(g.payment_status)}</td>
-          <td>${g.checked_in
-            ? `<span style="color:var(--grn);font-weight:700">✅</span>`
-            : `<button class="btn-sm" onclick="adminCheckinGuest('${g.id}',this)">Check-in</button>`}</td>
-        </tr>`).join('')
-      + `</tbody></table></div>`;
-  }
-  if (!soci.length && !ospiti.length) html += '<div class="empty">Nessun iscritto</div>';
-  el.innerHTML = html;
+  el.innerHTML = _buildGuestHtml(data, eventId, 'staff');
 }
 async function staffToggleVisibility(eventId, currentVisible) {
   const label = currentVisible ? 'nascondere' : 'rendere visibile';
@@ -893,17 +884,12 @@ async function loadStaffPromos() {
   el.innerHTML = prs.map(p => {
     const sconto = p.discount_type==='percent' ? p.discount_value+'%' : eur(p.discount_value);
     const fino   = p.valid_until ? fdt(p.valid_until).split(' ')[0] : '∞';
-    const untilVal = p.valid_until ? p.valid_until.slice(0,10) : '';
     return `<div class="card" style="margin-bottom:8px;padding:12px">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <span class="mono" style="font-weight:700;font-size:15px">${_esc(p.code)}</span>
         <span style="font-size:12px;color:var(--mut);flex:1">${_esc(p.description||'')}</span>
         <span style="font-size:13px;color:var(--gold);font-weight:700">${sconto}</span>
         <span style="font-size:11px;color:var(--mut)">fino ${fino}</span>
-      </div>
-      <div style="display:flex;gap:6px;margin-top:8px">
-        <button class="btn-sm" onclick="openEditPromo('${p.id}','${_esc(p.code)}','${_esc(p.description||'')}','${p.discount_type}',${p.discount_value},'${untilVal}')">✏️ Modifica</button>
-        <button class="btn-sm" style="color:var(--neg)" onclick="deletePromoFromStaff('${p.id}','${_esc(p.code)}')">🗑️ Elimina</button>
       </div>
     </div>`;
   }).join('');
@@ -1214,11 +1200,41 @@ async function createUser() {
   loadAUsers();
 }
 async function loadATx() {
-  const {data} = await db.rpc('admin_list_transactions', {p_limit:50});
+  const {data} = await db.rpc('admin_list_transactions', {p_limit: 200});
   const el = document.getElementById('a-tx-list');
-  if (!data||!data.length) { el.innerHTML='<div class="empty">Nessuna transazione</div>'; return; }
+  if (!data || !data.length) { el.innerHTML='<div class="empty">Nessuna transazione</div>'; return; }
+  _adminTxAll = data;
+  _adminTxTipo = 'all'; _adminTxDays = 0; _adminTxSearch = '';
+  const searchEl = document.getElementById('a-tx-search');
+  if (searchEl) searchEl.value = '';
+  document.querySelectorAll('#at-tx .fbtn').forEach(b => b.classList.toggle('active', b.dataset.mf==='all'||b.dataset.mf==='0'));
+  _renderAdminTx();
+}
+function setAdminTxFilter(btn, group) {
+  btn.closest('div').querySelectorAll('.fbtn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  if (group === 'tipo') _adminTxTipo = btn.dataset.mf;
+  else _adminTxDays = parseInt(btn.dataset.mf);
+  _renderAdminTx();
+}
+function filterAdminTxSearch(val) {
+  _adminTxSearch = (val||'').toLowerCase().trim();
+  _renderAdminTx();
+}
+function _renderAdminTx() {
+  const now = Date.now();
+  const list = _adminTxAll.filter(t => {
+    const tipoOk = _adminTxTipo === 'all' || t.type === _adminTxTipo;
+    const dateOk = _adminTxDays === 0 || (now - new Date(t.created_at).getTime()) < _adminTxDays * 86400000;
+    const srcOk  = !_adminTxSearch ||
+      (t.card_id||'').toLowerCase().includes(_adminTxSearch) ||
+      (t.operator_name||'').toLowerCase().includes(_adminTxSearch);
+    return tipoOk && dateOk && srcOk;
+  });
+  const el = document.getElementById('a-tx-list');
+  if (!list.length) { el.innerHTML='<div class="empty">Nessuna transazione</div>'; return; }
   el.innerHTML = `<div class="tbl-wrap"><table><thead><tr><th>Data</th><th>Tessera</th><th>Tipo</th><th>Importo</th><th>Operatore</th></tr></thead><tbody>`
-    + data.map(t=>`<tr>
+    + list.map(t=>`<tr>
         <td class="dt-cell">${fdt(t.created_at)}</td>
         <td class="mono">${t.card_id}</td>
         <td>${txic(t.type)} ${t.type}</td>
@@ -1232,6 +1248,9 @@ async function loadAGest() {
     db.rpc('admin_list_events'),
     db.rpc('get_catalog')
   ]);
+  // Pre-load SumUp links if tab is active
+  const sumupPanel = document.getElementById('gs-sumup');
+  if (sumupPanel && sumupPanel.classList.contains('active')) loadAdminSumupLinks();
   const evList  = document.getElementById('gs-ev-list');
   const gadList = document.getElementById('gs-gad-list');
   const proList = document.getElementById('gs-pro-list');
@@ -1290,6 +1309,68 @@ async function loadAGest() {
         </div>`;
       }).join('')
     : '<div class="empty">Nessuna promo</div>';
+}
+async function loadAdminSumupLinks() {
+  const el = document.getElementById('gs-sumup-list');
+  if (!el) return;
+  el.innerHTML = '<div class="empty">⏳ Carico…</div>';
+  const {data: cat} = await db.rpc('get_catalog');
+  const links = cat?.sumup_links || [];
+  if (!links.length) { el.innerHTML='<div class="empty">Nessun link SumUp</div>'; return; }
+  el.innerHTML = links.map(l => `
+    <div class="card" style="margin-bottom:8px;padding:12px">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span style="font-weight:600;flex:1">${_esc(l.label)}</span>
+        ${l.amount!=null?`<span style="color:var(--gold);font-weight:700">${eur(l.amount)}</span>`:''}
+      </div>
+      <div style="font-size:11px;color:var(--mut);word-break:break-all;margin:4px 0">${_esc(l.url)}</div>
+      <div style="display:flex;gap:6px;margin-top:8px">
+        <a href="${l.url}" target="_blank" rel="noopener" class="btn-sm" style="text-decoration:none">🔗 Apri</a>
+        <button class="btn-sm" onclick="openEditSumupLink('${l.id}','${_esc(l.label.replace(/'/g,"\\'"))}','${_esc(l.url.replace(/'/g,"\\'"))}',${l.amount!=null?l.amount:'null'})">✏️ Modifica</button>
+        <button class="btn-sm" style="color:var(--neg)" onclick="adminDeleteSumupLink('${l.id}','${_esc(l.label)}')">🗑️ Elimina</button>
+      </div>
+    </div>`).join('');
+}
+async function adminAddSumupLink() {
+  const label  = document.getElementById('sl-label').value.trim();
+  const url    = document.getElementById('sl-url').value.trim();
+  const amount = parseFloat(document.getElementById('sl-amount').value) || null;
+  if (!label || !url) return toast('Etichetta e URL obbligatori');
+  const {data, error} = await db.rpc('admin_add_sumup_link', {p_admin_id: currentUser.id, p_label: label, p_url: url, p_amount: amount});
+  if (error||!data.ok) return toast((error&&error.message)||data.error);
+  toast('Link aggiunto!', 'ok');
+  ['sl-label','sl-url','sl-amount'].forEach(id => document.getElementById(id).value='');
+  loadAdminSumupLinks();
+}
+function openEditSumupLink(id, label, url, amount) {
+  document.getElementById('sle-id').value     = id;
+  document.getElementById('sle-label').value  = label;
+  document.getElementById('sle-url').value    = url;
+  document.getElementById('sle-amount').value = (amount != null && amount !== 'null') ? amount : '';
+  document.getElementById('sle-bg').style.display = 'block';
+}
+function closeEditSumupLink() {
+  document.getElementById('sle-bg').style.display = 'none';
+}
+async function saveEditSumupLink() {
+  const id     = document.getElementById('sle-id').value;
+  const label  = document.getElementById('sle-label').value.trim();
+  const url    = document.getElementById('sle-url').value.trim();
+  const amount = parseFloat(document.getElementById('sle-amount').value) || null;
+  if (!label || !url) return toast('Etichetta e URL obbligatori');
+  const {data, error} = await db.rpc('admin_update_sumup_link', {p_admin_id: currentUser.id, p_link_id: id, p_label: label, p_url: url, p_amount: amount});
+  if (error||!data.ok) return toast((error&&error.message)||data.error);
+  toast('Link aggiornato!', 'ok');
+  closeEditSumupLink();
+  loadAdminSumupLinks();
+}
+async function adminDeleteSumupLink(id, label) {
+  modalConfirm(`Eliminare il link "${label}"?`, async () => {
+    const {data, error} = await db.rpc('admin_delete_sumup_link', {p_admin_id: currentUser.id, p_link_id: id});
+    if (error||!data.ok) return toast((error&&error.message)||data.error);
+    toast('Link eliminato', 'ok');
+    loadAdminSumupLinks();
+  });
 }
 async function adminToggleVisibility(eventId, currentVisible) {
   const label = currentVisible ? 'nascondere' : 'rendere visibile';
@@ -1553,42 +1634,96 @@ async function toggleEventGuests(eventId, eventTitle, btn) {
   const {data, error} = await db.rpc('admin_list_event_registrations', {p_event_id: eventId});
   btn.textContent = '👥 Nascondi';
   if (error) { el.innerHTML=`<div class="empty">${error.message}</div>`; return; }
-  const soci = data.soci || [];
-  const ospiti = data.ospiti || [];
-  const total = data.total || 0;
+  el.innerHTML = _buildGuestHtml(data, eventId, 'admin');
+}
+function _buildGuestHtml(data, eventId, context) {
+  const soci = data.soci || [], ospiti = data.ospiti || [], total = data.total || 0;
   const statusColor = s => s==='saldato_credito'||s==='saldato_sumup'||s==='saldato_contanti' ? 'var(--grn)' : s==='da_saldare' ? 'var(--gold)' : 'var(--mut)';
-  const statusLabel = s => ({da_saldare:'Da saldare',saldato_credito:'Credito',saldato_sumup:'SumUp',saldato_contanti:'Contanti',annullato:'Annullato'}[s]||s);
+  const statusLabel = s => ({da_saldare:'Da saldare',saldato_credito:'Credito',saldato_sumup:'SumUp',saldato_contanti:'Contanti',annullato:'Annullato',gratuito:'Gratuito'}[s]||s);
+  const payBtns = (regId, name, amt) => `<div style="display:flex;gap:3px;margin-top:4px">
+    <button class="btn-sm p" style="font-size:10px;padding:2px 6px" onclick="payRegFromList('${regId}','credito','${name}',${amt},'${eventId}','${context}')">💳</button>
+    <button class="btn-sm" style="font-size:10px;padding:2px 6px" onclick="payRegFromList('${regId}','contanti','${name}',${amt},'${eventId}','${context}')">💵</button>
+    <button class="btn-sm" style="font-size:10px;padding:2px 6px" onclick="payRegFromList('${regId}','sumup','${name}',${amt},'${eventId}','${context}')">📱</button>
+  </div>`;
+  const guestPayBtns = (gId, name, amt) => `<div style="display:flex;gap:3px;margin-top:4px">
+    <button class="btn-sm" style="font-size:10px;padding:2px 6px" onclick="payGuestFromList('${gId}','contanti','${name}',${amt},'${eventId}','${context}')">💵</button>
+    <button class="btn-sm" style="font-size:10px;padding:2px 6px" onclick="payGuestFromList('${gId}','sumup','${name}',${amt},'${eventId}','${context}')">📱</button>
+  </div>`;
   let html = `<div style="font-size:12px;color:var(--mut);margin-bottom:8px">${total} iscritti totali</div>`;
   if (soci.length) {
     html += `<div class="sec-lbl" style="margin-bottom:6px">Soci (${soci.length})</div>`;
-    html += `<div class="tbl-wrap"><table><thead><tr><th>Tessera</th><th>Nome</th><th>Importo</th><th>Stato</th><th>Presenza</th></tr></thead><tbody>`
-      + soci.map(r=>`<tr>
-          <td class="mono">${r.card_id}</td>
-          <td>${r.display_name}</td>
-          <td>${eur(r.amount)}</td>
-          <td style="color:${statusColor(r.payment_status)}">${statusLabel(r.payment_status)}</td>
-          <td>${r.checked_in
-            ? `<span style="color:var(--grn);font-weight:700">✅</span>`
-            : `<button class="btn-sm" onclick="adminCheckinReg('${r.registration_id}',this)">Check-in</button>`}</td>
-        </tr>`).join('')
+    html += `<div class="tbl-wrap"><table><thead><tr><th>Tessera</th><th>Nome</th><th>€</th><th>Stato</th><th>Check-in</th></tr></thead><tbody>`
+      + soci.map(r => {
+          const dn = _esc(r.display_name||'').replace(/'/g,"\\'");
+          return `<tr>
+            <td class="mono">${r.card_id}</td>
+            <td>${_esc(r.display_name||'')}</td>
+            <td>${eur(r.amount)}</td>
+            <td style="color:${statusColor(r.payment_status)}">
+              ${statusLabel(r.payment_status)}
+              ${r.payment_status==='da_saldare' ? payBtns(r.registration_id, dn, r.amount) : ''}
+            </td>
+            <td>${r.checked_in
+              ? `<span style="color:var(--grn);font-weight:700">✅</span>`
+              : `<button class="btn-sm" onclick="adminCheckinReg('${r.registration_id}',this)">Check-in</button>`}</td>
+          </tr>`;
+        }).join('')
       + `</tbody></table></div>`;
   }
   if (ospiti.length) {
-    html += `<div class="sec-lbl" style="margin:10px 0 6px">Ospiti esterni (${ospiti.length})</div>`;
-    html += `<div class="tbl-wrap"><table><thead><tr><th>Nome</th><th>Cognome</th><th>Tel</th><th>Importo</th><th>Stato</th><th>Presenza</th></tr></thead><tbody>`
-      + ospiti.map(g=>`<tr>
-          <td>${g.nome}</td><td>${g.cognome}</td>
-          <td style="font-size:12px">${g.telefono||'—'}</td>
-          <td>${eur(g.amount)}</td>
-          <td style="color:${statusColor(g.payment_status)}">${statusLabel(g.payment_status)}</td>
-          <td>${g.checked_in
-            ? `<span style="color:var(--grn);font-weight:700">✅</span>`
-            : `<button class="btn-sm" onclick="adminCheckinGuest('${g.id}',this)">Check-in</button>`}</td>
-        </tr>`).join('')
+    html += `<div class="sec-lbl" style="margin:10px 0 6px">Ospiti (${ospiti.length})</div>`;
+    html += `<div class="tbl-wrap"><table><thead><tr><th>Nome</th><th>Cognome</th><th>Tel</th><th>€</th><th>Stato</th><th>Check-in</th></tr></thead><tbody>`
+      + ospiti.map(g => {
+          const nc = _esc((g.nome+' '+g.cognome).replace(/'/g,"\\'"));
+          return `<tr>
+            <td>${_esc(g.nome)}</td><td>${_esc(g.cognome)}</td>
+            <td style="font-size:12px">${g.telefono||'—'}</td>
+            <td>${eur(g.amount||0)}</td>
+            <td style="color:${statusColor(g.payment_status)}">
+              ${statusLabel(g.payment_status)}
+              ${g.payment_status==='da_saldare'&&(g.amount||0)>0 ? guestPayBtns(g.id, nc, g.amount||0) : ''}
+            </td>
+            <td>${g.checked_in
+              ? `<span style="color:var(--grn);font-weight:700">✅</span>`
+              : `<button class="btn-sm" onclick="adminCheckinGuest('${g.id}',this)">Check-in</button>`}</td>
+          </tr>`;
+        }).join('')
       + `</tbody></table></div>`;
   }
   if (!soci.length && !ospiti.length) html += '<div class="empty">Nessun iscritto</div>';
-  el.innerHTML = html;
+  return html;
+}
+async function payRegFromList(regId, method, displayName, amount, eventId, context) {
+  const label = {credito:'credito',contanti:'contanti',sumup:'SumUp'}[method]||method;
+  modalConfirm(`Salda "${displayName}" (${eur(amount)}) con ${label}?`, async () => {
+    const {data, error} = await db.rpc('staff_pay_event', {p_operator_id: currentUser.id, p_registration_id: regId, p_method: method});
+    if (error||!data.ok) return toast((error&&error.message)||data.error);
+    toast(`✓ ${data.message}`, 'ok');
+    if (context === 'admin') await _reloadAdminEventGuests(eventId);
+    else await _reloadStaffEventGuests(eventId);
+  });
+}
+async function payGuestFromList(guestId, method, nomeCog, amount, eventId, context) {
+  const label = {contanti:'contanti',sumup:'SumUp'}[method]||method;
+  modalConfirm(`Salda "${nomeCog}" (${eur(amount)}) con ${label}?`, async () => {
+    const {data, error} = await db.rpc('staff_pay_event_guest', {p_operator_id: currentUser.id, p_guest_id: guestId, p_method: method});
+    if (error||!data.ok) return toast((error&&error.message)||data.error);
+    toast(`✓ ${data.message}`, 'ok');
+    if (context === 'admin') await _reloadAdminEventGuests(eventId);
+    else await _reloadStaffEventGuests(eventId);
+  });
+}
+async function _reloadAdminEventGuests(eventId) {
+  const el = document.getElementById('guests-' + eventId);
+  if (!el || el.style.display === 'none') return;
+  const {data} = await db.rpc('admin_list_event_registrations', {p_event_id: eventId});
+  if (data) { el.innerHTML = _buildGuestHtml(data, eventId, 'admin'); loadEvDash(eventId); }
+}
+async function _reloadStaffEventGuests(eventId) {
+  const el = document.getElementById('sev-guests-' + eventId);
+  if (!el || el.style.display === 'none') return;
+  const {data} = await db.rpc('admin_list_event_registrations', {p_event_id: eventId});
+  if (data) { el.innerHTML = _buildGuestHtml(data, eventId, 'staff'); loadStaffEvDash(eventId); }
 }
 async function exportEventCSV(eventId, eventTitle) {
   const {data, error} = await db.rpc('admin_export_event_csv', {p_event_id: eventId});

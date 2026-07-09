@@ -226,7 +226,7 @@
     <div class="tab-wrap">
       <div class="tabs" id="stabs">
         <button class="tab active" data-p="st-tessere" onclick="switchTab(this,'stabs')">🏷️ Tessere</button>
-        <button class="tab" data-p="st-eventi" onclick="switchTab(this,'stabs');loadStaffEvents()">🎫 Eventi</button>
+        <button class="tab" data-p="st-eventi" onclick="switchTab(this,'stabs');loadStaffEvents()">📅 Catalogo</button>
         <button class="tab" data-p="st-promo" onclick="switchTab(this,'stabs');loadStaffPromos()">🏷️ Promo</button>
       </div>
 
@@ -308,7 +308,19 @@
         </div>
 
         <div id="s-tx-wrap" style="display:none">
-          <div class="sec-title" style="margin-bottom:8px">📋 Ultime transazioni</div>
+          <div class="sec-title" style="margin-bottom:6px">📋 Movimenti</div>
+          <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:6px">
+            <button class="fbtn active" data-mf="all" onclick="setStaffTxFilter(this,'tipo')">Tutti</button>
+            <button class="fbtn" data-mf="recharge" onclick="setStaffTxFilter(this,'tipo')">Ricariche</button>
+            <button class="fbtn" data-mf="purchase" onclick="setStaffTxFilter(this,'tipo')">Spese</button>
+            <button class="fbtn" data-mf="event_fee" onclick="setStaffTxFilter(this,'tipo')">Eventi</button>
+          </div>
+          <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px">
+            <button class="fbtn active" data-mf="0" onclick="setStaffTxFilter(this,'days')">Tutti</button>
+            <button class="fbtn" data-mf="7" onclick="setStaffTxFilter(this,'days')">7gg</button>
+            <button class="fbtn" data-mf="30" onclick="setStaffTxFilter(this,'days')">30gg</button>
+            <button class="fbtn" data-mf="90" onclick="setStaffTxFilter(this,'days')">90gg</button>
+          </div>
           <div id="s-tx-list" class="tx-list"></div>
         </div>
 
@@ -488,8 +500,21 @@
 
       <!-- TRANSAZIONI -->
       <div id="at-tx" class="tab-panel">
-        <div style="text-align:right;margin-bottom:10px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+          <input id="a-tx-search" type="text" placeholder="Cerca tessera o nome…" style="flex:1;min-width:140px;background:var(--bg);color:var(--txt);border:1px solid var(--brd);border-radius:8px;padding:8px 12px;font-size:13px" oninput="filterAdminTxSearch(this.value)">
           <button class="btn-sm" onclick="exportCSVTx()">📥 CSV</button>
+        </div>
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:6px">
+          <button class="fbtn active" data-mf="all" onclick="setAdminTxFilter(this,'tipo')">Tutti</button>
+          <button class="fbtn" data-mf="recharge" onclick="setAdminTxFilter(this,'tipo')">Ricariche</button>
+          <button class="fbtn" data-mf="purchase" onclick="setAdminTxFilter(this,'tipo')">Spese</button>
+          <button class="fbtn" data-mf="event_fee" onclick="setAdminTxFilter(this,'tipo')">Eventi</button>
+        </div>
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:12px">
+          <button class="fbtn active" data-mf="0" onclick="setAdminTxFilter(this,'days')">Tutti</button>
+          <button class="fbtn" data-mf="7" onclick="setAdminTxFilter(this,'days')">7gg</button>
+          <button class="fbtn" data-mf="30" onclick="setAdminTxFilter(this,'days')">30gg</button>
+          <button class="fbtn" data-mf="90" onclick="setAdminTxFilter(this,'days')">90gg</button>
         </div>
         <div id="a-tx-list"></div>
       </div>
@@ -501,6 +526,7 @@
             <button class="stab active" data-p="gs-ev" onclick="switchStab(this,'gst-tabs')">Eventi</button>
             <button class="stab" data-p="gs-gad" onclick="switchStab(this,'gst-tabs')">Gadget</button>
             <button class="stab" data-p="gs-pro" onclick="switchStab(this,'gst-tabs')">Promo</button>
+            <button class="stab" data-p="gs-sumup" onclick="switchStab(this,'gst-tabs');loadAdminSumupLinks()">💳 SumUp</button>
           </div>
           <div id="gs-ev" class="sub-panel active">
             <button class="btn-sm p" style="margin-bottom:10px" onclick="toggleEl('fe-form')">+ Nuovo Evento</button>
@@ -539,6 +565,17 @@
               <button class="btn btn-p w100" onclick="createGadget()">Crea Gadget</button>
             </div>
             <div id="gs-gad-list"></div>
+          </div>
+          <div id="gs-sumup" class="sub-panel">
+            <div class="card" style="margin-bottom:10px">
+              <div class="sec-lbl" style="margin-bottom:10px">Aggiungi link SumUp</div>
+              <div class="fg"><label>Etichetta (es. "Ricarica €30")</label><input id="sl-label" type="text" placeholder="Ricarica €30"></div>
+              <div class="fg"><label>URL SumUp</label><input id="sl-url" type="url" placeholder="https://pay.sumup.com/..."></div>
+              <div class="fg"><label>Importo € (opzionale)</label><input id="sl-amount" type="number" min="0" step="0.50" placeholder="es. 30"></div>
+              <button class="btn btn-p w100" onclick="adminAddSumupLink()">+ Aggiungi</button>
+            </div>
+            <div class="sec-lbl" style="margin-bottom:8px">Link attivi</div>
+            <div id="gs-sumup-list"><div class="empty">⏳ Carico…</div></div>
           </div>
           <div id="gs-pro" class="sub-panel">
             <button class="btn-sm p" style="margin-bottom:10px" onclick="toggleEl('fp-form')">+ Nuova Promo</button>
@@ -581,7 +618,7 @@
 <nav id="app-nav">
   <button class="nav-item active" data-nav="home" onclick="navGo('home')"><span class="ni">🏠</span>Home</button>
   <button class="nav-item" data-nav="movimenti" onclick="navGo('movimenti')"><span class="ni">📋</span>Movimenti</button>
-  <button class="nav-item" data-nav="eventi" onclick="navGo('eventi')"><span class="ni">🎫</span>Eventi</button>
+  <button class="nav-item" data-nav="eventi" onclick="navGo('eventi')"><span class="ni">📅</span>Catalogo</button>
   <button class="nav-item" data-nav="profilo" onclick="navGo('profilo')"><span class="ni">👤</span>Profilo</button>
   <button class="nav-item" id="nav-pos-btn" onclick="toggleNavPos()" title="Sposta nav"><span class="ni">⇅</span></button>
 </nav>
@@ -609,6 +646,22 @@
       <div id="ev-reg-msg" style="font-size:13px;color:var(--mut)"></div>
     </div>
     <div style="text-align:center;margin-top:14px;font-size:13px;color:var(--mut)">Sei socio del Rione? <a href="?" class="reg-link">Accedi</a> per iscriverti con la tua card</div>
+  </div>
+</div>
+
+<!-- MODALE MODIFICA SUMUP LINK -->
+<div id="sle-bg" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:2000;overflow-y:auto;padding:20px 12px">
+  <div style="max-width:480px;margin:0 auto;background:var(--bgc);border-radius:var(--r);padding:24px 20px;position:relative;border:1px solid var(--gold)">
+    <button onclick="closeEditSumupLink()" style="position:absolute;top:14px;right:14px;background:transparent;border:none;font-size:20px;cursor:pointer;color:var(--mut)">✕</button>
+    <div class="sec-lbl" style="margin-bottom:14px">✏️ Modifica Link SumUp</div>
+    <input type="hidden" id="sle-id">
+    <div class="fg"><label>Etichetta</label><input id="sle-label" type="text" placeholder="Ricarica €30"></div>
+    <div class="fg"><label>URL SumUp</label><input id="sle-url" type="url" placeholder="https://pay.sumup.com/..."></div>
+    <div class="fg"><label>Importo € (opzionale)</label><input id="sle-amount" type="number" min="0" step="0.50" placeholder="es. 30"></div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn btn-q" style="flex:1" onclick="closeEditSumupLink()">Annulla</button>
+      <button class="btn btn-p" style="flex:2" onclick="saveEditSumupLink()">Salva</button>
+    </div>
   </div>
 </div>
 
