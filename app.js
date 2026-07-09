@@ -122,7 +122,7 @@ function modalCancel() {
   document.getElementById('modal-ok').textContent = 'Conferma';
   document.querySelector('#modal .btn-q').style.display = '';
 }
-function modalInfo(msg) {
+function modalInfo(msg, cb, btnLabel) {
   const parts = msg.split('\n\n');
   document.getElementById('modal-title').textContent = parts[0];
   const det = document.getElementById('modal-detail');
@@ -131,9 +131,9 @@ function modalInfo(msg) {
     det.style.display = '';
   } else { det.style.display = 'none'; }
   document.getElementById('modal').classList.add('open');
-  window._mcb = null;
-  document.getElementById('modal-ok').textContent = 'Chiudi';
+  document.getElementById('modal-ok').textContent = btnLabel || 'Chiudi';
   document.querySelector('#modal .btn-q').style.display = 'none';
+  window._mcb = cb || null;
 }
 function showScreen(id) { document.querySelectorAll('.screen').forEach(s => s.classList.remove('active')); document.getElementById(id).classList.add('active'); }
 function switchTab(btn, groupId) {
@@ -805,7 +805,11 @@ async function loadStaffEvents() {
           ${e.visible===false?'👁‍🗨 Nascosto':'👁 Visibile'}
         </span>
       </div>
-      <div style="font-size:12px;color:var(--mut);margin-bottom:8px">${e.event_date?fdt(e.event_date):'—'} · ${_esc(e.location||'—')} · ${e.price>0?eur(e.price):'Gratuito'}</div>
+      <div style="font-size:12px;color:var(--mut);margin-bottom:6px">${e.event_date?fdt(e.event_date):'—'} · ${_esc(e.location||'—')} · ${e.price>0?eur(e.price):'Gratuito'}</div>
+      ${e.slug&&e.public_registration?`<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap">
+        <a href="?event=${e.slug}" target="_blank" rel="noopener" class="reg-link" style="font-size:11px">🔗 ?event=${_esc(e.slug)}</a>
+        <button class="btn-sm" style="font-size:11px;padding:2px 8px" onclick="copyPublicLink('${_esc(e.slug)}')">📋 Copia link</button>
+      </div>`:''}
       <div id="sev-dash-${e.id}" class="ev-mini-dash" style="margin-bottom:10px">
         <span style="font-size:11px;color:var(--mut)">⏳ carico…</span>
       </div>
@@ -1243,7 +1247,10 @@ async function loadAGest() {
           </span>
         </div>
         <div style="font-size:12px;color:var(--mut)">${e.event_date?fdt(e.event_date):'—'} · ${_esc(e.location||'—')} · ${e.price>0?eur(e.price):'Gratuito'} · ${e.max_participants||'∞'} posti</div>
-        ${e.slug&&e.public_registration?`<div style="font-size:11px;margin-top:6px">🔗 <a href="?event=${e.slug}" target="_blank" class="reg-link">?event=${e.slug}</a></div>`:''}
+        ${e.slug&&e.public_registration?`<div style="display:flex;align-items:center;gap:6px;margin-top:6px;flex-wrap:wrap">
+          <a href="?event=${e.slug}" target="_blank" rel="noopener" class="reg-link" style="font-size:11px">🔗 ?event=${_esc(e.slug)}</a>
+          <button class="btn-sm" style="font-size:11px;padding:2px 8px" onclick="copyPublicLink('${_esc(e.slug)}')">📋 Copia link</button>
+        </div>`:''}
         <div id="ev-dash-${e.id}" class="ev-mini-dash" style="margin-top:10px;display:flex;gap:12px;flex-wrap:wrap;padding:10px;background:var(--bg);border-radius:8px">
           <span style="font-size:11px;color:var(--mut)">⏳ carico…</span>
         </div>
@@ -1293,7 +1300,18 @@ async function adminToggleVisibility(eventId, currentVisible) {
     loadAGest();
   });
 }
-async function createEvent() {
+function copyPublicLink(slug) {
+  const link = `https://maci81x.github.io/shanghai-card/?event=${slug}`;
+  navigator.clipboard?.writeText(link).then(()=>toast('Link copiato!','ok')).catch(()=>toast(link));
+}
+function _slugify(s) {
+  return s.toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g,'')
+    .replace(/[^a-z0-9\s-]/g,'')
+    .trim().replace(/\s+/g,'-')
+    .replace(/-+/g,'-');
+}
+async function adminCreateEvent() {
   const title  = document.getElementById('fe-title').value.trim();
   const desc   = document.getElementById('fe-desc').value.trim();
   const date   = document.getElementById('fe-date').value;
@@ -1302,16 +1320,29 @@ async function createEvent() {
   const price  = parseFloat(document.getElementById('fe-price').value)||0;
   const pub    = document.getElementById('fe-public').checked;
   const sumup  = document.getElementById('fe-sumup').value.trim();
-  const slug   = document.getElementById('fe-slug').value.trim();
+  let   slug   = document.getElementById('fe-slug').value.trim();
   if (!title) return toast('Inserisci il titolo');
-  const {data, error} = await db.rpc('admin_create_event', {p_title:title, p_description:desc||null, p_event_date:date?new Date(date).toISOString():null, p_location:loc||null, p_max_participants:maxp, p_price:price, p_public_registration:pub, p_sumup_link:sumup||null, p_slug:slug||null});
-  if (error||!data.ok) return toast((error&&error.message)||data.error);
-  if (pub && data.public_link) toast(`Evento creato! Link: ${data.public_link}`, 'ok');
-  else toast('Evento creato!', 'ok');
+  // Auto-slug dal titolo se le iscrizioni esterne sono attive e slug vuoto
+  if (pub && !slug) slug = _slugify(title);
+  const {data, error} = await db.rpc('admin_create_event', {
+    p_title: title, p_description: desc||null,
+    p_event_date: date ? new Date(date).toISOString() : null,
+    p_location: loc||null, p_max_participants: maxp, p_price: price,
+    p_public_registration: pub, p_sumup_link: sumup||null, p_slug: slug||null
+  });
+  if (error||!data||!data.ok) return toast((error&&error.message)||(data&&data.error)||'Errore creazione evento');
   ['fe-title','fe-desc','fe-date','fe-loc','fe-maxp','fe-price','fe-sumup','fe-slug'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('fe-public').checked = false;
   document.getElementById('fe-form').style.display='none';
   loadAGest();
+  if (pub && data.slug) {
+    const link = `https://maci81x.github.io/shanghai-card/?event=${data.slug}`;
+    modalInfo(`✅ Evento creato!\n\n🔗 Link pubblico:\n${link}\n\nCondividi questo link per le iscrizioni esterne.`, () => {
+      navigator.clipboard?.writeText(link).then(()=>toast('Link copiato!','ok')).catch(()=>{});
+    }, '📋 Copia link');
+  } else {
+    toast('Evento creato!', 'ok');
+  }
 }
 async function createGadget() {
   const name  = document.getElementById('fg-name').value.trim();
@@ -1369,8 +1400,8 @@ function addGuestRow() {
       <div class="fg"><label>Cognome *</label><input type="text" class="g-cognome" placeholder="Rossi"></div>
     </div>
     <div class="form-row">
+      <div class="fg"><label>Telefono *</label><input type="tel" class="g-tel" placeholder="+39 333..."></div>
       <div class="fg"><label>Email</label><input type="email" class="g-email" placeholder="email@..."></div>
-      <div class="fg"><label>Telefono</label><input type="tel" class="g-tel" placeholder="+39 333..."></div>
     </div>
     ${idx>0?`<button class="btn-ico" style="margin-top:4px" onclick="this.closest('div.card').remove();updateEvTotal()">✕ Rimuovi</button>`:''}
   `;
@@ -1394,10 +1425,11 @@ async function submitGuests() {
   const rows = document.querySelectorAll('#ev-guests-list > div');
   const guests = [];
   for (const row of rows) {
-    const nome    = row.querySelector('.g-nome')?.value.trim();
-    const cognome = row.querySelector('.g-cognome')?.value.trim();
-    if (!nome || !cognome) return toast('Nome e cognome obbligatori per ogni persona');
-    guests.push({nome, cognome, email: row.querySelector('.g-email')?.value.trim()||null, telefono: row.querySelector('.g-tel')?.value.trim()||null});
+    const nome     = row.querySelector('.g-nome')?.value.trim();
+    const cognome  = row.querySelector('.g-cognome')?.value.trim();
+    const telefono = row.querySelector('.g-tel')?.value.trim();
+    if (!nome || !cognome || !telefono) return toast('Nome, cognome e telefono obbligatori per ogni persona');
+    guests.push({nome, cognome, email: row.querySelector('.g-email')?.value.trim()||null, telefono});
   }
   if (!guests.length) return toast('Aggiungi almeno una persona');
   const btn = document.getElementById('ev-reg-btn');
