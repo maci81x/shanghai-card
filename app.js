@@ -1533,13 +1533,14 @@ async function loadAGest() {
   gadSummary.forEach(g => { gadSumMap[g.id] = g; });
   gadList.innerHTML = gads.length
     ? gads.map(g => {
-        const sum = gadSumMap[g.id] || {prenotati: 0, prenotazioni: []};
+        const sum = gadSumMap[g.id] || {prenotati: 0, disponibili: g.stock, prenotazioni: []};
         const pren = sum.prenotati || 0;
+        const disp = sum.disponibili ?? g.stock;
         const gn = g.name.replace(/'/g,"\\'"); const gd = (g.description||'').replace(/'/g,"\\'");
         return `<div class="card" style="margin-bottom:8px;padding:12px">
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
             <span style="font-weight:700;flex:1">${_esc(g.name)}</span>
-            <span style="font-size:12px;color:var(--mut)">Stock: ${g.stock}</span>
+            <span style="font-size:12px;color:var(--mut)">Stock: ${g.stock}${pren>0?` · <span style="color:var(--grn);font-weight:600">Disp: ${disp}</span>`:''}</span>
             <span style="font-weight:700;color:var(--gold)">${eur(g.price)}</span>
           </div>
           ${g.description?`<div style="font-size:12px;color:var(--mut);margin-top:3px">${_esc(g.description)}</div>`:''}
