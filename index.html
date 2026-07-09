@@ -496,71 +496,86 @@ body.nav-sidebar .screen .hdr{padding-left:80px}
     <button class="btn-ico" onclick="logout()">Esci</button>
   </div>
   <div class="content">
-    <div class="card">
-      <div class="sec-lbl">Cerca tessera</div>
-      <div class="inp-row">
-        <input id="s-lookup" type="text" placeholder="SH-001" oninput="this.value=this.value.toUpperCase()" style="flex:1">
-        <button class="btn btn-p" onclick="staffLookup()">Cerca</button>
-        <button class="btn btn-g" onclick="toggleScanner()" id="s-scan-btn">📷</button>
+    <div class="tab-wrap">
+      <div class="tabs" id="stabs">
+        <button class="tab active" data-p="st-tessere" onclick="switchTab(this,'stabs')">🏷️ Tessere</button>
+        <button class="tab" data-p="st-eventi" onclick="switchTab(this,'stabs');loadStaffEvents()">🎫 Eventi</button>
       </div>
-      <div id="s-scanner-wrap" style="display:none;margin-top:12px">
-        <div id="s-scanner-reader" style="border-radius:8px;overflow:hidden"></div>
-        <button class="btn btn-q w100" style="margin-top:8px" onclick="stopScanner()">Chiudi fotocamera</button>
-      </div>
-    </div>
 
-    <div id="s-result" style="display:none">
-      <div class="card card-gold">
-        <div class="res-name" id="s-res-name"></div>
-        <div class="res-sub" id="s-res-card"></div>
-        <div class="res-bal" id="s-res-bal"></div>
-      </div>
-      <div class="card">
-        <div class="sec-lbl">Ricarica rapida</div>
-        <div class="quick-grid">
-          <button class="btn-amt" onclick="staffRecharge(5)">€5</button>
-          <button class="btn-amt" onclick="staffRecharge(10)">€10</button>
-          <button class="btn-amt" onclick="staffRecharge(20)">€20</button>
-          <button class="btn-amt" onclick="staffRecharge(50)">€50</button>
+      <!-- ── TAB: TESSERE ── -->
+      <div id="st-tessere" class="tab-panel active">
+        <div class="card">
+          <div class="sec-lbl">Cerca tessera</div>
+          <div class="inp-row">
+            <input id="s-lookup" type="text" placeholder="SH-001" oninput="this.value=this.value.toUpperCase()" style="flex:1">
+            <button class="btn btn-p" onclick="staffLookup()">Cerca</button>
+            <button class="btn btn-g" onclick="toggleScanner()" id="s-scan-btn">📷</button>
+          </div>
+          <div id="s-scanner-wrap" style="display:none;margin-top:12px">
+            <div id="s-scanner-reader" style="border-radius:8px;overflow:hidden"></div>
+            <button class="btn btn-q w100" style="margin-top:8px" onclick="stopScanner()">Chiudi fotocamera</button>
+          </div>
         </div>
-        <div class="inp-row" style="margin-top:12px">
-          <input id="s-custom" type="number" placeholder="Importo €" min="1" step="0.50" style="flex:1">
-          <button class="btn btn-p" onclick="staffRechargeCustom()">Ricarica</button>
+
+        <div id="s-result" style="display:none">
+          <div class="card card-gold">
+            <div class="res-name" id="s-res-name"></div>
+            <div class="res-sub" id="s-res-card"></div>
+            <div class="res-bal" id="s-res-bal"></div>
+          </div>
+          <div class="card">
+            <div class="sec-lbl">Ricarica rapida</div>
+            <div class="quick-grid">
+              <button class="btn-amt" onclick="staffRecharge(5)">€5</button>
+              <button class="btn-amt" onclick="staffRecharge(10)">€10</button>
+              <button class="btn-amt" onclick="staffRecharge(20)">€20</button>
+              <button class="btn-amt" onclick="staffRecharge(50)">€50</button>
+            </div>
+            <div class="inp-row" style="margin-top:12px">
+              <input id="s-custom" type="number" placeholder="Importo €" min="1" step="0.50" style="flex:1">
+              <button class="btn btn-p" onclick="staffRechargeCustom()">Ricarica</button>
+            </div>
+          </div>
+          <div class="card">
+            <div class="sec-lbl">Addebito</div>
+            <div class="fg">
+              <label>Importo €</label>
+              <input id="s-charge-amt" type="number" placeholder="0,00" min="0.01" step="0.01">
+            </div>
+            <div class="fg">
+              <label>Descrizione</label>
+              <input id="s-charge-desc" type="text" value="Consumazione" placeholder="es. Consumazione">
+            </div>
+            <button class="btn btn-neg w100" onclick="staffCharge()">Addebita</button>
+          </div>
+        </div>
+
+        <!-- EVENTI DA SALDARE del socio trovato -->
+        <div id="s-pending-wrap" style="display:none">
+          <div class="sec-title">Da saldare</div>
+          <div id="s-pending-list"></div>
+        </div>
+
+        <div id="s-checkin-wrap" style="display:none">
+          <div class="sec-title" style="margin-bottom:8px">✅ Check-in eventi</div>
+          <div id="s-checkin-list"></div>
+        </div>
+
+        <div id="s-tx-wrap" style="display:none">
+          <div class="sec-title" style="margin-bottom:8px">📋 Ultime transazioni</div>
+          <div id="s-tx-list" class="tx-list"></div>
+        </div>
+
+        <div id="s-hist-wrap" style="display:none">
+          <div class="sec-title">Operazioni sessione</div>
+          <div id="s-hist" class="tx-list"></div>
         </div>
       </div>
-      <div class="card">
-        <div class="sec-lbl">Addebito</div>
-        <div class="fg">
-          <label>Importo €</label>
-          <input id="s-charge-amt" type="number" placeholder="0,00" min="0.01" step="0.01">
-        </div>
-        <div class="fg">
-          <label>Descrizione</label>
-          <input id="s-charge-desc" type="text" value="Consumazione" placeholder="es. Consumazione">
-        </div>
-        <button class="btn btn-neg w100" onclick="staffCharge()">Addebita</button>
+
+      <!-- ── TAB: EVENTI ── -->
+      <div id="st-eventi" class="tab-panel">
+        <div id="sev-list"><div class="empty">Carico eventi…</div></div>
       </div>
-    </div>
-
-    <!-- EVENTI DA SALDARE del socio trovato -->
-    <div id="s-pending-wrap" style="display:none">
-      <div class="sec-title">Da saldare</div>
-      <div id="s-pending-list"></div>
-    </div>
-
-    <div id="s-checkin-wrap" style="display:none">
-      <div class="sec-title" style="margin-bottom:8px">✅ Check-in eventi</div>
-      <div id="s-checkin-list"></div>
-    </div>
-
-    <div id="s-tx-wrap" style="display:none">
-      <div class="sec-title" style="margin-bottom:8px">📋 Ultime transazioni</div>
-      <div id="s-tx-list" class="tx-list"></div>
-    </div>
-
-    <div id="s-hist-wrap" style="display:none">
-      <div class="sec-title">Operazioni sessione</div>
-      <div id="s-hist" class="tx-list"></div>
     </div>
   </div>
 </div>
@@ -1509,6 +1524,97 @@ function renderStaffHist() {
       <div class="tx-inf"><div class="tx-dsc">${o.name} (${o.card})${o.desc?' — '+o.desc:''}</div><div class="tx-dt">${fdt(o.ts)}</div></div>
       <div class="tx-amt ${o.amount>=0?'pos':'neg-c'}">${o.amount>=0?'+':''}${eur(o.amount)}</div>
     </div>`).join('');
+}
+
+// ── STAFF EVENTI ─────────────────────────────────────────────────────
+let _staffEventsCache = [];
+async function loadStaffEvents() {
+  const el = document.getElementById('sev-list');
+  el.innerHTML = '<div class="empty">⏳ Carico eventi…</div>';
+  const {data, error} = await db.rpc('admin_list_events');
+  if (error || !data) { el.innerHTML='<div class="empty">Errore caricamento</div>'; return; }
+  _staffEventsCache = data;
+  if (!data.length) { el.innerHTML='<div class="empty">Nessun evento</div>'; return; }
+  el.innerHTML = data.map(e => `
+    <div class="card" style="margin-bottom:10px;opacity:${e.visible===false?0.55:1}">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+        <span style="font-weight:700;flex:1">${_esc(e.title)}</span>
+        <span style="font-size:11px;padding:2px 8px;border-radius:12px;background:${e.visible===false?'rgba(239,68,68,.15)':'rgba(34,197,94,.15)'};color:${e.visible===false?'var(--neg)':'var(--grn)'}">
+          ${e.visible===false?'👁‍🗨 Nascosto':'👁 Visibile'}
+        </span>
+      </div>
+      <div style="font-size:12px;color:var(--mut);margin-bottom:8px">${e.event_date?fdt(e.event_date):'—'} · ${_esc(e.location||'—')} · ${e.price>0?eur(e.price):'Gratuito'}</div>
+      <div id="sev-dash-${e.id}" class="ev-mini-dash" style="margin-bottom:10px">
+        <span style="font-size:11px;color:var(--mut)">⏳ carico…</span>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn-sm" onclick="staffToggleVisibility('${e.id}',${e.visible!==false})">${e.visible===false?'🔓 Mostra':'🔒 Nascondi'}</button>
+        <button class="btn-sm" onclick="toggleStaffEventGuests('${e.id}','${e.title.replace(/'/g,"\\'")}',this)">👥 Iscritti</button>
+        <button class="btn-sm" onclick="exportEventCSV('${e.id}','${e.title.replace(/'/g,"\\'")}')">📥 CSV</button>
+      </div>
+      <div id="sev-guests-${e.id}" style="display:none;margin-top:10px"></div>
+    </div>`).join('');
+  await Promise.all(data.map(e => loadStaffEvDash(e.id)));
+}
+async function loadStaffEvDash(eventId) {
+  const el = document.getElementById('sev-dash-' + eventId);
+  if (!el) return;
+  const {data, error} = await db.rpc('admin_event_dashboard', {p_event_id: eventId});
+  if (error || !data || !data.ok) { el.innerHTML='<span style="font-size:11px;color:var(--mut)">—</span>'; return; }
+  el.innerHTML = `
+    <div class="ev-kpi"><span class="ev-kpi-n">${data.total_iscritti}</span><span class="ev-kpi-l">👥 Iscritti</span></div>
+    <div class="ev-kpi"><span class="ev-kpi-n" style="color:var(--grn)">${data.total_paganti}</span><span class="ev-kpi-l">💰 Paganti</span></div>
+    <div class="ev-kpi"><span class="ev-kpi-n" style="color:var(--gold)">${data.total_presenti}</span><span class="ev-kpi-l">✅ Presenti</span></div>`;
+}
+async function toggleStaffEventGuests(eventId, eventTitle, btn) {
+  const el = document.getElementById('sev-guests-' + eventId);
+  if (el.style.display !== 'none') { el.style.display='none'; btn.textContent='👥 Iscritti'; return; }
+  el.style.display = 'block'; btn.textContent = '⏳ Carico…';
+  const {data, error} = await db.rpc('admin_list_event_registrations', {p_event_id: eventId});
+  btn.textContent = '👥 Nascondi';
+  if (error) { el.innerHTML=`<div class="empty">${error.message}</div>`; return; }
+  const soci = data.soci || [], ospiti = data.ospiti || [];
+  const statusColor = s => s==='saldato_credito'||s==='saldato_sumup'||s==='saldato_contanti' ? 'var(--grn)' : s==='da_saldare' ? 'var(--gold)' : 'var(--mut)';
+  const statusLabel = s => ({da_saldare:'Da saldare',saldato_credito:'Credito',saldato_sumup:'SumUp',saldato_contanti:'Contanti',annullato:'Annullato',gratuito:'Gratuito'}[s]||s);
+  let html = `<div style="font-size:12px;color:var(--mut);margin-bottom:8px">${(data.total||0)} iscritti</div>`;
+  if (soci.length) {
+    html += `<div class="sec-lbl" style="margin-bottom:6px">Soci (${soci.length})</div>`;
+    html += `<div class="tbl-wrap"><table><thead><tr><th>Tessera</th><th>Nome</th><th>Importo</th><th>Stato</th><th>Presenza</th></tr></thead><tbody>`
+      + soci.map(r=>`<tr>
+          <td class="mono">${r.card_id}</td>
+          <td>${_esc(r.display_name||'')}</td>
+          <td>${eur(r.amount)}</td>
+          <td style="color:${statusColor(r.payment_status)}">${statusLabel(r.payment_status)}</td>
+          <td>${r.checked_in
+            ? `<span style="color:var(--grn);font-weight:700">✅</span>`
+            : `<button class="btn-sm" onclick="adminCheckinReg('${r.registration_id}',this)">Check-in</button>`}</td>
+        </tr>`).join('')
+      + `</tbody></table></div>`;
+  }
+  if (ospiti.length) {
+    html += `<div class="sec-lbl" style="margin:10px 0 6px">Ospiti (${ospiti.length})</div>`;
+    html += `<div class="tbl-wrap"><table><thead><tr><th>Nome</th><th>Cognome</th><th>Tel</th><th>Stato</th><th>Presenza</th></tr></thead><tbody>`
+      + ospiti.map(g=>`<tr>
+          <td>${_esc(g.nome)}</td><td>${_esc(g.cognome)}</td>
+          <td style="font-size:12px">${g.telefono||'—'}</td>
+          <td style="color:${statusColor(g.payment_status)}">${statusLabel(g.payment_status)}</td>
+          <td>${g.checked_in
+            ? `<span style="color:var(--grn);font-weight:700">✅</span>`
+            : `<button class="btn-sm" onclick="adminCheckinGuest('${g.id}',this)">Check-in</button>`}</td>
+        </tr>`).join('')
+      + `</tbody></table></div>`;
+  }
+  if (!soci.length && !ospiti.length) html += '<div class="empty">Nessun iscritto</div>';
+  el.innerHTML = html;
+}
+async function staffToggleVisibility(eventId, currentVisible) {
+  const label = currentVisible ? 'nascondere' : 'rendere visibile';
+  modalConfirm(`Vuoi ${label} questo evento nel catalogo?`, async () => {
+    const {data, error} = await db.rpc('admin_toggle_event_visibility', {p_admin_id: currentUser.id, p_event_id: eventId});
+    if (error||!data.ok) return toast((error&&error.message)||data.error);
+    toast(`Evento ${data.visible?'visibile':'nascosto'}`, 'ok');
+    loadStaffEvents();
+  });
 }
 
 // ── ADMIN CASSA ───────────────────────────────────────────────────────
