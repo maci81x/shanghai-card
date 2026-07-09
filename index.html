@@ -400,6 +400,7 @@ body.nav-sidebar .screen .hdr{padding-left:80px}
     <svg height="34" style="display:block"><use href="#drago"/></svg>
     <div style="flex:1"></div>
     <button class="btn-ico" onclick="toggleTheme()" id="theme-btn" title="Cambia tema">🌙</button>
+    <button class="btn-ico" onclick="openGuide('user')" title="Guida">❓</button>
     <button class="btn-ico" onclick="logout()">Esci</button>
   </div>
   <div class="content">
@@ -493,6 +494,7 @@ body.nav-sidebar .screen .hdr{padding-left:80px}
       <div class="hdr-sub" id="s-name"></div>
     </div>
     <button class="btn-ico" onclick="toggleTheme()" id="theme-btn" title="Cambia tema">🌙</button>
+    <button class="btn-ico" onclick="openGuide('staff')" title="Guida">❓</button>
     <button class="btn-ico" onclick="logout()">Esci</button>
   </div>
   <div class="content">
@@ -589,6 +591,7 @@ body.nav-sidebar .screen .hdr{padding-left:80px}
       <div class="hdr-sub" id="a-name"></div>
     </div>
     <button class="btn-ico" onclick="toggleTheme()" id="theme-btn" title="Cambia tema">🌙</button>
+    <button class="btn-ico" onclick="openGuide('admin')" title="Guida">❓</button>
     <button class="btn-ico" onclick="logout()">Esci</button>
   </div>
   <div class="content">
@@ -855,6 +858,14 @@ body.nav-sidebar .screen .hdr{padding-left:80px}
       <div id="ev-reg-msg" style="font-size:13px;color:var(--mut)"></div>
     </div>
     <div style="text-align:center;margin-top:14px;font-size:13px;color:var(--mut)">Sei socio del Rione? <a href="?" class="reg-link">Accedi</a> per iscriverti con la tua card</div>
+  </div>
+</div>
+
+<!-- MODALE GUIDA -->
+<div id="guide-bg" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:2000;overflow-y:auto;padding:20px 12px">
+  <div style="max-width:520px;margin:0 auto;background:var(--bgc);border-radius:var(--r);padding:24px 20px;position:relative">
+    <button onclick="closeGuide()" style="position:absolute;top:14px;right:14px;background:transparent;border:none;font-size:20px;cursor:pointer;color:var(--mut)">✕</button>
+    <div id="guide-content" style="line-height:1.65;font-size:14px;color:var(--txt)"></div>
   </div>
 </div>
 
@@ -2255,6 +2266,102 @@ async function exportCSVTx() {
   const today = new Date().toISOString().slice(0,10);
   downloadCSV(data.transactions, `shanghai_card_transazioni_${today}.csv`);
 }
+
+// ── GUIDA IN-APP ─────────────────────────────────────────────────────
+const _GUIDE = {
+  user: `<h3 style="color:var(--gold);margin:0 0 16px">🎴 LA TUA SHANGHAI CARD — Guida</h3>
+<p><strong>📱 HOME</strong><br>
+• Vedi il tuo saldo disponibile<br>
+• Mostra il QR code allo staff per ricariche e pagamenti</p>
+<p><strong>💳 RICARICA</strong><br>
+• Ricarica la tua card con SumUp (€5, €10, €20, €50)<br>
+• Dopo il pagamento SumUp, lo staff accrediterà il saldo sulla tua tessera</p>
+<p><strong>📋 MOVIMENTI</strong><br>
+• Consulta lo storico di tutte le tue transazioni<br>
+• Filtra per tipo (ricarica, spesa, evento) e periodo</p>
+<p><strong>🎪 EVENTI</strong><br>
+• Sfoglia gli eventi del Rione<br>
+• Clicca "Iscriviti" per prenotare il tuo posto<br>
+• Dopo l'iscrizione scegli come pagare:<br>
+&nbsp;&nbsp;- 💳 Credito: paga subito col saldo della card<br>
+&nbsp;&nbsp;- 📱 SumUp: paga online (lo staff confermerà)<br>
+&nbsp;&nbsp;- 🏠 In cassa: paghi di persona alla cassa<br>
+• Gli eventi gratuiti si prenotano con un click</p>
+<p><strong>🛍️ GADGET</strong><br>
+• Acquista gadget del Rione col credito della card<br>
+• Le promo attive vengono applicate automaticamente</p>
+<p><strong>👤 PROFILO</strong><br>
+• Vedi i tuoi dati, la tessera e il QR<br>
+• Cambia il PIN<br>
+• Scegli tema chiaro o scuro</p>`,
+
+  staff: `<h3 style="color:var(--gold);margin:0 0 16px">🏪 GUIDA CASSA — Staff</h3>
+<p><strong>📷 CERCA SOCIO</strong><br>
+• Scansiona il QR code del socio o digita il numero tessera<br>
+• Vedi: saldo, eventi da saldare, ultime transazioni</p>
+<p><strong>💰 RICARICA</strong><br>
+• Ricarica rapida: €5, €10, €20, €50<br>
+• Ricarica manuale: inserisci un importo personalizzato<br>
+• Il saldo si aggiorna immediatamente</p>
+<p><strong>💸 ADDEBITO</strong><br>
+• Addebita una consumazione o un servizio<br>
+• Se c'è una promo attiva, il sistema te lo mostra PRIMA della conferma<br>
+• Inserisci importo e descrizione, conferma nel popup</p>
+<p><strong>🎪 EVENTI — DA SALDARE</strong><br>
+• Dopo il lookup del socio, vedi i suoi eventi "da saldare"<br>
+• Per ogni evento scegli il metodo di pagamento:<br>
+&nbsp;&nbsp;- 💳 Credito: scala dal saldo del socio<br>
+&nbsp;&nbsp;- 📱 SumUp: conferma che ha pagato con SumUp<br>
+&nbsp;&nbsp;- 💵 Contanti: conferma pagamento in contanti<br>
+• Ogni operazione registra chi ha operato e come</p>
+<p><strong>📋 GESTIONE EVENTI</strong><br>
+• Vedi tutti gli eventi con il cruscotto: 👥 Iscritti / 💰 Paganti / ✅ Presenti<br>
+• Click su evento → lista iscritti con stato pagamento<br>
+• ✅ Check-in: segna la presenza di ogni iscritto<br>
+• 📥 CSV: esporta l'elenco iscritti per Excel<br>
+• 🔒/🔓: nascondi o mostra un evento</p>
+<p><strong>🏷️ PROMO</strong><br>
+• Vedi le promo attive — le promo si applicano automaticamente sugli addebiti</p>`,
+
+  admin: `<h3 style="color:var(--gold);margin:0 0 16px">⚙️ GUIDA AMMINISTRAZIONE</h3>
+<p><strong>📊 DASHBOARD</strong><br>
+• Panoramica: soci totali, saldo totale, transazioni del periodo<br>
+• Grafico ricariche vs spese con filtro periodo (7/14/30/60 giorni)</p>
+<p><strong>🏪 CASSA</strong><br>
+• Tutte le funzioni dello staff: cerca socio, ricarica, addebita, salda eventi<br>
+• Funziona da QR scan o ricerca tessera</p>
+<p><strong>👥 SOCI</strong><br>
+• Lista completa dei soci con saldo e ruolo<br>
+• 🔑 Reset PIN di un socio<br>
+• Crea nuovi soci manualmente</p>
+<p><strong>📋 TRANSAZIONI</strong><br>
+• Storico completo di tutte le transazioni<br>
+• 📥 Esporta in CSV per Excel</p>
+<p><strong>🎪 EVENTI</strong><br>
+• Crea nuovo evento: titolo, data, luogo, prezzo, posti, link SumUp, slug<br>
+• 🌐 "Apri iscrizioni esterne" per il link pubblico (?event=slug)<br>
+• Cruscotto per evento: 👥 Iscritti / 💰 Paganti / ✅ Presenti<br>
+• Lista iscritti con check-in e export CSV<br>
+• 🔒 Nascondi eventi passati dalla vista socio/staff</p>
+<p><strong>🛍️ GADGET</strong><br>
+• Crea e gestisci i gadget del Rione (nome, prezzo, descrizione)</p>
+<p><strong>🏷️ PROMO</strong><br>
+• Crea nuove promo (percentuale o importo fisso)<br>
+• ✏️ Modifica o 🗑️ Elimina promo esistenti<br>
+• Le promo attive si applicano automaticamente sugli addebiti e acquisti gadget</p>
+<p><strong>📥 EXPORT</strong><br>
+• Esporta tutti i dati (soci, transazioni, iscritti eventi) in CSV</p>`
+};
+function openGuide(role) {
+  document.getElementById('guide-content').innerHTML = _GUIDE[role] || '';
+  document.getElementById('guide-bg').style.display = 'block';
+  document.body.style.overflow = 'hidden';
+}
+function closeGuide() {
+  document.getElementById('guide-bg').style.display = 'none';
+  document.body.style.overflow = '';
+}
+document.addEventListener('keydown', e => { if(e.key==='Escape') closeGuide(); });
 
 async function createPromo() {
   const code  = document.getElementById('fp-code').value.trim().toUpperCase();
