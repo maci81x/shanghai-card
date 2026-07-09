@@ -186,9 +186,11 @@ function logout() {
 
 // ── MOVIMENTI FILTRI ─────────────────────────────────────────────────
 let _movTipo = 'all', _movDays = 0, _allTx = [];
-let _pendingEvents = [], _myEventIds = new Set(), _eventsCache = [], _promoCache = [];
+let _pendingEvents = [], _myEventIds = new Set(), _myEventRegs = {}, _eventsCache = [], _promoCache = [];
 let _staffTxAll = [], _staffTxTipo = 'all', _staffTxDays = 0;
 let _adminTxAll = [], _adminTxTipo = 'all', _adminTxDays = 0, _adminTxSearch = '';
+let _gqtyId, _gqtyName, _gqtyPrice, _gqtyN = 1;
+let _partyRegId = null, _partyN = 1, _partyMode = 'user', _partyEventId = '', _partyContext = '';
 function setMovFiltro(btn, group) {
   btn.closest('div').querySelectorAll('.fbtn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
@@ -281,9 +283,11 @@ async function refreshUser() {
   const {data, error} = await db.rpc('get_user_state', {p_user_id: currentUser.id});
   if (error || !data.ok) return toast((error&&error.message)||data.error);
   renderBal(data.balance);
-  _allTx       = data.transactions   || [];
+  _allTx         = data.transactions   || [];
   _pendingEvents = data.pending_events || [];
-  _myEventIds  = new Set(data.my_event_ids || []);
+  _myEventIds    = new Set(data.my_event_ids || []);
+  _myEventRegs   = {};
+  (data.my_event_regs || []).forEach(r => { _myEventRegs[r.event_id] = r; });
   renderTx(_allTx.slice(0, 5));
   renderPendingEvents(_pendingEvents);
   if (_eventsCache.length) renderEvents(_eventsCache);
@@ -353,10 +357,18 @@ function renderEvents(evs) {
         </div></div>`;
     }
     if (isRegistered) {
+      const reg = _myEventRegs[e.id] || {};
+      const pSz = reg.party_size || 1;
+      const pNt = reg.party_notes || '';
+      const regId = reg.registration_id || '';
+      const partyDisp = pSz > 1 ? `<div style="font-size:12px;color:var(--mut);margin-top:4px">👥 ${pSz} persone${pNt?' · '+_esc(pNt):''}</div>` : '';
       return `<div class="cat-card ev-card-paid">
-        <div class="ev-status ev-paid">✓ Iscritto e pagato</div>
+        <div class="ev-status ev-paid">✓ Iscritto${pSz>1?' · 👥 '+pSz:''}</div>
         <div class="cat-title">${t}</div>
-        <div class="cat-sub">${e.event_date?fdt(e.event_date):'—'}${e.location?' · '+_esc(e.location):''}</div></div>`;
+        <div class="cat-sub">${e.event_date?fdt(e.event_date):'—'}${e.location?' · '+_esc(e.location):''}</div>
+        ${partyDisp}
+        ${regId?`<button class="btn-sm" style="margin-top:8px" onclick="openPartyModal('${regId}',${pSz},'${pNt.replace(/'/g,"\\'")}')">👥 Modifica gruppo</button>`:''}
+      </div>`;
     }
     return `<div class="cat-card">
       <div class="cat-title">${t}</div>
@@ -388,13 +400,70 @@ function renderGadgets(gads) {
   loadUserGadgetReservations();
 }
 function openReserveGadget(id, name, price) {
-  modalConfirm(`Prenotare "${name}" (${eur(price)} cad.)?\n\nScegli quantità nella schermata successiva.\n\nIl pagamento avviene in cassa da Antonella.`, async () => {
-    const qty = 1;
-    const {data, error} = await db.rpc('user_reserve_gadget', {p_user_id: currentUser.id, p_gadget_id: id, p_quantity: qty});
-    if (error||!data.ok) return toast((error&&error.message)||data.error);
-    toast(`📌 Prenotazione inviata! Ritira e paga in cassa da Antonella.`, 'ok');
-    loadUserGadgetReservations();
-  });
+  _gqtyId = id; _gqtyName = name; _gqtyPrice = price; _gqtyN = 1;
+  document.getElementById('gqty-name').textContent = name;
+  document.getElementById('gqty-unit').textContent = eur(price) + ' cad.';
+  document.getElementById('gqty-n').textContent = 1;
+  document.getElementById('gqty-total').textContent = 'Totale: ' + eur(price);
+  document.getElementById('gqty-bg').style.display = 'flex';
+}
+function gqtyAdj(delta) {
+  _gqtyN = Math.min(10, Math.max(1, _gqtyN + delta));
+  document.getElementById('gqty-n').textContent = _gqtyN;
+  document.getElementById('gqty-total').textContent = 'Totale: ' + eur(_gqtyPrice * _gqtyN);
+}
+function closeGqty() { document.getElementById('gqty-bg').style.display = 'none'; }
+async function confirmGqty() {
+  closeGqty();
+  const {data, error} = await db.rpc('user_reserve_gadget', {p_user_id: currentUser.id, p_gadget_id: _gqtyId, p_quantity: _gqtyN});
+  if (error||!data.ok) return toast((error&&error.message)||data.error);
+  toast(`📌 Prenotazione inviata! Ritira e paga in cassa da Antonella.`, 'ok');
+  loadUserGadgetReservations();
+}
+function openPartyModal(regId, n, notes) {
+  _partyMode = 'user'; _partyRegId = regId; _partyN = n || 1;
+  document.getElementById('pm-reg-id').value = regId;
+  document.getElementById('pm-mode').value = 'user';
+  document.getElementById('pm-n').textContent = _partyN;
+  document.getElementById('pm-notes').value = notes || '';
+  document.getElementById('party-bg').style.display = 'flex';
+}
+function staffEditParty(regId, n, notes, eventId, context) {
+  _partyMode = 'staff'; _partyRegId = regId; _partyN = n || 1;
+  _partyEventId = eventId; _partyContext = context;
+  document.getElementById('pm-reg-id').value = regId;
+  document.getElementById('pm-mode').value = 'staff';
+  document.getElementById('pm-event-id').value = eventId;
+  document.getElementById('pm-ctx').value = context;
+  document.getElementById('pm-n').textContent = _partyN;
+  document.getElementById('pm-notes').value = notes || '';
+  document.getElementById('party-bg').style.display = 'flex';
+}
+function partyAdj(delta) {
+  _partyN = Math.min(20, Math.max(1, _partyN + delta));
+  document.getElementById('pm-n').textContent = _partyN;
+}
+function closePartyModal() { document.getElementById('party-bg').style.display = 'none'; }
+async function savePartyModal() {
+  const regId  = document.getElementById('pm-reg-id').value;
+  const mode   = document.getElementById('pm-mode').value;
+  const notes  = document.getElementById('pm-notes').value.trim() || null;
+  closePartyModal();
+  if (mode === 'staff') {
+    const evId  = document.getElementById('pm-event-id').value;
+    const ctx   = document.getElementById('pm-ctx').value;
+    const {data, error} = await db.rpc('staff_update_party', {p_operator_id: currentUser.id, p_registration_id: regId, p_party_size: _partyN, p_party_notes: notes});
+    if (error||!data||!data.ok) return toast((error&&error.message)||(data&&data.error)||'Errore');
+    toast('Gruppo aggiornato!', 'ok');
+    if (ctx === 'admin') await _reloadAdminEventGuests(evId);
+    else await _reloadStaffEventGuests(evId);
+  } else {
+    const {data, error} = await db.rpc('user_update_party', {p_user_id: currentUser.id, p_registration_id: regId, p_party_size: _partyN, p_party_notes: notes});
+    if (error||!data||!data.ok) return toast((error&&error.message)||(data&&data.error)||'Errore');
+    toast('Gruppo aggiornato!', 'ok');
+    await refreshUser();
+    await loadCatalog();
+  }
 }
 async function loadUserGadgetReservations() {
   const {data, error} = await db.rpc('user_list_gadget_reservations', {p_user_id: currentUser.id});
@@ -1649,12 +1718,15 @@ function _buildGuestHtml(data, eventId, context) {
     <button class="btn-sm" style="font-size:10px;padding:2px 6px" onclick="payGuestFromList('${gId}','contanti','${name}',${amt},'${eventId}','${context}')">💵</button>
     <button class="btn-sm" style="font-size:10px;padding:2px 6px" onclick="payGuestFromList('${gId}','sumup','${name}',${amt},'${eventId}','${context}')">📱</button>
   </div>`;
-  let html = `<div style="font-size:12px;color:var(--mut);margin-bottom:8px">${total} iscritti totali</div>`;
+  const totalPersons = soci.reduce((s,r) => s + (r.party_size||1), 0) + ospiti.length;
+  let html = `<div style="font-size:12px;color:var(--mut);margin-bottom:8px">${totalPersons} persone totali (${soci.length+ospiti.length} iscrizioni)</div>`;
   if (soci.length) {
     html += `<div class="sec-lbl" style="margin-bottom:6px">Soci (${soci.length})</div>`;
-    html += `<div class="tbl-wrap"><table><thead><tr><th>Tessera</th><th>Nome</th><th>€</th><th>Stato</th><th>Check-in</th></tr></thead><tbody>`
+    html += `<div class="tbl-wrap"><table><thead><tr><th>Tessera</th><th>Nome</th><th>€</th><th>Stato</th><th>Gruppo</th><th>Check-in</th></tr></thead><tbody>`
       + soci.map(r => {
           const dn = _esc(r.display_name||'').replace(/'/g,"\\'");
+          const rn = (r.party_notes||'').replace(/'/g,"\\'");
+          const pSz = r.party_size || 1;
           return `<tr>
             <td class="mono">${r.card_id}</td>
             <td>${_esc(r.display_name||'')}</td>
@@ -1662,6 +1734,11 @@ function _buildGuestHtml(data, eventId, context) {
             <td style="color:${statusColor(r.payment_status)}">
               ${statusLabel(r.payment_status)}
               ${r.payment_status==='da_saldare' ? payBtns(r.registration_id, dn, r.amount) : ''}
+            </td>
+            <td style="white-space:nowrap">
+              ${pSz>1?`<span style="color:var(--gold);font-weight:700">👥 ${pSz}</span>`:'—'}
+              ${r.party_notes?`<div style="font-size:10px;color:var(--mut)">${_esc(r.party_notes)}</div>`:''}
+              <button class="btn-sm" style="font-size:10px;padding:2px 5px;margin-top:2px" onclick="staffEditParty('${r.registration_id}',${pSz},'${rn}','${eventId}','${context}')">✏️</button>
             </td>
             <td>${r.checked_in
               ? `<span style="color:var(--grn);font-weight:700">✅</span>`
@@ -1740,6 +1817,8 @@ async function exportEventCSV(eventId, eventTitle) {
     email:            r.email||'',
     importo:          Number(r.amount||0).toFixed(2),
     stato_pagamento:  statusLabel(r.payment_status),
+    persone:          r.party_size || 1,
+    note_gruppo:      r.party_notes || '',
     presenza:         r.checked_in ? 'Sì' : 'No',
     operatore:        r.operatore||''
   }));
@@ -1791,10 +1870,14 @@ const _GUIDE = {
 &nbsp;&nbsp;- 💳 Credito: paga subito col saldo della card<br>
 &nbsp;&nbsp;- 📱 SumUp: paga online (lo staff confermerà)<br>
 &nbsp;&nbsp;- 🏠 In cassa: paghi di persona alla cassa<br>
-• Gli eventi gratuiti si prenotano con un click</p>
+• Gli eventi gratuiti si prenotano con un click<br>
+• Dopo l'iscrizione usa "👥 Modifica gruppo" per indicare quante persone vieni (max 20)</p>
 <p><strong>🛍️ GADGET</strong><br>
-• Acquista gadget del Rione col credito della card<br>
-• Le promo attive vengono applicate automaticamente</p>
+• Scegli il gadget e la quantità [−][N][+] direttamente nel modale di prenotazione<br>
+• Ritira e paga in cassa da Antonella</p>
+<p><strong>💳 SUMUP</strong><br>
+• Trovi i link SumUp per ricariche e servizi nella sezione Catalogo → SumUp<br>
+• Dopo il pagamento online, segnala allo staff per l'accredito</p>
 <p><strong>👤 PROFILO</strong><br>
 • Vedi i tuoi dati, la tessera e il QR<br>
 • Cambia il PIN<br>
@@ -1819,14 +1902,17 @@ const _GUIDE = {
 &nbsp;&nbsp;- 📱 SumUp: conferma che ha pagato con SumUp<br>
 &nbsp;&nbsp;- 💵 Contanti: conferma pagamento in contanti<br>
 • Ogni operazione registra chi ha operato e come</p>
-<p><strong>📋 GESTIONE EVENTI</strong><br>
-• Vedi tutti gli eventi con il cruscotto: 👥 Iscritti / 💰 Paganti / ✅ Presenti<br>
-• Click su evento → lista iscritti con stato pagamento<br>
-• ✅ Check-in: segna la presenza di ogni iscritto<br>
-• 📥 CSV: esporta l'elenco iscritti per Excel<br>
+<p><strong>📋 GESTIONE EVENTI (Catalogo)</strong><br>
+• Vedi tutti gli eventi con il cruscotto: 👥 Persone / 💰 Paganti / ✅ Presenti<br>
+• Il contatore 👥 somma le persone per gruppo (es. 1 iscrizione da 3 = 3 persone)<br>
+• Click su "👥 Iscritti" → lista con colonna Gruppo: vedi n. persone e note<br>
+• ✏️ nella colonna Gruppo: modifica party_size di un iscritto<br>
+• 💰 Salda direttamente dalla lista: 💳 credito, 💵 contanti, 📱 SumUp<br>
+• ✅ Check-in, 📥 CSV (include colonne Persone e Note gruppo)<br>
 • 🔒/🔓: nascondi o mostra un evento</p>
 <p><strong>🏷️ PROMO</strong><br>
-• Vedi le promo attive — le promo si applicano automaticamente sugli addebiti</p>`,
+• Vedi le promo attive — le promo si applicano automaticamente sugli addebiti<br>
+• Solo l'admin può creare/modificare/eliminare promo</p>`,
 
   admin: `<h3 style="color:var(--gold);margin:0 0 16px">⚙️ GUIDA AMMINISTRAZIONE</h3>
 <p><strong>📊 DASHBOARD</strong><br>
@@ -1840,20 +1926,26 @@ const _GUIDE = {
 • 🔑 Reset PIN di un socio<br>
 • Crea nuovi soci manualmente</p>
 <p><strong>📋 TRANSAZIONI</strong><br>
-• Storico completo di tutte le transazioni<br>
+• Storico completo con filtri tipo+periodo e ricerca per tessera/nome<br>
 • 📥 Esporta in CSV per Excel</p>
-<p><strong>🎪 EVENTI</strong><br>
+<p><strong>🎪 EVENTI (Gestione)</strong><br>
 • Crea nuovo evento: titolo, data, luogo, prezzo, posti, link SumUp, slug<br>
-• 🌐 "Apri iscrizioni esterne" per il link pubblico (?event=slug)<br>
-• Cruscotto per evento: 👥 Iscritti / 💰 Paganti / ✅ Presenti<br>
-• Lista iscritti con check-in e export CSV<br>
+• 🌐 "Apri iscrizioni esterne": genera link pubblico (?event=slug) con copia<br>
+• Il link appare anche in lista per condivisione rapida<br>
+• Cruscotto: 👥 Persone totali (SUM party_size) / 💰 Paganti / ✅ Presenti<br>
+• Lista iscritti: colonna Gruppo con n. persone e note, bottone ✏️ per modificare<br>
+• 💰 Salda dalla lista: 💳 credito, 💵 contanti, 📱 SumUp<br>
+• 📥 CSV: include colonne Persone e Note gruppo<br>
 • 🔒 Nascondi eventi passati dalla vista socio/staff</p>
 <p><strong>🛍️ GADGET</strong><br>
-• Crea e gestisci i gadget del Rione (nome, prezzo, descrizione)</p>
+• Crea e gestisci i gadget del Rione (nome, prezzo, stock, descrizione)</p>
 <p><strong>🏷️ PROMO</strong><br>
 • Crea nuove promo (percentuale o importo fisso)<br>
-• ✏️ Modifica o 🗑️ Elimina promo esistenti<br>
-• Le promo attive si applicano automaticamente sugli addebiti e acquisti gadget</p>
+• ✏️ Modifica o 🗑️ Elimina promo (solo admin)<br>
+• Le promo attive si applicano automaticamente</p>
+<p><strong>💳 SUMUP</strong><br>
+• Gestisci i link SumUp del Rione (etichetta, URL, importo opzionale)<br>
+• I link sono visibili ai soci nella sezione Catalogo → SumUp</p>
 <p><strong>📥 EXPORT</strong><br>
 • Esporta tutti i dati (soci, transazioni, iscritti eventi) in CSV</p>`
 };

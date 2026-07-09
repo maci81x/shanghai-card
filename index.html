@@ -687,6 +687,50 @@
   </div>
 </div>
 
+<!-- MODALE QUANTITÀ GADGET -->
+<div id="gqty-bg" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:1900;align-items:center;justify-content:center">
+  <div style="background:var(--card);border-radius:16px;padding:24px;max-width:320px;width:90%;margin:16px">
+    <div id="gqty-name" style="font-weight:700;font-size:15px;margin-bottom:4px"></div>
+    <div id="gqty-unit" style="font-size:12px;color:var(--mut);margin-bottom:20px"></div>
+    <div style="display:flex;align-items:center;justify-content:center;gap:16px;margin-bottom:12px">
+      <button class="btn" style="width:44px;height:44px;font-size:22px;padding:0;border-radius:50%" onclick="gqtyAdj(-1)">−</button>
+      <span id="gqty-n" style="font-size:32px;font-weight:700;min-width:40px;text-align:center">1</span>
+      <button class="btn btn-p" style="width:44px;height:44px;font-size:22px;padding:0;border-radius:50%" onclick="gqtyAdj(1)">+</button>
+    </div>
+    <div id="gqty-total" style="text-align:center;font-size:15px;color:var(--gold);font-weight:700;margin-bottom:8px"></div>
+    <div style="font-size:11px;color:var(--mut);margin-bottom:20px;text-align:center">Ritira e paga in cassa da Antonella</div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-q" style="flex:1" onclick="closeGqty()">Annulla</button>
+      <button class="btn btn-p" style="flex:1" onclick="confirmGqty()">📌 Prenota</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODALE PARTY SIZE -->
+<div id="party-bg" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:1900;align-items:center;justify-content:center">
+  <div style="background:var(--card);border-radius:16px;padding:24px;max-width:320px;width:90%;margin:16px">
+    <div style="font-weight:700;font-size:15px;margin-bottom:4px">👥 Quante persone?</div>
+    <div style="font-size:12px;color:var(--mut);margin-bottom:20px">Includi te stesso nel conteggio</div>
+    <div style="display:flex;align-items:center;justify-content:center;gap:16px;margin-bottom:12px">
+      <button class="btn" style="width:44px;height:44px;font-size:22px;padding:0;border-radius:50%" onclick="partyAdj(-1)">−</button>
+      <span id="pm-n" style="font-size:32px;font-weight:700;min-width:40px;text-align:center">1</span>
+      <button class="btn btn-p" style="width:44px;height:44px;font-size:22px;padding:0;border-radius:50%" onclick="partyAdj(1)">+</button>
+    </div>
+    <div class="fg" style="margin-bottom:20px">
+      <label style="font-size:12px;color:var(--mut)">Note (opzionale)</label>
+      <input id="pm-notes" type="text" placeholder="es: allergie, posti speciali…" style="width:100%;margin-top:6px">
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-q" style="flex:1" onclick="closePartyModal()">Annulla</button>
+      <button class="btn btn-p" style="flex:1" onclick="savePartyModal()">Salva</button>
+    </div>
+    <input type="hidden" id="pm-reg-id">
+    <input type="hidden" id="pm-mode" value="user">
+    <input type="hidden" id="pm-event-id" value="">
+    <input type="hidden" id="pm-ctx" value="">
+  </div>
+</div>
+
 <!-- MODALE GUIDA -->
 <div id="guide-bg" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:2000;overflow-y:auto;padding:20px 12px">
   <div style="max-width:520px;margin:0 auto;background:var(--bgc);border-radius:var(--r);padding:24px 20px;position:relative">
