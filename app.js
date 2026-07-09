@@ -765,6 +765,40 @@ async function staffToggleVisibility(eventId, currentVisible) {
   });
 }
 
+async function loadStaffPromos() {
+  const el = document.getElementById('st-promo-list');
+  el.innerHTML = '<div class="empty">⏳ Carico promo…</div>';
+  const {data, error} = await db.rpc('get_catalog');
+  if (error || !data) { el.innerHTML='<div class="empty">Errore caricamento</div>'; return; }
+  const prs = (data.promos||[]);
+  if (!prs.length) { el.innerHTML='<div class="empty">Nessuna promo attiva</div>'; return; }
+  el.innerHTML = prs.map(p => {
+    const sconto = p.discount_type==='percent' ? p.discount_value+'%' : eur(p.discount_value);
+    const fino   = p.valid_until ? fdt(p.valid_until).split(' ')[0] : '∞';
+    const untilVal = p.valid_until ? p.valid_until.slice(0,10) : '';
+    return `<div class="card" style="margin-bottom:8px;padding:12px">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span class="mono" style="font-weight:700;font-size:15px">${_esc(p.code)}</span>
+        <span style="font-size:12px;color:var(--mut);flex:1">${_esc(p.description||'')}</span>
+        <span style="font-size:13px;color:var(--gold);font-weight:700">${sconto}</span>
+        <span style="font-size:11px;color:var(--mut)">fino ${fino}</span>
+      </div>
+      <div style="display:flex;gap:6px;margin-top:8px">
+        <button class="btn-sm" onclick="openEditPromo('${p.id}','${_esc(p.code)}','${_esc(p.description||'')}','${p.discount_type}',${p.discount_value},'${untilVal}')">✏️ Modifica</button>
+        <button class="btn-sm" style="color:var(--neg)" onclick="deletePromoFromStaff('${p.id}','${_esc(p.code)}')">🗑️ Elimina</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+async function deletePromoFromStaff(id, code) {
+  modalConfirm(`Eliminare la promo [${code}]?`, async () => {
+    const {data, error} = await db.rpc('admin_delete_promo', {p_admin_id: currentUser.id, p_promo_id: id});
+    if (error||!data.ok) return toast((error&&error.message)||data.error);
+    toast('Promo eliminata', 'ok');
+    loadStaffPromos();
+  });
+}
+
 // ── ADMIN CASSA ───────────────────────────────────────────────────────
 let _acScanner = null;
 function toggleAcScanner() {
@@ -1349,8 +1383,8 @@ async function exportEventCSV(eventId, eventTitle) {
   const rows = raw.map(r => ({
     tipo:             r.tipo||'',
     tessera:          r.card_id||'',
-    nome:             r.nome||'',
-    cognome:          r.cognome||'',
+    nome:             r.nome || (r.tipo==='socio' ? (r.display_name||'').split(' ')[0] : '') || '',
+    cognome:          r.cognome || (r.tipo==='socio' ? (r.display_name||'').split(' ').slice(1).join(' ') : '') || '',
     telefono:         r.telefono||'',
     email:            r.email||'',
     importo:          Number(r.amount||0).toFixed(2),
@@ -1505,9 +1539,10 @@ function openEditPromo(id, code, desc, type, val, until) {
   document.getElementById('fpe-type').value = type;
   document.getElementById('fpe-val').value  = val;
   document.getElementById('fpe-until').value= until;
-  document.getElementById('fp-form').style.display  = 'none';
-  document.getElementById('fpe-form').style.display = 'block';
-  document.getElementById('fpe-form').scrollIntoView({behavior:'smooth', block:'nearest'});
+  document.getElementById('fpe-bg').style.display = 'block';
+}
+function closeEditPromo() {
+  document.getElementById('fpe-bg').style.display = 'none';
 }
 async function saveEditPromo() {
   const id    = document.getElementById('fpe-id').value;
@@ -1524,8 +1559,8 @@ async function saveEditPromo() {
   });
   if (error||!data.ok) return toast((error&&error.message)||data.error);
   toast('Promo aggiornata!', 'ok');
-  document.getElementById('fpe-form').style.display = 'none';
-  loadAGest();
+  closeEditPromo();
+  if (currentUser.role === 'admin') loadAGest(); else loadStaffPromos();
 }
 async function deletePromo(id, code) {
   modalConfirm(`Eliminare la promo [${code}]?`, async () => {

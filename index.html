@@ -227,6 +227,7 @@
       <div class="tabs" id="stabs">
         <button class="tab active" data-p="st-tessere" onclick="switchTab(this,'stabs')">🏷️ Tessere</button>
         <button class="tab" data-p="st-eventi" onclick="switchTab(this,'stabs');loadStaffEvents()">🎫 Eventi</button>
+        <button class="tab" data-p="st-promo" onclick="switchTab(this,'stabs');loadStaffPromos()">🏷️ Promo</button>
       </div>
 
       <!-- ── TAB: TESSERE ── -->
@@ -302,6 +303,14 @@
       <!-- ── TAB: EVENTI ── -->
       <div id="st-eventi" class="tab-panel">
         <div id="sev-list"><div class="empty">Carico eventi…</div></div>
+      </div>
+
+      <!-- ── TAB: PROMO ── -->
+      <div id="st-promo" class="tab-panel">
+        <div class="card">
+          <div class="sec-lbl">Promo attive</div>
+          <div id="st-promo-list"><div class="empty">Carico promo…</div></div>
+        </div>
       </div>
     </div>
   </div>
@@ -514,23 +523,6 @@
               </div>
               <button class="btn btn-p w100" onclick="createPromo()">Crea Promo</button>
             </div>
-            <div id="fpe-form" class="card" style="display:none;margin-bottom:10px;border:1px solid var(--gold)">
-              <div class="sec-lbl" style="margin-bottom:10px">✏️ Modifica Promo</div>
-              <input type="hidden" id="fpe-id">
-              <div class="form-row">
-                <div class="fg"><label>Codice</label><input id="fpe-code" type="text" oninput="this.value=this.value.toUpperCase()"></div>
-                <div class="fg"><label>Descrizione</label><input id="fpe-desc" type="text"></div>
-              </div>
-              <div class="form-row">
-                <div class="fg"><label>Tipo</label><select id="fpe-type"><option value="fixed">Fisso (€)</option><option value="percent">Percentuale (%)</option></select></div>
-                <div class="fg"><label>Valore</label><input id="fpe-val" type="number" min="0.01" step="0.01"></div>
-              </div>
-              <div class="fg"><label>Valida fino</label><input id="fpe-until" type="date"></div>
-              <div style="display:flex;gap:8px;margin-top:4px">
-                <button class="btn btn-q" style="flex:1" onclick="document.getElementById('fpe-form').style.display='none'">Annulla</button>
-                <button class="btn btn-p" style="flex:2" onclick="saveEditPromo()">Salva modifiche</button>
-              </div>
-            </div>
             <div id="gs-pro-list"></div>
           </div>
         </div>
@@ -583,6 +575,28 @@
       <div id="ev-reg-msg" style="font-size:13px;color:var(--mut)"></div>
     </div>
     <div style="text-align:center;margin-top:14px;font-size:13px;color:var(--mut)">Sei socio del Rione? <a href="?" class="reg-link">Accedi</a> per iscriverti con la tua card</div>
+  </div>
+</div>
+
+<!-- MODALE MODIFICA PROMO -->
+<div id="fpe-bg" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:2000;overflow-y:auto;padding:20px 12px">
+  <div style="max-width:480px;margin:0 auto;background:var(--bgc);border-radius:var(--r);padding:24px 20px;position:relative;border:1px solid var(--gold)">
+    <button onclick="closeEditPromo()" style="position:absolute;top:14px;right:14px;background:transparent;border:none;font-size:20px;cursor:pointer;color:var(--mut)">✕</button>
+    <div class="sec-lbl" style="margin-bottom:14px">✏️ Modifica Promo</div>
+    <input type="hidden" id="fpe-id">
+    <div class="form-row">
+      <div class="fg"><label>Codice</label><input id="fpe-code" type="text" oninput="this.value=this.value.toUpperCase()"></div>
+      <div class="fg"><label>Descrizione</label><input id="fpe-desc" type="text"></div>
+    </div>
+    <div class="form-row">
+      <div class="fg"><label>Tipo</label><select id="fpe-type"><option value="fixed">Fisso (€)</option><option value="percent">Percentuale (%)</option></select></div>
+      <div class="fg"><label>Valore</label><input id="fpe-val" type="number" min="0.01" step="0.01"></div>
+    </div>
+    <div class="fg"><label>Valida fino</label><input id="fpe-until" type="date"></div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn btn-q" style="flex:1" onclick="closeEditPromo()">Annulla</button>
+      <button class="btn btn-p" style="flex:2" onclick="saveEditPromo()">Salva modifiche</button>
+    </div>
   </div>
 </div>
 
