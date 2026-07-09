@@ -228,6 +228,7 @@
       <div class="tabs" id="stabs">
         <button class="tab active" data-p="st-tessere" onclick="switchTab(this,'stabs')">🏷️ Tessere</button>
         <button class="tab" data-p="st-eventi" onclick="switchTab(this,'stabs');loadStaffEvents()">📅 Catalogo</button>
+        <button class="tab" data-p="st-gad" onclick="switchTab(this,'stabs');loadStaffGadgets()">🛍️ Gadget</button>
         <button class="tab" data-p="st-promo" onclick="switchTab(this,'stabs');loadStaffPromos()">🏷️ Promo</button>
       </div>
 
@@ -334,6 +335,11 @@
       <!-- ── TAB: EVENTI ── -->
       <div id="st-eventi" class="tab-panel">
         <div id="sev-list"><div class="empty">Carico eventi…</div></div>
+      </div>
+
+      <!-- ── TAB: GADGET (STAFF) ── -->
+      <div id="st-gad" class="tab-panel">
+        <div id="st-gad-list"><div class="empty">Carico gadget…</div></div>
       </div>
 
       <!-- ── TAB: PROMO ── -->
@@ -684,6 +690,22 @@
     <div style="display:flex;gap:8px;margin-top:12px">
       <button class="btn btn-q" style="flex:1" onclick="closeEditPromo()">Annulla</button>
       <button class="btn btn-p" style="flex:2" onclick="saveEditPromo()">Salva modifiche</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODALE EDIT GADGET -->
+<div id="gad-edit-bg" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:1900;align-items:center;justify-content:center">
+  <div style="background:var(--card);border-radius:16px;padding:24px;max-width:340px;width:90%;margin:16px">
+    <div class="sec-lbl" style="margin-bottom:12px">✏️ Modifica Gadget</div>
+    <input type="hidden" id="gae-id">
+    <div class="fg"><label>Nome</label><input id="gae-name" type="text" placeholder="Nome gadget"></div>
+    <div class="fg"><label>Prezzo €</label><input id="gae-price" type="number" min="0.01" step="0.50"></div>
+    <div class="fg"><label>Descrizione</label><input id="gae-desc" type="text" placeholder="Descrizione (opz.)"></div>
+    <div class="fg"><label>Stock</label><input id="gae-stock" type="number" min="0"></div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn btn-q" style="flex:1" onclick="closeEditGadget()">Annulla</button>
+      <button class="btn btn-p" style="flex:2" onclick="saveEditGadget()">Salva</button>
     </div>
   </div>
 </div>

@@ -1313,9 +1313,10 @@ function _renderAdminTx() {
     + '</tbody></table></div>';
 }
 async function loadAGest() {
-  const [{data: evData}, {data: catData}] = await Promise.all([
+  const [{data: evData}, {data: catData}, {data: gadSum}] = await Promise.all([
     db.rpc('admin_list_events'),
-    db.rpc('get_catalog')
+    db.rpc('get_catalog'),
+    db.rpc('staff_gadget_reservation_summary')
   ]);
   // Pre-load SumUp links if tab is active
   const sumupPanel = document.getElementById('gs-sumup');
@@ -1353,11 +1354,37 @@ async function loadAGest() {
   }
   const cat = catData||{};
   const gads = cat.gadgets||[];
+  const gadSummary = (gadSum && gadSum.gadgets) ? gadSum.gadgets : [];
+  const gadSumMap = {};
+  gadSummary.forEach(g => { gadSumMap[g.id] = g; });
   gadList.innerHTML = gads.length
-    ? `<div class="tbl-wrap"><table><thead><tr><th>Nome</th><th>Prezzo</th><th>Stock</th></tr></thead><tbody>`
-        + gads.map(g=>`<tr><td>${g.name}</td><td>${eur(g.price)}</td><td>${g.stock}</td></tr>`).join('')
-        + '</tbody></table></div>'
+    ? gads.map(g => {
+        const sum = gadSumMap[g.id] || {prenotati: 0, prenotazioni: []};
+        const pren = sum.prenotati || 0;
+        const gn = g.name.replace(/'/g,"\\'"); const gd = (g.description||'').replace(/'/g,"\\'");
+        return `<div class="card" style="margin-bottom:8px;padding:12px">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <span style="font-weight:700;flex:1">${_esc(g.name)}</span>
+            <span style="font-size:12px;color:var(--mut)">Stock: ${g.stock}</span>
+            <span style="font-weight:700;color:var(--gold)">${eur(g.price)}</span>
+          </div>
+          ${g.description?`<div style="font-size:12px;color:var(--mut);margin-top:3px">${_esc(g.description)}</div>`:''}
+          <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;align-items:center">
+            ${pren>0
+              ? `<button class="btn-sm" style="background:rgba(255,214,10,.15);color:var(--gold)" onclick="toggleGadgetPren('${g.id}',this)">📌 ${pren} prenotat${pren===1?'o':'i'}</button>`
+              : `<span style="font-size:11px;color:var(--mut)">📌 0 prenotati</span>`}
+            <button class="btn-sm" onclick="openEditGadget('${g.id}','${gn}',${g.price},'${gd}',${g.stock})">✏️ Modifica</button>
+            <button class="btn-sm" style="color:var(--neg)" onclick="adminDeleteGadget('${g.id}','${gn}')">🗑️ Elimina</button>
+          </div>
+          <div id="gpren-${g.id}" style="display:none;margin-top:8px"></div>
+        </div>`;
+      }).join('')
     : '<div class="empty">Nessun gadget</div>';
+  gadSummary.forEach(g => {
+    const el = document.getElementById('gpren-' + g.id);
+    if (!el) return;
+    el.dataset.pren = JSON.stringify(g.prenotazioni || []);
+  });
   const prs = cat.promos||[];
   proList.innerHTML = prs.length
     ? prs.map(p => {
@@ -1508,6 +1535,96 @@ async function createGadget() {
   document.getElementById('fg-form').style.display='none';
   loadAGest();
 }
+// ── GADGET ADMIN ─────────────────────────────────────────────────────
+function toggleGadgetPren(gadgetId, btn) {
+  const el = document.getElementById('gpren-' + gadgetId);
+  if (!el) return;
+  if (el.style.display !== 'none') { el.style.display = 'none'; return; }
+  const list = JSON.parse(el.dataset.pren || '[]');
+  if (!list.length) { el.innerHTML = '<div class="empty" style="font-size:12px">Nessuna prenotazione attiva</div>'; }
+  else {
+    el.innerHTML = `<div class="tbl-wrap"><table style="font-size:12px"><thead><tr><th>Tessera</th><th>Nome</th><th>Qtà</th><th>Data</th></tr></thead><tbody>`
+      + list.map(r=>`<tr>
+          <td class="mono">${_esc(r.card_id)}</td>
+          <td>${_esc(r.display_name)}</td>
+          <td style="text-align:center">${r.quantity}</td>
+          <td>${fdt(r.created_at).split(' ')[0]}</td>
+        </tr>`).join('')
+      + '</tbody></table></div>';
+  }
+  el.style.display = 'block';
+}
+function openEditGadget(id, name, price, desc, stock) {
+  document.getElementById('gae-id').value    = id;
+  document.getElementById('gae-name').value  = name;
+  document.getElementById('gae-price').value = price;
+  document.getElementById('gae-desc').value  = desc;
+  document.getElementById('gae-stock').value = stock;
+  document.getElementById('gad-edit-bg').style.display = 'flex';
+}
+function closeEditGadget() { document.getElementById('gad-edit-bg').style.display = 'none'; }
+async function saveEditGadget() {
+  const id    = document.getElementById('gae-id').value;
+  const name  = document.getElementById('gae-name').value.trim();
+  const price = parseFloat(document.getElementById('gae-price').value);
+  const desc  = document.getElementById('gae-desc').value.trim();
+  const stock = parseInt(document.getElementById('gae-stock').value)||0;
+  if (!name || !price) return toast('Nome e prezzo obbligatori');
+  const {data, error} = await db.rpc('admin_update_gadget', {p_admin_id: currentUser.id, p_gadget_id: id, p_name: name, p_price: price, p_description: desc||null, p_stock: stock});
+  if (error||!data||!data.ok) return toast((error&&error.message)||(data&&data.error)||'Errore');
+  toast('Gadget aggiornato!', 'ok');
+  closeEditGadget();
+  loadAGest();
+}
+async function adminDeleteGadget(id, name) {
+  modalConfirm(`Eliminare il gadget "${name}"?\n\nLe prenotazioni attive non vengono cancellate.`, async () => {
+    const {data, error} = await db.rpc('admin_delete_gadget', {p_admin_id: currentUser.id, p_gadget_id: id});
+    if (error||!data||!data.ok) return toast((error&&error.message)||(data&&data.error)||'Errore');
+    toast('Gadget eliminato', 'ok');
+    loadAGest();
+  });
+}
+async function loadStaffGadgets() {
+  const el = document.getElementById('st-gad-list');
+  if (!el) return;
+  el.innerHTML = '<div class="empty">⏳ Carico…</div>';
+  const {data, error} = await db.rpc('staff_gadget_reservation_summary');
+  if (error || !data || !data.ok) { el.innerHTML='<div class="empty">Errore caricamento</div>'; return; }
+  const gads = data.gadgets || [];
+  if (!gads.length) { el.innerHTML='<div class="empty">Nessun gadget</div>'; return; }
+  el.innerHTML = gads.map(g => {
+    const pren = g.prenotati || 0;
+    return `<div class="card" style="margin-bottom:8px;padding:12px">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span style="font-weight:700;flex:1">${_esc(g.name)}</span>
+        <span style="font-size:12px;color:var(--mut)">Stock: ${g.stock}</span>
+        <span style="font-weight:700;color:var(--gold)">${eur(g.price)}</span>
+      </div>
+      ${g.description?`<div style="font-size:12px;color:var(--mut);margin-top:3px">${_esc(g.description)}</div>`:''}
+      <div style="margin-top:8px">
+        ${pren>0
+          ? `<button class="btn-sm" style="background:rgba(255,214,10,.15);color:var(--gold)" onclick="toggleStaffGadgetPren('${g.id}',this,'${JSON.stringify(g.prenotazioni||[]).replace(/'/g,"\\'").replace(/"/g,'&quot;')}')">📌 ${pren} prenotat${pren===1?'o':'i'} — vedi chi</button>`
+          : `<span style="font-size:11px;color:var(--mut)">📌 0 prenotati</span>`}
+      </div>
+      <div id="sgpren-${g.id}" style="display:none;margin-top:8px"></div>
+    </div>`;
+  }).join('');
+}
+function toggleStaffGadgetPren(gadgetId, btn, prenJson) {
+  const el = document.getElementById('sgpren-' + gadgetId);
+  if (!el) return;
+  if (el.style.display !== 'none') { el.style.display = 'none'; return; }
+  try {
+    const list = JSON.parse(prenJson.replace(/&quot;/g, '"'));
+    el.innerHTML = !list.length
+      ? '<div class="empty" style="font-size:12px">Nessuna</div>'
+      : `<div class="tbl-wrap"><table style="font-size:12px"><thead><tr><th>Tessera</th><th>Nome</th><th>Qtà</th><th>Data</th></tr></thead><tbody>`
+        + list.map(r=>`<tr><td class="mono">${_esc(r.card_id)}</td><td>${_esc(r.display_name)}</td><td style="text-align:center">${r.quantity}</td><td>${fdt(r.created_at).split(' ')[0]}</td></tr>`).join('')
+        + '</tbody></table></div>';
+  } catch(e) { el.innerHTML = '—'; }
+  el.style.display = 'block';
+}
+
 // ── LANDING EVENTO PUBBLICO ───────────────────────────────────────────
 let _publicEvent = null;
 async function loadPublicEvent(slug) {
