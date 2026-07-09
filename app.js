@@ -190,7 +190,7 @@ let _pendingEvents = [], _myEventIds = new Set(), _myEventRegs = {}, _eventsCach
 let _staffTxAll = [], _staffTxTipo = 'all', _staffTxDays = 0;
 let _adminTxAll = [], _adminTxTipo = 'all', _adminTxDays = 0, _adminTxSearch = '';
 let _gqtyId, _gqtyName, _gqtyPrice, _gqtyN = 1;
-let _partyRegId = null, _partyN = 1, _partyMode = 'user', _partyEventId = '', _partyContext = '';
+let _compRegId = null, _compMode = 'user', _compEventId = '', _compCtx = '', _compCache = [];
 function setMovFiltro(btn, group) {
   btn.closest('div').querySelectorAll('.fbtn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
@@ -359,15 +359,17 @@ function renderEvents(evs) {
     if (isRegistered) {
       const reg = _myEventRegs[e.id] || {};
       const pSz = reg.party_size || 1;
-      const pNt = reg.party_notes || '';
       const regId = reg.registration_id || '';
-      const partyDisp = pSz > 1 ? `<div style="font-size:12px;color:var(--mut);margin-top:4px">👥 ${pSz} persone${pNt?' · '+_esc(pNt):''}</div>` : '';
+      const companions = reg.companions || [];
+      const compDisp = companions.length
+        ? `<div style="font-size:12px;color:var(--mut);margin-top:4px">👥 ${companions.map(c=>_esc(c.nome)+' '+_esc(c.cognome)).join(', ')}</div>`
+        : '';
       return `<div class="cat-card ev-card-paid">
-        <div class="ev-status ev-paid">✓ Iscritto${pSz>1?' · 👥 '+pSz:''}</div>
+        <div class="ev-status ev-paid">✓ Iscritto${pSz>1?' · 👥 '+pSz+' persone':''}</div>
         <div class="cat-title">${t}</div>
         <div class="cat-sub">${e.event_date?fdt(e.event_date):'—'}${e.location?' · '+_esc(e.location):''}</div>
-        ${partyDisp}
-        ${regId?`<button class="btn-sm" style="margin-top:8px" onclick="openPartyModal('${regId}',${pSz},'${pNt.replace(/'/g,"\\'")}')">👥 Modifica gruppo</button>`:''}
+        ${compDisp}
+        ${regId?`<button class="btn-sm" style="margin-top:8px" onclick="openCompanionsModal('${regId}')">👥 Gestisci gruppo</button>`:''}
       </div>`;
     }
     return `<div class="cat-card">
@@ -420,50 +422,111 @@ async function confirmGqty() {
   toast(`📌 Prenotazione inviata! Ritira e paga in cassa da Antonella.`, 'ok');
   loadUserGadgetReservations();
 }
-function openPartyModal(regId, n, notes) {
-  _partyMode = 'user'; _partyRegId = regId; _partyN = n || 1;
-  document.getElementById('pm-reg-id').value = regId;
-  document.getElementById('pm-mode').value = 'user';
-  document.getElementById('pm-n').textContent = _partyN;
-  document.getElementById('pm-notes').value = notes || '';
-  document.getElementById('party-bg').style.display = 'flex';
-}
-function staffEditParty(regId, n, notes, eventId, context) {
-  _partyMode = 'staff'; _partyRegId = regId; _partyN = n || 1;
-  _partyEventId = eventId; _partyContext = context;
-  document.getElementById('pm-reg-id').value = regId;
-  document.getElementById('pm-mode').value = 'staff';
-  document.getElementById('pm-event-id').value = eventId;
-  document.getElementById('pm-ctx').value = context;
-  document.getElementById('pm-n').textContent = _partyN;
-  document.getElementById('pm-notes').value = notes || '';
-  document.getElementById('party-bg').style.display = 'flex';
-}
-function partyAdj(delta) {
-  _partyN = Math.min(20, Math.max(1, _partyN + delta));
-  document.getElementById('pm-n').textContent = _partyN;
-}
-function closePartyModal() { document.getElementById('party-bg').style.display = 'none'; }
-async function savePartyModal() {
-  const regId  = document.getElementById('pm-reg-id').value;
-  const mode   = document.getElementById('pm-mode').value;
-  const notes  = document.getElementById('pm-notes').value.trim() || null;
-  closePartyModal();
-  if (mode === 'staff') {
-    const evId  = document.getElementById('pm-event-id').value;
-    const ctx   = document.getElementById('pm-ctx').value;
-    const {data, error} = await db.rpc('staff_update_party', {p_operator_id: currentUser.id, p_registration_id: regId, p_party_size: _partyN, p_party_notes: notes});
-    if (error||!data||!data.ok) return toast((error&&error.message)||(data&&data.error)||'Errore');
-    toast('Gruppo aggiornato!', 'ok');
-    if (ctx === 'admin') await _reloadAdminEventGuests(evId);
-    else await _reloadStaffEventGuests(evId);
-  } else {
-    const {data, error} = await db.rpc('user_update_party', {p_user_id: currentUser.id, p_registration_id: regId, p_party_size: _partyN, p_party_notes: notes});
-    if (error||!data||!data.ok) return toast((error&&error.message)||(data&&data.error)||'Errore');
-    toast('Gruppo aggiornato!', 'ok');
-    await refreshUser();
-    await loadCatalog();
+// ── ACCOMPAGNATORI ───────────────────────────────────────────────────
+function _renderCompList(companions, mode) {
+  const el = document.getElementById('comp-list');
+  if (!companions.length) {
+    el.innerHTML = '<div style="color:var(--mut);font-size:13px;padding:8px 0">Nessun accompagnatore aggiunto</div>';
+    return;
   }
+  el.innerHTML = companions.map(c => `
+    <div style="display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid var(--brd)">
+      <div style="flex:1;font-size:14px">${_esc(c.nome)} ${_esc(c.cognome)}</div>
+      ${c.checked_in ? '<span style="color:var(--grn);font-size:13px">✅</span>' : ''}
+      ${mode !== 'view' ? `<button class="btn-sm" style="color:var(--neg);font-size:11px;padding:2px 6px" onclick="removeCompanion('${c.id}')">Rimuovi</button>` : ''}
+    </div>`).join('');
+}
+function openCompanionsModal(regId) {
+  _compMode = 'user'; _compRegId = regId;
+  const reg = Object.values(_myEventRegs).find(r => r.registration_id === regId) || {};
+  _compCache = (reg.companions || []).map(c => ({...c}));
+  document.getElementById('comp-reg-id').value = regId;
+  document.getElementById('comp-mode').value = 'user';
+  document.getElementById('comp-event-id').value = '';
+  document.getElementById('comp-ctx').value = '';
+  document.getElementById('comp-subtitle').textContent = 'Persone che vengono con te';
+  document.getElementById('comp-add-section').style.display = '';
+  document.getElementById('comp-nome').value = '';
+  document.getElementById('comp-cognome').value = '';
+  _renderCompList(_compCache, 'user');
+  document.getElementById('comp-bg').style.display = 'flex';
+}
+function staffManageCompanions(regId, eventId, context) {
+  _compMode = 'staff'; _compRegId = regId; _compEventId = eventId; _compCtx = context;
+  _compCache = ((window._guestCompMap || {})[regId] || []).map(c => ({...c}));
+  document.getElementById('comp-reg-id').value = regId;
+  document.getElementById('comp-mode').value = 'staff';
+  document.getElementById('comp-event-id').value = eventId;
+  document.getElementById('comp-ctx').value = context;
+  document.getElementById('comp-subtitle').textContent = 'Gestisci accompagnatori del socio';
+  document.getElementById('comp-add-section').style.display = '';
+  document.getElementById('comp-nome').value = '';
+  document.getElementById('comp-cognome').value = '';
+  _renderCompList(_compCache, 'staff');
+  document.getElementById('comp-bg').style.display = 'flex';
+}
+function closeCompanionsModal() { document.getElementById('comp-bg').style.display = 'none'; }
+async function addCompanion() {
+  const nome    = document.getElementById('comp-nome').value.trim();
+  const cognome = document.getElementById('comp-cognome').value.trim();
+  if (!nome || !cognome) return toast('Inserisci nome e cognome');
+  const mode  = _compMode;
+  const regId = _compRegId;
+  if (mode === 'staff') {
+    const {data, error} = await db.rpc('staff_add_companions', {p_operator_id: currentUser.id, p_registration_id: regId, p_companions: [{nome, cognome}]});
+    if (error||!data||!data.ok) return toast((error&&error.message)||(data&&data.error)||'Errore');
+    _compCache = Array.isArray(data.companions) ? data.companions : [];
+    _renderCompList(_compCache, 'staff');
+    document.getElementById('comp-nome').value = '';
+    document.getElementById('comp-cognome').value = '';
+    toast('Accompagnatore aggiunto!', 'ok');
+    if (_compEventId) {
+      if (_compCtx === 'admin') await _reloadAdminEventGuests(_compEventId);
+      else await _reloadStaffEventGuests(_compEventId);
+    }
+  } else {
+    const {data, error} = await db.rpc('user_add_companions', {p_user_id: currentUser.id, p_registration_id: regId, p_companions: [{nome, cognome}]});
+    if (error||!data||!data.ok) return toast((error&&error.message)||(data&&data.error)||'Errore');
+    _compCache = Array.isArray(data.companions) ? data.companions : [];
+    _renderCompList(_compCache, 'user');
+    document.getElementById('comp-nome').value = '';
+    document.getElementById('comp-cognome').value = '';
+    toast('Accompagnatore aggiunto!', 'ok');
+    await refreshUser();
+    if (_eventsCache.length) renderEvents(_eventsCache);
+  }
+}
+async function removeCompanion(compId) {
+  const mode  = _compMode;
+  const regId = _compRegId;
+  if (mode === 'staff') {
+    const {data, error} = await db.rpc('staff_remove_companion', {p_operator_id: currentUser.id, p_companion_id: compId});
+    if (error||!data||!data.ok) return toast((error&&error.message)||(data&&data.error)||'Errore');
+    _compCache = Array.isArray(data.companions) ? data.companions : [];
+    _renderCompList(_compCache, 'staff');
+    toast('Rimosso', 'ok');
+    if (_compEventId) {
+      if (_compCtx === 'admin') await _reloadAdminEventGuests(_compEventId);
+      else await _reloadStaffEventGuests(_compEventId);
+    }
+  } else {
+    const {data, error} = await db.rpc('user_remove_companion', {p_user_id: currentUser.id, p_companion_id: compId});
+    if (error||!data||!data.ok) return toast((error&&error.message)||(data&&data.error)||'Errore');
+    _compCache = Array.isArray(data.companions) ? data.companions : [];
+    _renderCompList(_compCache, 'user');
+    toast('Rimosso', 'ok');
+    await refreshUser();
+    if (_eventsCache.length) renderEvents(_eventsCache);
+  }
+}
+async function checkinCompanion(compId, eventId, context, btn) {
+  const {data, error} = await db.rpc('staff_checkin_companion', {p_operator_id: currentUser.id, p_companion_id: compId});
+  if (error||!data||!data.ok) return toast((error&&error.message)||(data&&data.error)||'Errore');
+  const sp = document.createElement('span');
+  sp.textContent = '✅'; sp.style.cssText = 'color:var(--grn);font-weight:700';
+  btn.replaceWith(sp);
+  if (context === 'admin') loadEvDash(eventId);
+  else loadStaffEvDash(eventId);
 }
 async function loadUserGadgetReservations() {
   const {data, error} = await db.rpc('user_list_gadget_reservations', {p_user_id: currentUser.id});
@@ -1835,15 +1898,25 @@ function _buildGuestHtml(data, eventId, context) {
     <button class="btn-sm" style="font-size:10px;padding:2px 6px" onclick="payGuestFromList('${gId}','contanti','${name}',${amt},'${eventId}','${context}')">💵</button>
     <button class="btn-sm" style="font-size:10px;padding:2px 6px" onclick="payGuestFromList('${gId}','sumup','${name}',${amt},'${eventId}','${context}')">📱</button>
   </div>`;
+  // Popola mappa companions per staffManageCompanions
+  window._guestCompMap = window._guestCompMap || {};
+  soci.forEach(r => { window._guestCompMap[r.registration_id] = r.companions || []; });
   const totalPersons = soci.reduce((s,r) => s + (r.party_size||1), 0) + ospiti.length;
   let html = `<div style="font-size:12px;color:var(--mut);margin-bottom:8px">${totalPersons} persone totali (${soci.length+ospiti.length} iscrizioni)</div>`;
   if (soci.length) {
     html += `<div class="sec-lbl" style="margin-bottom:6px">Soci (${soci.length})</div>`;
     html += `<div class="tbl-wrap"><table><thead><tr><th>Tessera</th><th>Nome</th><th>€</th><th>Stato</th><th>Gruppo</th><th>Check-in</th></tr></thead><tbody>`
       + soci.map(r => {
-          const dn = _esc(r.display_name||'').replace(/'/g,"\\'");
-          const rn = (r.party_notes||'').replace(/'/g,"\\'");
+          const dn  = _esc(r.display_name||'').replace(/'/g,"\\'");
           const pSz = r.party_size || 1;
+          const companions = r.companions || [];
+          const compRows = companions.map(c => `<tr style="background:rgba(255,214,10,.04)">
+            <td colspan="2" style="padding-left:22px;font-size:12px;color:var(--mut)">↳ ${_esc(c.nome)} ${_esc(c.cognome)}</td>
+            <td></td><td></td><td></td>
+            <td>${c.checked_in
+              ? `<span style="color:var(--grn);font-weight:700">✅</span>`
+              : `<button class="btn-sm" style="font-size:11px" onclick="checkinCompanion('${c.id}','${eventId}','${context}',this)">Check-in</button>`}</td>
+          </tr>`).join('');
           return `<tr>
             <td class="mono">${r.card_id}</td>
             <td>${_esc(r.display_name||'')}</td>
@@ -1854,13 +1927,12 @@ function _buildGuestHtml(data, eventId, context) {
             </td>
             <td style="white-space:nowrap">
               ${pSz>1?`<span style="color:var(--gold);font-weight:700">👥 ${pSz}</span>`:'—'}
-              ${r.party_notes?`<div style="font-size:10px;color:var(--mut)">${_esc(r.party_notes)}</div>`:''}
-              <button class="btn-sm" style="font-size:10px;padding:2px 5px;margin-top:2px" onclick="staffEditParty('${r.registration_id}',${pSz},'${rn}','${eventId}','${context}')">✏️</button>
+              <button class="btn-sm" style="font-size:10px;padding:2px 5px;margin-top:2px" onclick="staffManageCompanions('${r.registration_id}','${eventId}','${context}')">✏️</button>
             </td>
             <td>${r.checked_in
               ? `<span style="color:var(--grn);font-weight:700">✅</span>`
               : `<button class="btn-sm" onclick="adminCheckinReg('${r.registration_id}',this)">Check-in</button>`}</td>
-          </tr>`;
+          </tr>${compRows}`;
         }).join('')
       + `</tbody></table></div>`;
   }
@@ -1926,18 +1998,16 @@ async function exportEventCSV(eventId, eventTitle) {
   if (!raw.length) return toast('Nessun iscritto da esportare');
   const statusLabel = s => ({da_saldare:'Da saldare',saldato_credito:'Credito',saldato_sumup:'SumUp',saldato_contanti:'Contanti',annullato:'Annullato',gratuito:'Gratuito'}[s]||s||'—');
   const rows = raw.map(r => ({
-    tipo:             r.tipo||'',
-    tessera:          r.card_id||'',
-    nome:             r.nome || (r.tipo==='socio' ? (r.display_name||'').split(' ')[0] : '') || '',
-    cognome:          r.cognome || (r.tipo==='socio' ? (r.display_name||'').split(' ').slice(1).join(' ') : '') || '',
-    telefono:         r.telefono||'',
-    email:            r.email||'',
-    importo:          Number(r.amount||0).toFixed(2),
-    stato_pagamento:  statusLabel(r.payment_status),
-    persone:          r.party_size || 1,
-    note_gruppo:      r.party_notes || '',
-    presenza:         r.checked_in ? 'Sì' : 'No',
-    operatore:        r.operatore||''
+    tipo:            r.tipo||'',
+    tessera:         r.card_id||'',
+    nome:            r.nome||'',
+    cognome:         r.cognome||'',
+    telefono:        r.telefono||'',
+    email:           r.email||'',
+    importo:         Number(r.amount||0).toFixed(2),
+    stato_pagamento: statusLabel(r.payment_status),
+    presenza:        r.checked_in ? 'Sì' : 'No',
+    operatore:       r.operatore||''
   }));
   const today = new Date().toISOString().slice(0,10);
   const safeName = (eventTitle||'evento').replace(/[^a-zA-Z0-9]/g,'_').toLowerCase();
@@ -1988,7 +2058,8 @@ const _GUIDE = {
 &nbsp;&nbsp;- 📱 SumUp: paga online (lo staff confermerà)<br>
 &nbsp;&nbsp;- 🏠 In cassa: paghi di persona alla cassa<br>
 • Gli eventi gratuiti si prenotano con un click<br>
-• Dopo l'iscrizione usa "👥 Modifica gruppo" per indicare quante persone vieni (max 20)</p>
+• Dopo l'iscrizione usa "👥 Gestisci gruppo" per aggiungere accompagnatori con nome e cognome<br>
+• Puoi rimuovere un accompagnatore solo prima del pagamento</p>
 <p><strong>🛍️ GADGET</strong><br>
 • Scegli il gadget e la quantità [−][N][+] direttamente nel modale di prenotazione<br>
 • Ritira e paga in cassa da Antonella</p>
@@ -2022,10 +2093,12 @@ const _GUIDE = {
 <p><strong>📋 GESTIONE EVENTI (Catalogo)</strong><br>
 • Vedi tutti gli eventi con il cruscotto: 👥 Persone / 💰 Paganti / ✅ Presenti<br>
 • Il contatore 👥 somma le persone per gruppo (es. 1 iscrizione da 3 = 3 persone)<br>
-• Click su "👥 Iscritti" → lista con colonna Gruppo: vedi n. persone e note<br>
-• ✏️ nella colonna Gruppo: modifica party_size di un iscritto<br>
+• Click su "👥 Iscritti" → lista con colonna Gruppo: n. persone + nomi accompagnatori<br>
+• ✏️ nella colonna Gruppo: gestisci accompagnatori (aggiungi/rimuovi nome e cognome)<br>
+• Righe ↳ sotto ogni socio = accompagnatori con check-in individuale<br>
 • 💰 Salda direttamente dalla lista: 💳 credito, 💵 contanti, 📱 SumUp<br>
-• ✅ Check-in, 📥 CSV (include colonne Persone e Note gruppo)<br>
+• ✅ Check-in per socio e per ogni accompagnatore singolarmente<br>
+• 📥 CSV: una riga per persona (soci, accompagnatori, ospiti separati)<br>
 • 🔒/🔓: nascondi o mostra un evento</p>
 <p><strong>🏷️ PROMO</strong><br>
 • Vedi le promo attive — le promo si applicano automaticamente sugli addebiti<br>
@@ -2049,10 +2122,12 @@ const _GUIDE = {
 • Crea nuovo evento: titolo, data, luogo, prezzo, posti, link SumUp, slug<br>
 • 🌐 "Apri iscrizioni esterne": genera link pubblico (?event=slug) con copia<br>
 • Il link appare anche in lista per condivisione rapida<br>
-• Cruscotto: 👥 Persone totali (SUM party_size) / 💰 Paganti / ✅ Presenti<br>
-• Lista iscritti: colonna Gruppo con n. persone e note, bottone ✏️ per modificare<br>
+• Cruscotto: 👥 Persone totali (SUM party_size) / 💰 Paganti / ✅ Presenti (inclusi accompagnatori)<br>
+• Lista iscritti: colonna Gruppo con n. persone + nomi; righe ↳ per ogni accompagnatore<br>
+• ✏️ Gestisci accompagnatori: aggiungi/rimuovi nome e cognome di ogni persona<br>
+• ✅ Check-in per socio e per ogni accompagnatore singolarmente<br>
 • 💰 Salda dalla lista: 💳 credito, 💵 contanti, 📱 SumUp<br>
-• 📥 CSV: include colonne Persone e Note gruppo<br>
+• 📥 CSV: una riga per persona (tipo: socio/accompagnatore/ospite)<br>
 • 🔒 Nascondi eventi passati dalla vista socio/staff</p>
 <p><strong>🛍️ GADGET</strong><br>
 • Crea e gestisci i gadget del Rione (nome, prezzo, stock, descrizione)</p>
