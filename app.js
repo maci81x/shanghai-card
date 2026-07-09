@@ -579,6 +579,7 @@ async function staffLookup() {
     loadStaffUserTx(data.user.card_id)
   ]);
   loadStaffGadgetReservationsForUser(data.user.id);
+  loadStaffRegisterEventDropdown(data.user.card_id);
 }
 async function loadStaffUserTx(cardId) {
   const wrap = document.getElementById('s-tx-wrap');
@@ -655,6 +656,38 @@ async function staffFulfillGadget(resId, method, name, total) {
     toast(msg, 'ok');
     if (staffTarget) { const {data: u} = await db.rpc('staff_lookup', {p_card_id: staffTarget.card_id}); if (u?.ok) { staffTarget = u.user; document.getElementById('s-res-bal').textContent = eur(u.user.balance); } }
     loadStaffGadgetReservationsForUser(staffTarget?.id);
+  });
+}
+async function loadStaffRegisterEventDropdown(cardId) {
+  const wrap = document.getElementById('s-reg-event-wrap');
+  if (!wrap) return;
+  const {data, error} = await db.rpc('admin_list_events');
+  if (error || !data || !data.length) { wrap.style.display='none'; return; }
+  // Filtra eventi attivi a cui il socio non è già iscritto
+  const {data: pend} = await db.rpc('staff_list_pending_events', {p_card_id: cardId});
+  const {data: chk}  = await db.rpc('staff_list_active_registrations', {p_operator_id: currentUser.id, p_card_id: cardId});
+  const registeredIds = new Set([
+    ...((pend||[]).map(r => r.event_id)),
+    ...((chk?.registrations||[]).map(r => r.event_id))
+  ]);
+  const available = data.filter(e => e.active && !registeredIds.has(e.id));
+  const sel = document.getElementById('s-event-select');
+  sel.innerHTML = '<option value="">Scegli evento…</option>' +
+    available.map(e => `<option value="${e.id}">${_esc(e.title)} — ${eur(e.price)}</option>`).join('');
+  wrap.style.display = available.length ? 'block' : 'none';
+}
+async function staffRegisterUserEvent() {
+  if (!staffTarget) return toast('Cerca prima una tessera');
+  const eventId = document.getElementById('s-event-select').value;
+  if (!eventId) return toast('Seleziona un evento');
+  const evName = document.getElementById('s-event-select').selectedOptions[0]?.text || '';
+  modalConfirm(`Iscrivere ${staffTarget.display_name} a:\n\n"${evName}"?`, async () => {
+    const {data, error} = await db.rpc('staff_register_user_event', {p_operator_id: currentUser.id, p_card_id: staffTarget.card_id, p_event_id: eventId});
+    if (error || !data.ok) return toast((error&&error.message)||data.error);
+    const msg = data.already_registered ? 'Socio già iscritto' : `✅ Iscritto a "${data.event_title}" — ${eur(data.amount)} da saldare`;
+    toast(msg, 'ok');
+    await loadStaffPendingEvents(staffTarget.card_id);
+    loadStaffRegisterEventDropdown(staffTarget.card_id);
   });
 }
 async function loadStaffCheckin(cardId) {
@@ -914,6 +947,7 @@ async function adminCassaLookup() {
     loadAcUserTx(data.user.card_id)
   ]);
   loadAcGadgetReservationsForUser(data.user.id);
+  loadAcRegisterEventDropdown(data.user.card_id);
 }
 async function loadAcPendingEvents(cardId) {
   const wrap = document.getElementById('ac-pending-wrap');
@@ -968,6 +1002,37 @@ async function acFulfillGadget(resId, method, name, total) {
     toast(msg, 'ok');
     if (staffTarget) { const {data: u} = await db.rpc('staff_lookup', {p_card_id: staffTarget.card_id}); if (u?.ok) { staffTarget = u.user; document.getElementById('ac-res-bal').textContent = eur(u.user.balance); } }
     loadAcGadgetReservationsForUser(staffTarget?.id);
+  });
+}
+async function loadAcRegisterEventDropdown(cardId) {
+  const wrap = document.getElementById('ac-reg-event-wrap');
+  if (!wrap) return;
+  const {data, error} = await db.rpc('admin_list_events');
+  if (error || !data || !data.length) { wrap.style.display='none'; return; }
+  const {data: pend} = await db.rpc('staff_list_pending_events', {p_card_id: cardId});
+  const {data: chk}  = await db.rpc('staff_list_active_registrations', {p_operator_id: currentUser.id, p_card_id: cardId});
+  const registeredIds = new Set([
+    ...((pend||[]).map(r => r.event_id)),
+    ...((chk?.registrations||[]).map(r => r.event_id))
+  ]);
+  const available = data.filter(e => e.active && !registeredIds.has(e.id));
+  const sel = document.getElementById('ac-event-select');
+  sel.innerHTML = '<option value="">Scegli evento…</option>' +
+    available.map(e => `<option value="${e.id}">${_esc(e.title)} — ${eur(e.price)}</option>`).join('');
+  wrap.style.display = available.length ? 'block' : 'none';
+}
+async function acRegisterUserEvent() {
+  if (!staffTarget) return toast('Cerca prima una tessera');
+  const eventId = document.getElementById('ac-event-select').value;
+  if (!eventId) return toast('Seleziona un evento');
+  const evName = document.getElementById('ac-event-select').selectedOptions[0]?.text || '';
+  modalConfirm(`Iscrivere ${staffTarget.display_name} a:\n\n"${evName}"?`, async () => {
+    const {data, error} = await db.rpc('staff_register_user_event', {p_operator_id: currentUser.id, p_card_id: staffTarget.card_id, p_event_id: eventId});
+    if (error || !data.ok) return toast((error&&error.message)||data.error);
+    const msg = data.already_registered ? 'Socio già iscritto' : `✅ Iscritto a "${data.event_title}" — ${eur(data.amount)} da saldare`;
+    toast(msg, 'ok');
+    await loadAcPendingEvents(staffTarget.card_id);
+    loadAcRegisterEventDropdown(staffTarget.card_id);
   });
 }
 async function loadAcCheckin(cardId) {
