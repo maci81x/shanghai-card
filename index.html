@@ -1177,7 +1177,9 @@ function renderEvents(evs) {
         <div class="cat-sub">${e.event_date?fdt(e.event_date):'—'}${e.location?' · '+_esc(e.location):''}</div>
         <div class="ev-pay-grid">
           <button class="btn btn-p" onclick="userPayEventCredit('${pend.registration_id}','${tj}',${pend.amount})">💳 Credito</button>
-          ${pend.sumup_link?`<a href="${pend.sumup_link}" target="_blank" rel="noopener" class="btn btn-g">📱 SumUp</a>`:''}
+          ${pend.sumup_link
+            ?`<a href="${pend.sumup_link}" target="_blank" rel="noopener" class="btn btn-g">📱 SumUp</a>`
+            :`<button class="btn btn-g" onclick="toast('Paga con SumUp in cassa: lo staff registrerà il pagamento.','ok')">📱 SumUp</button>`}
           <button class="btn btn-q" onclick="toast('Recati in cassa con il tuo QR per saldare','ok')">🏠 In cassa</button>
         </div></div>`;
     }
@@ -1252,7 +1254,9 @@ function renderPendingEvents(evs) {
       <div style="font-size:12px;color:var(--mut);margin-bottom:12px">${e.event_date?fdt(e.event_date):'—'}</div>
       <div class="ev-pay-grid">
         <button class="btn btn-p" onclick="userPayEventCredit('${e.registration_id}','${e.evento.replace(/'/g,"\\'")}',${e.amount})">💳 Credito</button>
-        ${e.sumup_link?`<a href="${e.sumup_link}" target="_blank" rel="noopener" class="btn btn-g">📱 SumUp</a>`:''}
+        ${e.sumup_link
+          ?`<a href="${e.sumup_link}" target="_blank" rel="noopener" class="btn btn-g">📱 SumUp</a>`
+          :`<button class="btn btn-g" onclick="toast('Paga con SumUp in cassa: lo staff registrerà il pagamento.','ok')">📱 SumUp</button>`}
         <button class="btn btn-q" onclick="toast('Recati in cassa con il tuo QR per saldare','ok')">🏠 In cassa</button>
       </div>
     </div>`).join('');
@@ -1793,7 +1797,7 @@ async function loadAGest() {
 async function adminToggleVisibility(eventId, currentVisible) {
   const label = currentVisible ? 'nascondere' : 'rendere visibile';
   modalConfirm(`Vuoi ${label} questo evento nel catalogo?`, async () => {
-    const {data, error} = await db.rpc('admin_toggle_event_visibility', {p_event_id: eventId});
+    const {data, error} = await db.rpc('admin_toggle_event_visibility', {p_admin_id: currentUser.id, p_event_id: eventId});
     if (error||!data.ok) return toast((error&&error.message)||data.error);
     toast(`Evento ${data.visible?'visibile':'nascosto'}`, 'ok');
     loadAGest();
