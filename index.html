@@ -1389,12 +1389,16 @@ async function loadStaffPendingEvents(cardId) {
   wrap.style.display = 'block';
   list.innerHTML = data.map(r => `
     <div class="card" style="margin-bottom:8px">
-      <div style="font-weight:700;margin-bottom:2px">${r.evento}</div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:2px">
+        <span style="font-weight:700;flex:1">${_esc(r.evento)}</span>
+        ${r.total_registrations!=null?`<span style="font-size:11px;color:var(--mut)">👥 ${r.total_registrations} iscritti</span>`:''}
+      </div>
       <div style="font-size:12px;color:var(--mut);margin-bottom:10px">${r.event_date ? fdt(r.event_date) : '—'} · <strong style="color:var(--gold)">${eur(r.amount)}</strong></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn btn-p" style="flex:1;min-width:100px" onclick="staffPayEvent('${r.registration_id}','credito','${r.evento}',${r.amount})">💳 Credito</button>
-        <button class="btn btn-g" style="flex:1;min-width:100px" onclick="staffPayEvent('${r.registration_id}','sumup','${r.evento}',${r.amount})">📱 SumUp</button>
-        <button class="btn btn-q" style="flex:1;min-width:100px" onclick="staffPayEvent('${r.registration_id}','contanti','${r.evento}',${r.amount})">💵 Contanti</button>
+        <button class="btn btn-p" style="flex:1;min-width:100px" onclick="staffPayEvent('${r.registration_id}','credito','${r.evento.replace(/'/g,"\\'")}',${r.amount})">💳 Credito</button>
+        ${r.sumup_link?`<a href="${r.sumup_link}" target="_blank" rel="noopener" class="btn btn-g" style="flex:1;min-width:100px;text-decoration:none;display:flex;align-items:center;justify-content:center">📱 SumUp</a>`:
+          `<button class="btn btn-g" style="flex:1;min-width:100px" onclick="staffPayEvent('${r.registration_id}','sumup','${r.evento.replace(/'/g,"\\'")}',${r.amount})">📱 SumUp</button>`}
+        <button class="btn btn-q" style="flex:1;min-width:100px" onclick="staffPayEvent('${r.registration_id}','contanti','${r.evento.replace(/'/g,"\\'")}',${r.amount})">💵 Contanti</button>
       </div>
     </div>`).join('');
 }
