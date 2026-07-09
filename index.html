@@ -874,7 +874,25 @@ function modalConfirm(msg, cb) {
   document.getElementById('modal').classList.add('open');
   window._mcb = cb;
 }
-function modalCancel() { document.getElementById('modal').classList.remove('open'); window._mcb = null; }
+function modalCancel() {
+  document.getElementById('modal').classList.remove('open');
+  window._mcb = null;
+  document.getElementById('modal-ok').textContent = 'Conferma';
+  document.querySelector('#modal .btn-q').style.display = '';
+}
+function modalInfo(msg) {
+  const parts = msg.split('\n\n');
+  document.getElementById('modal-title').textContent = parts[0];
+  const det = document.getElementById('modal-detail');
+  if (parts.length > 1) {
+    det.innerHTML = parts.slice(1).join('\n\n').split('\n').map(_esc).join('<br>');
+    det.style.display = '';
+  } else { det.style.display = 'none'; }
+  document.getElementById('modal').classList.add('open');
+  window._mcb = null;
+  document.getElementById('modal-ok').textContent = 'Chiudi';
+  document.querySelector('#modal .btn-q').style.display = 'none';
+}
 function showScreen(id) { document.querySelectorAll('.screen').forEach(s => s.classList.remove('active')); document.getElementById(id).classList.add('active'); }
 function switchTab(btn, groupId) {
   const wrap = document.getElementById(groupId).closest('.tab-wrap');
@@ -1148,7 +1166,13 @@ function renderPendingEvents(evs) {
 async function userPayEventCredit(regId, eventName, amount) {
   modalConfirm(`Pagare "${eventName}" (${eur(amount)}) con il tuo credito?`, async () => {
     const {data, error} = await db.rpc('user_pay_event_credit', {p_user_id: currentUser.id, p_registration_id: regId});
-    if (error || !data.ok) return toast((error && error.message) || data.error);
+    if (error || !data.ok) {
+      const msg = (error && error.message) || data.error || 'Errore';
+      if (msg === 'Saldo insufficiente') {
+        modalInfo(`Saldo insufficiente\n\nSaldo attuale: ${eur(data.balance||0)}\nRichiesto: ${eur(data.required||amount)}\n\nRicarica la tessera oppure scegli SumUp o pagamento in cassa.`);
+      } else { toast(msg); }
+      return;
+    }
     toast(`Pagato! Nuovo saldo: ${eur(data.new_balance)}`, 'ok');
     await refreshUser();
     await loadCatalog();
