@@ -1015,7 +1015,7 @@ function logout() {
 
 // ── MOVIMENTI FILTRI ─────────────────────────────────────────────────
 let _movTipo = 'all', _movDays = 0, _allTx = [];
-let _pendingEvents = [], _myEventIds = new Set(), _eventsCache = [];
+let _pendingEvents = [], _myEventIds = new Set(), _eventsCache = [], _promoCache = [];
 function setMovFiltro(btn, group) {
   btn.closest('div').querySelectorAll('.fbtn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
@@ -1136,10 +1136,25 @@ async function loadCatalog() {
   const {data} = await db.rpc('get_catalog');
   if (!data) return;
   _eventsCache = data.events || [];
+  _promoCache  = data.promos || [];
   renderEvents(_eventsCache);
   renderGadgets(data.gadgets||[]);
   renderPromos(data.promos||[]);
   renderSumUp(data.sumup_links||[]);
+}
+function _calcPromo(amount) {
+  const now = new Date();
+  const active = _promoCache.find(p => {
+    const from = p.valid_from ? new Date(p.valid_from) : null;
+    const to   = p.valid_to   ? new Date(p.valid_to)   : null;
+    return (!from || now >= from) && (!to || now <= to);
+  });
+  if (!active) return null;
+  let discount = 0;
+  if (active.discount_type === 'percent') discount = +(amount * active.discount_value / 100).toFixed(2);
+  else if (active.discount_type === 'fixed') discount = Math.min(+active.discount_value, amount);
+  const charged = +(amount - discount).toFixed(2);
+  return {code: active.code, discount, charged, original: amount};
 }
 function renderEvents(evs) {
   _eventsCache = evs;
@@ -1207,7 +1222,11 @@ function renderSumUp(links) {
   document.getElementById('u-sumup').innerHTML = links.map(l=>`<a href="${l.url}" target="_blank" rel="noopener" class="sumup-btn">${l.label}</a>`).join('');
 }
 async function buyGadget(id, name, price) {
-  modalConfirm(`Acquistare "${name}" per ${eur(price)}?`, async () => {
+  const promo = _calcPromo(price);
+  const promoLine = promo
+    ? `\n\n⚡ Promo [${promo.code}] attiva: -${eur(promo.discount)}\n${eur(price)} → <strong>${eur(promo.charged)}</strong>`
+    : '';
+  modalConfirm(`Acquistare "${name}" per ${eur(price)}?${promoLine}`, async () => {
     const {data, error} = await db.rpc('user_buy_gadget', {p_user_id:currentUser.id, p_gadget_id:id});
     if (error||!data.ok) return toast((error&&error.message)||data.error);
     if (data.promo_code) {
@@ -1439,7 +1458,11 @@ async function staffCharge() {
   const v    = parseFloat(document.getElementById('s-charge-amt').value);
   const desc = document.getElementById('s-charge-desc').value.trim()||'Addebito';
   if (!v||v<=0) return toast('Importo non valido');
-  modalConfirm(`Addebitare ${eur(v)} a ${staffTarget.display_name}?`, async () => {
+  const {data: pv} = await db.rpc('staff_preview_charge', {p_card_id: staffTarget.card_id, p_amount: v});
+  const promoLine = (pv && pv.promo_code)
+    ? `\n\n⚡ Promo [${pv.promo_code}] attiva: -${eur(pv.discount)}\nImporto originale: ${eur(v)} → Addebito finale: <strong>${eur(pv.charged)}</strong> (sconto ${eur(pv.discount)})`
+    : '';
+  modalConfirm(`Addebitare ${eur(v)} a ${staffTarget.display_name}?${promoLine}`, async () => {
     const {data, error} = await db.rpc('staff_charge', {p_operator_id:currentUser.id, p_card_id:staffTarget.card_id, p_amount:v, p_description:desc});
     if (error||!data.ok) return toast((error&&error.message)||data.error);
     if (data.promo_code) {
@@ -1576,7 +1599,11 @@ async function adminCassaCharge() {
   const v    = parseFloat(document.getElementById('ac-charge-amt').value);
   const desc = document.getElementById('ac-charge-desc').value.trim()||'Addebito';
   if (!v||v<=0) return toast('Importo non valido');
-  modalConfirm(`Addebitare ${eur(v)} a ${staffTarget.display_name}?`, async () => {
+  const {data: pv} = await db.rpc('staff_preview_charge', {p_card_id: staffTarget.card_id, p_amount: v});
+  const promoLine = (pv && pv.promo_code)
+    ? `\n\n⚡ Promo [${pv.promo_code}] attiva: -${eur(pv.discount)}\nImporto originale: ${eur(v)} → Addebito finale: <strong>${eur(pv.charged)}</strong> (sconto ${eur(pv.discount)})`
+    : '';
+  modalConfirm(`Addebitare ${eur(v)} a ${staffTarget.display_name}?${promoLine}`, async () => {
     const {data, error} = await db.rpc('staff_charge', {p_operator_id:currentUser.id, p_card_id:staffTarget.card_id, p_amount:v, p_description:desc});
     if (error||!data.ok) return toast((error&&error.message)||data.error);
     toast(`Addebito ok! ${eur(data.old_balance)} → ${eur(data.new_balance)}`, 'ok');
