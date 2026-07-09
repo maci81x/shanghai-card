@@ -539,6 +539,11 @@ body.nav-sidebar .screen .hdr{padding-left:80px}
       <div id="s-pending-list"></div>
     </div>
 
+    <div id="s-tx-wrap" style="display:none">
+      <div class="sec-title" style="margin-bottom:8px">📋 Ultime transazioni</div>
+      <div id="s-tx-list" class="tx-list"></div>
+    </div>
+
     <div id="s-hist-wrap" style="display:none">
       <div class="sec-title">Operazioni sessione</div>
       <div id="s-hist" class="tx-list"></div>
@@ -1268,7 +1273,26 @@ async function staffLookup() {
   document.getElementById('s-res-card').textContent = data.user.card_id;
   document.getElementById('s-res-bal').textContent  = eur(data.user.balance);
   document.getElementById('s-result').style.display = 'block';
-  await loadStaffPendingEvents(data.user.card_id);
+  await Promise.all([
+    loadStaffPendingEvents(data.user.card_id),
+    loadStaffUserTx(data.user.card_id)
+  ]);
+}
+async function loadStaffUserTx(cardId) {
+  const wrap = document.getElementById('s-tx-wrap');
+  const list = document.getElementById('s-tx-list');
+  const {data, error} = await db.rpc('staff_get_user_transactions', {p_operator_id: currentUser.id, p_card_id: cardId});
+  if (error || !data || !data.ok || !data.transactions.length) { wrap.style.display='none'; return; }
+  wrap.style.display = 'block';
+  list.innerHTML = data.transactions.map(t => `
+    <div class="tx-row">
+      <span class="tx-ic">${txic(t.type)}</span>
+      <div class="tx-inf">
+        <div class="tx-dsc">${t.description||t.type}</div>
+        <div class="tx-dt">${fdt(t.created_at)}${t.operator_name?' · '+t.operator_name:''}</div>
+      </div>
+      <div class="tx-amt ${t.amount>=0?'pos':'neg-c'}">${t.amount>=0?'+':''}${eur(t.amount)}</div>
+    </div>`).join('');
 }
 async function loadStaffPendingEvents(cardId) {
   const {data, error} = await db.rpc('staff_list_pending_events', {p_card_id: cardId});
