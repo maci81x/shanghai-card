@@ -275,8 +275,11 @@ body.nav-sidebar .screen .hdr{padding-left:80px}
   .content{padding:12px;gap:12px}
   .saldo-val{font-size:40px}
   .u-hero-greet{font-size:18px}
-  .modal-box{padding:22px 18px}
+  .modal-box{padding:22px 18px;max-width:calc(100vw - 32px)}
   .hdr{padding:10px 14px}
+  .ev-pay-grid .btn{min-width:0;font-size:12px;padding:10px 4px}
+  .ev-mini-dash{gap:8px}
+  .ev-kpi-n{font-size:18px}
 }
 @media(min-width:640px){
   .content{padding:24px;gap:20px}
@@ -1225,7 +1228,7 @@ function renderSumUp(links) {
 async function buyGadget(id, name, price) {
   const promo = _calcPromo(price);
   const promoLine = promo
-    ? `\n\n⚡ Promo [${promo.code}] attiva: -${eur(promo.discount)}\n${eur(price)} → <strong>${eur(promo.charged)}</strong>`
+    ? `\n\n⚡ Promo [${promo.code}] attiva: -${eur(promo.discount)}\n${eur(price)} → ${eur(promo.charged)} (sconto ${eur(promo.discount)})`
     : '';
   modalConfirm(`Acquistare "${name}" per ${eur(price)}?${promoLine}`, async () => {
     const {data, error} = await db.rpc('user_buy_gadget', {p_user_id:currentUser.id, p_gadget_id:id});
@@ -1465,7 +1468,7 @@ async function staffCharge() {
   if (!v||v<=0) return toast('Importo non valido');
   const {data: pv} = await db.rpc('staff_preview_charge', {p_card_id: staffTarget.card_id, p_amount: v});
   const promoLine = (pv && pv.promo_code)
-    ? `\n\n⚡ Promo [${pv.promo_code}] attiva: -${eur(pv.discount)}\nImporto originale: ${eur(v)} → Addebito finale: <strong>${eur(pv.charged)}</strong> (sconto ${eur(pv.discount)})`
+    ? `\n\n⚡ Promo [${pv.promo_code}] attiva: -${eur(pv.discount)}\nImporto originale: ${eur(v)} → Addebito finale: ${eur(pv.charged)} (sconto ${eur(pv.discount)})`
     : '';
   modalConfirm(`Addebitare ${eur(v)} a ${staffTarget.display_name}?${promoLine}`, async () => {
     const {data, error} = await db.rpc('staff_charge', {p_operator_id:currentUser.id, p_card_id:staffTarget.card_id, p_amount:v, p_description:desc});
@@ -1606,7 +1609,7 @@ async function adminCassaCharge() {
   if (!v||v<=0) return toast('Importo non valido');
   const {data: pv} = await db.rpc('staff_preview_charge', {p_card_id: staffTarget.card_id, p_amount: v});
   const promoLine = (pv && pv.promo_code)
-    ? `\n\n⚡ Promo [${pv.promo_code}] attiva: -${eur(pv.discount)}\nImporto originale: ${eur(v)} → Addebito finale: <strong>${eur(pv.charged)}</strong> (sconto ${eur(pv.discount)})`
+    ? `\n\n⚡ Promo [${pv.promo_code}] attiva: -${eur(pv.discount)}\nImporto originale: ${eur(v)} → Addebito finale: ${eur(pv.charged)} (sconto ${eur(pv.discount)})`
     : '';
   modalConfirm(`Addebitare ${eur(v)} a ${staffTarget.display_name}?${promoLine}`, async () => {
     const {data, error} = await db.rpc('staff_charge', {p_operator_id:currentUser.id, p_card_id:staffTarget.card_id, p_amount:v, p_description:desc});
