@@ -637,9 +637,9 @@ async function staffCharge() {
   const v    = parseFloat(document.getElementById('s-charge-amt').value);
   const desc = document.getElementById('s-charge-desc').value.trim()||'Addebito';
   if (!v||v<=0) return toast('Importo non valido');
-  const {data: pv} = await db.rpc('staff_preview_charge', {p_card_id: staffTarget.card_id, p_amount: v});
+  const {data: pv} = await db.rpc('staff_preview_charge', {p_operator_id: currentUser.id, p_card_id: staffTarget.card_id, p_amount: v});
   const promoLine = (pv && pv.promo_code)
-    ? `\n\n⚡ Promo [${pv.promo_code}] attiva: -${eur(pv.discount)}\nImporto originale: ${eur(v)} → Addebito finale: ${eur(pv.charged)} (sconto ${eur(pv.discount)})`
+    ? `\n\n⚡ Promo [${pv.promo_code}] attiva: -${eur(pv.promo_discount)}\nImporto originale: ${eur(v)} → Addebito finale: ${eur(pv.final_amount)} (sconto ${eur(pv.promo_discount)})`
     : '';
   modalConfirm(`Addebitare ${eur(v)} a ${staffTarget.display_name}?${promoLine}`, async () => {
     const {data, error} = await db.rpc('staff_charge', {p_operator_id:currentUser.id, p_card_id:staffTarget.card_id, p_amount:v, p_description:desc});
@@ -903,9 +903,9 @@ async function adminCassaCharge() {
   const v    = parseFloat(document.getElementById('ac-charge-amt').value);
   const desc = document.getElementById('ac-charge-desc').value.trim()||'Addebito';
   if (!v||v<=0) return toast('Importo non valido');
-  const {data: pv} = await db.rpc('staff_preview_charge', {p_card_id: staffTarget.card_id, p_amount: v});
+  const {data: pv} = await db.rpc('staff_preview_charge', {p_operator_id: currentUser.id, p_card_id: staffTarget.card_id, p_amount: v});
   const promoLine = (pv && pv.promo_code)
-    ? `\n\n⚡ Promo [${pv.promo_code}] attiva: -${eur(pv.discount)}\nImporto originale: ${eur(v)} → Addebito finale: ${eur(pv.charged)} (sconto ${eur(pv.discount)})`
+    ? `\n\n⚡ Promo [${pv.promo_code}] attiva: -${eur(pv.promo_discount)}\nImporto originale: ${eur(v)} → Addebito finale: ${eur(pv.final_amount)} (sconto ${eur(pv.promo_discount)})`
     : '';
   modalConfirm(`Addebitare ${eur(v)} a ${staffTarget.display_name}?${promoLine}`, async () => {
     const {data, error} = await db.rpc('staff_charge', {p_operator_id:currentUser.id, p_card_id:staffTarget.card_id, p_amount:v, p_description:desc});
