@@ -191,6 +191,7 @@ let _staffTxAll = [], _staffTxTipo = 'all', _staffTxDays = 0;
 let _adminTxAll = [], _adminTxTipo = 'all', _adminTxDays = 0, _adminTxSearch = '';
 let _gqtyId, _gqtyName, _gqtyPrice, _gqtyN = 1;
 let _compRegId = null, _compMode = 'user', _compEventId = '', _compCtx = '', _compCache = [];
+let _compEventPrice = 0, _compSelfStatus = '', _compEventTitle = '';
 function setMovFiltro(btn, group) {
   btn.closest('div').querySelectorAll('.fbtn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
@@ -423,32 +424,90 @@ async function confirmGqty() {
   loadUserGadgetReservations();
 }
 // ── ACCOMPAGNATORI ───────────────────────────────────────────────────
-function _renderCompList(companions, mode) {
-  const el = document.getElementById('comp-list');
-  if (!companions.length) {
-    el.innerHTML = '<div style="color:var(--mut);font-size:13px;padding:8px 0">Nessun accompagnatore aggiunto</div>';
-    return;
+function _renderCompModal(mode) {
+  // Self row (user mode + evento con prezzo)
+  const selfEl = document.getElementById('comp-self-row');
+  if (mode === 'user' && _compEventPrice > 0) {
+    const paid = _compSelfStatus && _compSelfStatus !== 'da_saldare';
+    selfEl.innerHTML = `<div style="display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid var(--brd)">
+      ${!paid ? `<input type="checkbox" id="chk-self" onchange="_updateCompTotal()" style="width:16px;height:16px;flex-shrink:0">` : '<span style="width:16px;flex-shrink:0"></span>'}
+      <div style="flex:1;font-size:14px">Tu</div>
+      <span style="font-size:12px;color:${paid?'var(--grn)':'var(--gold)'}">${paid?'✅ Pagato':'⏳ Da saldare'}</span>
+    </div>`;
+    selfEl.style.display = '';
+  } else {
+    selfEl.innerHTML = ''; selfEl.style.display = 'none';
   }
-  el.innerHTML = companions.map(c => `
-    <div style="display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid var(--brd)">
-      <div style="flex:1;font-size:14px">${_esc(c.nome)} ${_esc(c.cognome)}</div>
-      ${c.checked_in ? '<span style="color:var(--grn);font-size:13px">✅</span>' : ''}
-      ${mode !== 'view' ? `<button class="btn-sm" style="color:var(--neg);font-size:11px;padding:2px 6px" onclick="removeCompanion('${c.id}')">Rimuovi</button>` : ''}
-    </div>`).join('');
+  // Lista companions
+  const listEl = document.getElementById('comp-list');
+  if (!_compCache.length) {
+    listEl.innerHTML = '<div style="color:var(--mut);font-size:13px;padding:8px 0">Nessun accompagnatore aggiunto</div>';
+  } else if (mode === 'user') {
+    listEl.innerHTML = _compCache.map(c => {
+      const paid = c.payment_status && c.payment_status !== 'da_saldare';
+      return `<div style="display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid var(--brd)">
+        ${(!paid && _compEventPrice > 0) ? `<input type="checkbox" id="chk-c-${c.id}" onchange="_updateCompTotal()" style="width:16px;height:16px;flex-shrink:0">` : '<span style="width:16px;flex-shrink:0"></span>'}
+        <div style="flex:1;font-size:14px">${_esc(c.nome)} ${_esc(c.cognome)}</div>
+        <span style="font-size:12px;color:${paid?'var(--grn)':'var(--gold)'}">${paid?'✅':'⏳'}</span>
+        <button class="btn-sm" style="color:var(--neg);font-size:11px;padding:2px 6px" onclick="removeCompanion('${c.id}')">×</button>
+      </div>`;
+    }).join('');
+  } else {
+    listEl.innerHTML = _compCache.map(c => {
+      const paid = c.payment_status && c.payment_status !== 'da_saldare';
+      return `<div style="padding:9px 0;border-bottom:1px solid var(--brd)">
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="flex:1;font-size:14px">${_esc(c.nome)} ${_esc(c.cognome)}</div>
+          <span style="font-size:11px;color:${paid?'var(--grn)':'var(--gold)'}">${paid?'✅ Pagato':'⏳ Da saldare'}</span>
+          <button class="btn-sm" style="color:var(--neg);font-size:11px;padding:2px 6px" onclick="removeCompanion('${c.id}')">×</button>
+        </div>
+        ${!paid ? `<div style="display:flex;gap:4px;margin-top:5px">
+          <button class="btn-sm p" style="font-size:11px" onclick="staffCompPay('${c.id}','credito')">💳</button>
+          <button class="btn-sm" style="font-size:11px" onclick="staffCompPay('${c.id}','contanti')">💵</button>
+          <button class="btn-sm" style="font-size:11px" onclick="staffCompPay('${c.id}','sumup')">📱</button>
+        </div>` : ''}
+      </div>`;
+    }).join('');
+  }
+  // Footer pagamento (user mode)
+  const footerEl = document.getElementById('comp-pay-footer');
+  if (mode === 'user' && _compEventPrice > 0) {
+    footerEl.style.display = '';
+    _updateCompTotal();
+  } else {
+    footerEl.style.display = 'none';
+  }
+}
+function _updateCompTotal() {
+  let count = 0;
+  if (document.getElementById('chk-self')?.checked) count++;
+  _compCache.filter(c => !c.payment_status || c.payment_status === 'da_saldare')
+    .forEach(c => { if (document.getElementById('chk-c-' + c.id)?.checked) count++; });
+  const footerEl = document.getElementById('comp-pay-footer');
+  if (!footerEl) return;
+  footerEl.innerHTML = count > 0
+    ? `<div style="font-size:13px;margin-bottom:8px">💰 ${count} ${count===1?'persona':'persone'} × ${eur(_compEventPrice)} = <strong>${eur(count * _compEventPrice)}</strong></div>
+       <button class="btn btn-p w100" onclick="userPaySelected()">💳 Paga col credito</button>
+       <div style="font-size:11px;color:var(--mut);text-align:center;margin-top:6px">oppure paga in cassa o SumUp</div>`
+    : `<div style="font-size:12px;color:var(--mut);text-align:center;padding:4px 0">Seleziona chi vuoi pagare</div>
+       <div style="font-size:11px;color:var(--mut);text-align:center;margin-top:4px">oppure paga in cassa o SumUp</div>`;
 }
 function openCompanionsModal(regId) {
   _compMode = 'user'; _compRegId = regId;
   const reg = Object.values(_myEventRegs).find(r => r.registration_id === regId) || {};
   _compCache = (reg.companions || []).map(c => ({...c}));
+  _compEventPrice = reg.event_price || 0;
+  _compSelfStatus = reg.payment_status || 'da_saldare';
+  _compEventTitle = reg.event_title || '';
   document.getElementById('comp-reg-id').value = regId;
   document.getElementById('comp-mode').value = 'user';
   document.getElementById('comp-event-id').value = '';
   document.getElementById('comp-ctx').value = '';
-  document.getElementById('comp-subtitle').textContent = 'Persone che vengono con te';
+  document.getElementById('comp-subtitle').textContent = _compEventTitle ? `📅 ${_compEventTitle}` : 'Persone che vengono con te';
   document.getElementById('comp-add-section').style.display = '';
   document.getElementById('comp-nome').value = '';
   document.getElementById('comp-cognome').value = '';
-  _renderCompList(_compCache, 'user');
+  _renderCompModal('user');
   document.getElementById('comp-bg').style.display = 'flex';
 }
 function staffManageCompanions(regId, eventId, context) {
@@ -462,7 +521,7 @@ function staffManageCompanions(regId, eventId, context) {
   document.getElementById('comp-add-section').style.display = '';
   document.getElementById('comp-nome').value = '';
   document.getElementById('comp-cognome').value = '';
-  _renderCompList(_compCache, 'staff');
+  _renderCompModal('staff');
   document.getElementById('comp-bg').style.display = 'flex';
 }
 function closeCompanionsModal() { document.getElementById('comp-bg').style.display = 'none'; }
@@ -476,7 +535,7 @@ async function addCompanion() {
     const {data, error} = await db.rpc('staff_add_companions', {p_operator_id: currentUser.id, p_registration_id: regId, p_companions: [{nome, cognome}]});
     if (error||!data||!data.ok) return toast((error&&error.message)||(data&&data.error)||'Errore');
     _compCache = Array.isArray(data.companions) ? data.companions : [];
-    _renderCompList(_compCache, 'staff');
+    _renderCompModal('staff');
     document.getElementById('comp-nome').value = '';
     document.getElementById('comp-cognome').value = '';
     toast('Accompagnatore aggiunto!', 'ok');
@@ -488,7 +547,7 @@ async function addCompanion() {
     const {data, error} = await db.rpc('user_add_companions', {p_user_id: currentUser.id, p_registration_id: regId, p_companions: [{nome, cognome}]});
     if (error||!data||!data.ok) return toast((error&&error.message)||(data&&data.error)||'Errore');
     _compCache = Array.isArray(data.companions) ? data.companions : [];
-    _renderCompList(_compCache, 'user');
+    _renderCompModal('user');
     document.getElementById('comp-nome').value = '';
     document.getElementById('comp-cognome').value = '';
     toast('Accompagnatore aggiunto!', 'ok');
@@ -503,7 +562,7 @@ async function removeCompanion(compId) {
     const {data, error} = await db.rpc('staff_remove_companion', {p_operator_id: currentUser.id, p_companion_id: compId});
     if (error||!data||!data.ok) return toast((error&&error.message)||(data&&data.error)||'Errore');
     _compCache = Array.isArray(data.companions) ? data.companions : [];
-    _renderCompList(_compCache, 'staff');
+    _renderCompModal('staff');
     toast('Rimosso', 'ok');
     if (_compEventId) {
       if (_compCtx === 'admin') await _reloadAdminEventGuests(_compEventId);
@@ -513,11 +572,63 @@ async function removeCompanion(compId) {
     const {data, error} = await db.rpc('user_remove_companion', {p_user_id: currentUser.id, p_companion_id: compId});
     if (error||!data||!data.ok) return toast((error&&error.message)||(data&&data.error)||'Errore');
     _compCache = Array.isArray(data.companions) ? data.companions : [];
-    _renderCompList(_compCache, 'user');
+    _renderCompModal('user');
     toast('Rimosso', 'ok');
     await refreshUser();
     if (_eventsCache.length) renderEvents(_eventsCache);
   }
+}
+async function userPaySelected() {
+  const self_selected = document.getElementById('chk-self')?.checked || false;
+  const companion_ids = _compCache
+    .filter(c => (!c.payment_status || c.payment_status === 'da_saldare') && document.getElementById('chk-c-' + c.id)?.checked)
+    .map(c => c.id);
+  if (!self_selected && !companion_ids.length) return toast('Seleziona almeno una persona');
+  const {data, error} = await db.rpc('user_pay_event_people', {
+    p_user_id: currentUser.id,
+    p_registration_id: _compRegId,
+    p_targets: {self: self_selected, companion_ids}
+  });
+  if (error||!data||!data.ok) return toast((error&&error.message)||(data&&data.error)||'Errore pagamento');
+  toast('✅ Pagamento effettuato!', 'ok');
+  await refreshUser();
+  if (_eventsCache.length) renderEvents(_eventsCache);
+  const reg = Object.values(_myEventRegs).find(r => r.registration_id === _compRegId) || {};
+  _compCache = (reg.companions || []).map(c => ({...c}));
+  _compSelfStatus = reg.payment_status || 'da_saldare';
+  _renderCompModal('user');
+}
+async function staffCompPay(compId, method) {
+  const {data, error} = await db.rpc('staff_pay_event_people', {
+    p_operator_id: currentUser.id,
+    p_registration_id: _compRegId,
+    p_targets: {self: false, companion_ids: [compId]},
+    p_method: method
+  });
+  if (error||!data||!data.ok) return toast((error&&error.message)||(data&&data.error)||'Errore');
+  toast('✅ Pagato!', 'ok');
+  if (Array.isArray(data.companions)) _compCache = data.companions;
+  else _compCache = _compCache.map(c => c.id===compId ? {...c, payment_status:'saldato_'+method} : c);
+  _renderCompModal('staff');
+  if (_compEventId) {
+    if (_compCtx === 'admin') await _reloadAdminEventGuests(_compEventId);
+    else await _reloadStaffEventGuests(_compEventId);
+  }
+}
+async function payCompanionFromList(compId, method, name, regId, eventId, context) {
+  const label = {credito:'credito',contanti:'contanti',sumup:'SumUp'}[method]||method;
+  modalConfirm(`Salda quota di ${name} — ${label}?`, async () => {
+    const {data, error} = await db.rpc('staff_pay_event_people', {
+      p_operator_id: currentUser.id,
+      p_registration_id: regId,
+      p_targets: {self: false, companion_ids: [compId]},
+      p_method: method
+    });
+    if (error||!data||!data.ok) return toast((error&&error.message)||(data&&data.error)||'Errore');
+    toast('✅ Pagato!', 'ok');
+    if (context === 'admin') await _reloadAdminEventGuests(eventId);
+    else await _reloadStaffEventGuests(eventId);
+  });
 }
 async function checkinCompanion(compId, eventId, context, btn) {
   const {data, error} = await db.rpc('staff_checkin_companion', {p_operator_id: currentUser.id, p_companion_id: compId});
@@ -1910,13 +2021,27 @@ function _buildGuestHtml(data, eventId, context) {
           const dn  = _esc(r.display_name||'').replace(/'/g,"\\'");
           const pSz = r.party_size || 1;
           const companions = r.companions || [];
-          const compRows = companions.map(c => `<tr style="background:rgba(255,214,10,.04)">
-            <td colspan="2" style="padding-left:22px;font-size:12px;color:var(--mut)">↳ ${_esc(c.nome)} ${_esc(c.cognome)}</td>
-            <td></td><td></td><td></td>
-            <td>${c.checked_in
-              ? `<span style="color:var(--grn);font-weight:700">✅</span>`
-              : `<button class="btn-sm" style="font-size:11px" onclick="checkinCompanion('${c.id}','${eventId}','${context}',this)">Check-in</button>`}</td>
-          </tr>`).join('');
+          const _pcb = (cId, cName, rId) => `<div style="display:flex;gap:3px;margin-top:3px">
+            <button class="btn-sm p" style="font-size:10px;padding:2px 5px" onclick="payCompanionFromList('${cId}','credito','${cName}','${rId}','${eventId}','${context}')">💳</button>
+            <button class="btn-sm" style="font-size:10px;padding:2px 5px" onclick="payCompanionFromList('${cId}','contanti','${cName}','${rId}','${eventId}','${context}')">💵</button>
+            <button class="btn-sm" style="font-size:10px;padding:2px 5px" onclick="payCompanionFromList('${cId}','sumup','${cName}','${rId}','${eventId}','${context}')">📱</button>
+          </div>`;
+          const compRows = companions.map(c => {
+            const cn = (`${_esc(c.nome)} ${_esc(c.cognome)}`).replace(/'/g,"\\'");
+            const ps = c.payment_status || 'da_saldare';
+            return `<tr style="background:rgba(255,214,10,.04)">
+              <td colspan="2" style="padding-left:22px;font-size:12px;color:var(--mut)">↳ ${_esc(c.nome)} ${_esc(c.cognome)}</td>
+              <td></td>
+              <td style="font-size:11px;color:${statusColor(ps)}">
+                ${statusLabel(ps)}
+                ${ps==='da_saldare' ? _pcb(c.id, cn, r.registration_id) : ''}
+              </td>
+              <td></td>
+              <td>${c.checked_in
+                ? `<span style="color:var(--grn);font-weight:700">✅</span>`
+                : `<button class="btn-sm" style="font-size:11px" onclick="checkinCompanion('${c.id}','${eventId}','${context}',this)">Check-in</button>`}</td>
+            </tr>`;
+          }).join('');
           return `<tr>
             <td class="mono">${r.card_id}</td>
             <td>${_esc(r.display_name||'')}</td>
