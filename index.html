@@ -828,6 +828,10 @@ body.nav-sidebar .screen .hdr{padding-left:80px}
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+<script>
+/* html5-qrcode@2.3.8 chiama document.createEvent() senza argomenti in alcuni browser */
+(function(){var _o=Document.prototype.createEvent;Document.prototype.createEvent=function(t){return _o.call(this,t||'CustomEvent');};})();
+</script>
 <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script>
