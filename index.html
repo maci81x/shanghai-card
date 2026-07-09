@@ -195,7 +195,7 @@
           <button class="tab" data-p="ut-promo" onclick="switchTab(this,'utabs')">🏷️ Promo</button>
         </div>
         <div id="ut-eventi" class="tab-panel active"></div>
-        <div id="ut-gadget" class="tab-panel"></div>
+        <div id="ut-gadget" class="tab-panel"><div id="ut-gad-reservations"></div></div>
         <div id="ut-promo" class="tab-panel"></div>
       </div>
       <div class="sec-title" style="margin-top:12px">Ricarica tessera</div>
@@ -282,6 +282,11 @@
         <div id="s-pending-wrap" style="display:none">
           <div class="sec-title">Da saldare</div>
           <div id="s-pending-list"></div>
+        </div>
+
+        <div id="s-gadget-res-wrap" style="display:none">
+          <div class="sec-title" style="margin-bottom:8px">📦 Prenotazioni gadget</div>
+          <div id="s-gadget-res-list"></div>
         </div>
 
         <div id="s-checkin-wrap" style="display:none">
@@ -396,6 +401,10 @@
         <div id="ac-pending-wrap" style="display:none">
           <div class="sec-title" style="margin-bottom:8px">Da saldare</div>
           <div id="ac-pending-list"></div>
+        </div>
+        <div id="ac-gadget-res-wrap" style="display:none">
+          <div class="sec-title" style="margin-bottom:8px">📦 Prenotazioni gadget</div>
+          <div id="ac-gadget-res-list"></div>
         </div>
         <div id="ac-checkin-wrap" style="display:none">
           <div class="sec-title" style="margin-bottom:8px">Check-in disponibili</div>

@@ -369,17 +369,57 @@ function renderEvents(evs) {
 function renderGadgets(gads) {
   const el = document.getElementById('ut-gadget');
   if (!gads.length) { el.innerHTML='<div class="empty">Nessun gadget disponibile</div>'; return; }
-  el.innerHTML = gads.map(g=>`
+  el.innerHTML = `<div style="font-size:13px;color:var(--mut);margin-bottom:10px;padding:10px;background:var(--bg);border-radius:8px">
+    🏪 Prenota qui, ritira e paga in cassa da <strong>Antonella</strong>
+  </div>` +
+  gads.map(g=>`
     <div class="cat-card">
       ${g.image_url?`<img src="${g.image_url}" class="cat-img" alt="${g.name}">` : ''}
-      <div class="cat-title">${g.name}</div>
-      <div class="cat-sub">${g.description||''}</div>
+      <div class="cat-title">${_esc(g.name)}</div>
+      <div class="cat-sub">${_esc(g.description||'')}</div>
       <div class="cat-foot">
         <div class="cat-price">${eur(g.price)}</div>
         <div class="cat-stock">Stock: ${g.stock}</div>
-        <button class="btn-sm p" onclick="buyGadget('${g.id}','${g.name.replace(/'/g,"\\'")}',${g.price})">Acquista</button>
+        <button class="btn-sm p" onclick="openReserveGadget('${g.id}','${_esc(g.name.replace(/'/g,"\\'"))}',${g.price})">📌 Prenota</button>
       </div>
     </div>`).join('');
+  loadUserGadgetReservations();
+}
+function openReserveGadget(id, name, price) {
+  modalConfirm(`Prenotare "${name}" (${eur(price)} cad.)?\n\nScegli quantità nella schermata successiva.\n\nIl pagamento avviene in cassa da Antonella.`, async () => {
+    const qty = 1;
+    const {data, error} = await db.rpc('user_reserve_gadget', {p_user_id: currentUser.id, p_gadget_id: id, p_quantity: qty});
+    if (error||!data.ok) return toast((error&&error.message)||data.error);
+    toast(`📌 Prenotazione inviata! Ritira e paga in cassa da Antonella.`, 'ok');
+    loadUserGadgetReservations();
+  });
+}
+async function loadUserGadgetReservations() {
+  const {data, error} = await db.rpc('user_list_gadget_reservations', {p_user_id: currentUser.id});
+  const el = document.getElementById('ut-gad-reservations');
+  if (!el) return;
+  const list = Array.isArray(data) ? data : [];
+  if (!list.length) { el.innerHTML = ''; return; }
+  el.innerHTML = `<div class="sec-lbl" style="margin-top:14px">Le mie prenotazioni</div>` +
+    list.map(r => `
+      <div class="card" style="margin-bottom:8px;padding:12px;display:flex;align-items:center;gap:12px">
+        <div style="flex:1">
+          <div style="font-weight:600">${_esc(r.gadget_name)}</div>
+          <div style="font-size:12px;color:var(--mut)">Qtà ${r.quantity} · ${eur(r.total_price)} · ${fdt(r.created_at).split(' ')[0]}</div>
+        </div>
+        <span style="font-size:11px;padding:3px 8px;border-radius:12px;background:${r.status==='prenotato'?'rgba(255,214,10,.15)':'rgba(34,197,94,.15)'};color:${r.status==='prenotato'?'var(--gold)':'var(--grn)'}">
+          ${r.status==='prenotato'?'⏳ Prenotato':'✅ Consegnato'}
+        </span>
+        ${r.status==='prenotato'?`<button class="btn-sm" style="color:var(--neg)" onclick="cancelGadgetReservation('${r.reservation_id}')">Annulla</button>`:''}
+      </div>`).join('');
+}
+async function cancelGadgetReservation(reservationId) {
+  modalConfirm('Annullare questa prenotazione?', async () => {
+    const {data, error} = await db.rpc('user_cancel_gadget_reservation', {p_user_id: currentUser.id, p_reservation_id: reservationId});
+    if (error||!data.ok) return toast((error&&error.message)||data.error);
+    toast('Prenotazione annullata', 'ok');
+    loadUserGadgetReservations();
+  });
 }
 function renderPromos(prs) {
   const el = document.getElementById('ut-promo');
@@ -538,6 +578,7 @@ async function staffLookup() {
     loadStaffCheckin(data.user.card_id),
     loadStaffUserTx(data.user.card_id)
   ]);
+  loadStaffGadgetReservationsForUser(data.user.id);
 }
 async function loadStaffUserTx(cardId) {
   const wrap = document.getElementById('s-tx-wrap');
@@ -575,6 +616,46 @@ async function loadStaffPendingEvents(cardId) {
         <button class="btn btn-q" style="flex:1;min-width:100px" onclick="staffPayEvent('${r.registration_id}','contanti','${r.evento.replace(/'/g,"\\'")}',${r.amount})">💵 Contanti</button>
       </div>
     </div>`).join('');
+}
+async function loadStaffGadgetReservationsForUser(userId) {
+  const wrap = document.getElementById('s-gadget-res-wrap');
+  if (!wrap) return;
+  const {data, error} = await db.rpc('staff_list_gadget_reservations', {p_operator_id: currentUser.id});
+  if (error) { wrap.style.display='none'; return; }
+  const list = Array.isArray(data) ? data.filter(r => {
+    const u = allAdminUsers.find(u => u.id === userId) || staffTarget;
+    return u && r.card_id === (u.card_id || staffTarget?.card_id);
+  }) : [];
+  if (!list.length) { wrap.style.display='none'; return; }
+  wrap.style.display = 'block';
+  document.getElementById('s-gadget-res-list').innerHTML = list.map(r => `
+    <div class="card" style="margin-bottom:8px;padding:12px">
+      <div style="font-weight:600">${_esc(r.gadget_name)} x${r.quantity}</div>
+      <div style="font-size:12px;color:var(--mut)">${eur(r.total_price)} · Prenotato ${fdt(r.created_at).split(' ')[0]}</div>
+      <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
+        <button class="btn btn-p" style="flex:1;min-width:80px" onclick="staffFulfillGadget('${r.reservation_id}','credito','${_esc(r.gadget_name)}',${r.total_price})">💳 Credito</button>
+        <button class="btn btn-q" style="flex:1;min-width:80px" onclick="staffFulfillGadget('${r.reservation_id}','contanti','${_esc(r.gadget_name)}',${r.total_price})">💵 Contanti</button>
+        <button class="btn btn-g" style="flex:1;min-width:80px" onclick="staffFulfillGadget('${r.reservation_id}','sumup','${_esc(r.gadget_name)}',${r.total_price})">📱 SumUp</button>
+      </div>
+    </div>`).join('');
+}
+async function staffFulfillGadget(resId, method, name, total) {
+  const label = {credito:'💳 Credito',contanti:'💵 Contanti',sumup:'📱 SumUp'}[method]||method;
+  let previewLine = '';
+  if (method === 'credito' && staffTarget) {
+    const {data: pv} = await db.rpc('staff_preview_charge', {p_operator_id: currentUser.id, p_card_id: staffTarget.card_id, p_amount: total});
+    if (pv && pv.promo_code) previewLine = `\n\n⚡ Promo [${pv.promo_code}]: -${eur(pv.promo_discount)}\nTotale → ${eur(pv.final_amount)}`;
+  }
+  modalConfirm(`Consegnare "${name}" e incassare (${label})?${previewLine}`, async () => {
+    const {data, error} = await db.rpc('staff_fulfill_gadget_reservation', {p_operator_id: currentUser.id, p_reservation_id: resId, p_payment_method: method});
+    if (error||!data.ok) return toast((error&&error.message)||data.error);
+    const msg = data.promo_code
+      ? `✅ Consegnato! Promo ${data.promo_code}: -${eur(data.discount)} → Addebitato ${eur(data.charged)}`
+      : `✅ Consegnato! ${eur(data.amount)} (${label})`;
+    toast(msg, 'ok');
+    if (staffTarget) { const {data: u} = await db.rpc('staff_lookup', {p_card_id: staffTarget.card_id}); if (u?.ok) { staffTarget = u.user; document.getElementById('s-res-bal').textContent = eur(u.user.balance); } }
+    loadStaffGadgetReservationsForUser(staffTarget?.id);
+  });
 }
 async function loadStaffCheckin(cardId) {
   const wrap = document.getElementById('s-checkin-wrap');
@@ -832,6 +913,7 @@ async function adminCassaLookup() {
     loadAcCheckin(data.user.card_id),
     loadAcUserTx(data.user.card_id)
   ]);
+  loadAcGadgetReservationsForUser(data.user.id);
 }
 async function loadAcPendingEvents(cardId) {
   const wrap = document.getElementById('ac-pending-wrap');
@@ -850,6 +932,43 @@ async function loadAcPendingEvents(cardId) {
         <button class="btn btn-q" onclick="adminCassaPayEvent('${r.registration_id}','contanti','${r.evento.replace(/'/g,"\\'")}',${r.amount})">💵 Contanti</button>
       </div>
     </div>`).join('');
+}
+async function loadAcGadgetReservationsForUser(userId) {
+  const wrap = document.getElementById('ac-gadget-res-wrap');
+  if (!wrap) return;
+  const {data, error} = await db.rpc('staff_list_gadget_reservations', {p_operator_id: currentUser.id});
+  if (error) { wrap.style.display='none'; return; }
+  const list = Array.isArray(data) ? data.filter(r => r.card_id === staffTarget?.card_id) : [];
+  if (!list.length) { wrap.style.display='none'; return; }
+  wrap.style.display = 'block';
+  document.getElementById('ac-gadget-res-list').innerHTML = list.map(r => `
+    <div class="card" style="margin-bottom:8px;padding:12px">
+      <div style="font-weight:600">${_esc(r.gadget_name)} x${r.quantity}</div>
+      <div style="font-size:12px;color:var(--mut)">${eur(r.total_price)} · Prenotato ${fdt(r.created_at).split(' ')[0]}</div>
+      <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
+        <button class="btn btn-p" style="flex:1;min-width:80px" onclick="acFulfillGadget('${r.reservation_id}','credito','${_esc(r.gadget_name)}',${r.total_price})">💳 Credito</button>
+        <button class="btn btn-q" style="flex:1;min-width:80px" onclick="acFulfillGadget('${r.reservation_id}','contanti','${_esc(r.gadget_name)}',${r.total_price})">💵 Contanti</button>
+        <button class="btn btn-g" style="flex:1;min-width:80px" onclick="acFulfillGadget('${r.reservation_id}','sumup','${_esc(r.gadget_name)}',${r.total_price})">📱 SumUp</button>
+      </div>
+    </div>`).join('');
+}
+async function acFulfillGadget(resId, method, name, total) {
+  const label = {credito:'💳 Credito',contanti:'💵 Contanti',sumup:'📱 SumUp'}[method]||method;
+  let previewLine = '';
+  if (method === 'credito' && staffTarget) {
+    const {data: pv} = await db.rpc('staff_preview_charge', {p_operator_id: currentUser.id, p_card_id: staffTarget.card_id, p_amount: total});
+    if (pv && pv.promo_code) previewLine = `\n\n⚡ Promo [${pv.promo_code}]: -${eur(pv.promo_discount)}\nTotale → ${eur(pv.final_amount)}`;
+  }
+  modalConfirm(`Consegnare "${name}" e incassare (${label})?${previewLine}`, async () => {
+    const {data, error} = await db.rpc('staff_fulfill_gadget_reservation', {p_operator_id: currentUser.id, p_reservation_id: resId, p_payment_method: method});
+    if (error||!data.ok) return toast((error&&error.message)||data.error);
+    const msg = data.promo_code
+      ? `✅ Consegnato! Promo ${data.promo_code}: -${eur(data.discount)} → ${eur(data.charged)}`
+      : `✅ Consegnato! ${eur(data.amount)} (${label})`;
+    toast(msg, 'ok');
+    if (staffTarget) { const {data: u} = await db.rpc('staff_lookup', {p_card_id: staffTarget.card_id}); if (u?.ok) { staffTarget = u.user; document.getElementById('ac-res-bal').textContent = eur(u.user.balance); } }
+    loadAcGadgetReservationsForUser(staffTarget?.id);
+  });
 }
 async function loadAcCheckin(cardId) {
   const wrap = document.getElementById('ac-checkin-wrap');
