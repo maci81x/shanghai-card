@@ -786,6 +786,23 @@ body.nav-sidebar .screen .hdr{padding-left:80px}
               </div>
               <button class="btn btn-p w100" onclick="createPromo()">Crea Promo</button>
             </div>
+            <div id="fpe-form" class="card" style="display:none;margin-bottom:10px;border:1px solid var(--gold)">
+              <div class="sec-lbl" style="margin-bottom:10px">✏️ Modifica Promo</div>
+              <input type="hidden" id="fpe-id">
+              <div class="form-row">
+                <div class="fg"><label>Codice</label><input id="fpe-code" type="text" oninput="this.value=this.value.toUpperCase()"></div>
+                <div class="fg"><label>Descrizione</label><input id="fpe-desc" type="text"></div>
+              </div>
+              <div class="form-row">
+                <div class="fg"><label>Tipo</label><select id="fpe-type"><option value="fixed">Fisso (€)</option><option value="percent">Percentuale (%)</option></select></div>
+                <div class="fg"><label>Valore</label><input id="fpe-val" type="number" min="0.01" step="0.01"></div>
+              </div>
+              <div class="fg"><label>Valida fino</label><input id="fpe-until" type="date"></div>
+              <div style="display:flex;gap:8px;margin-top:4px">
+                <button class="btn btn-q" style="flex:1" onclick="document.getElementById('fpe-form').style.display='none'">Annulla</button>
+                <button class="btn btn-p" style="flex:2" onclick="saveEditPromo()">Salva modifiche</button>
+              </div>
+            </div>
             <div id="gs-pro-list"></div>
           </div>
         </div>
@@ -1899,9 +1916,23 @@ async function loadAGest() {
     : '<div class="empty">Nessun gadget</div>';
   const prs = cat.promos||[];
   proList.innerHTML = prs.length
-    ? `<div class="tbl-wrap"><table><thead><tr><th>Codice</th><th>Descrizione</th><th>Sconto</th><th>Valida fino</th></tr></thead><tbody>`
-        + prs.map(p=>`<tr><td class="mono">${p.code}</td><td>${p.description||'—'}</td><td>${p.discount_type==='percent'?p.discount_value+'%':eur(p.discount_value)}</td><td>${p.valid_until?fdt(p.valid_until).split(' ')[0]:'∞'}</td></tr>`).join('')
-        + '</tbody></table></div>'
+    ? prs.map(p => {
+        const sconto = p.discount_type==='percent' ? p.discount_value+'%' : eur(p.discount_value);
+        const fino   = p.valid_until ? fdt(p.valid_until).split(' ')[0] : '∞';
+        const untilVal = p.valid_until ? p.valid_until.slice(0,10) : '';
+        return `<div class="card" style="margin-bottom:8px;padding:12px">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <span class="mono" style="font-weight:700;font-size:15px">${_esc(p.code)}</span>
+            <span style="font-size:12px;color:var(--mut);flex:1">${_esc(p.description||'')}</span>
+            <span style="font-size:13px;color:var(--gold);font-weight:700">${sconto}</span>
+            <span style="font-size:11px;color:var(--mut)">fino ${fino}</span>
+          </div>
+          <div style="display:flex;gap:6px;margin-top:8px">
+            <button class="btn-sm" onclick="openEditPromo('${p.id}','${_esc(p.code)}','${_esc(p.description||'')}','${p.discount_type}',${p.discount_value},'${untilVal}')">✏️ Modifica</button>
+            <button class="btn-sm" style="color:var(--neg)" onclick="deletePromo('${p.id}','${_esc(p.code)}')">🗑️ Elimina</button>
+          </div>
+        </div>`;
+      }).join('')
     : '<div class="empty">Nessuna promo</div>';
 }
 async function adminToggleVisibility(eventId, currentVisible) {
@@ -2239,6 +2270,43 @@ async function createPromo() {
   ['fp-code','fp-desc','fp-val','fp-until','fp-maxu'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('fp-form').style.display='none';
   loadAGest();
+}
+function openEditPromo(id, code, desc, type, val, until) {
+  document.getElementById('fpe-id').value   = id;
+  document.getElementById('fpe-code').value = code;
+  document.getElementById('fpe-desc').value = desc;
+  document.getElementById('fpe-type').value = type;
+  document.getElementById('fpe-val').value  = val;
+  document.getElementById('fpe-until').value= until;
+  document.getElementById('fp-form').style.display  = 'none';
+  document.getElementById('fpe-form').style.display = 'block';
+  document.getElementById('fpe-form').scrollIntoView({behavior:'smooth', block:'nearest'});
+}
+async function saveEditPromo() {
+  const id    = document.getElementById('fpe-id').value;
+  const code  = document.getElementById('fpe-code').value.trim().toUpperCase();
+  const desc  = document.getElementById('fpe-desc').value.trim();
+  const type  = document.getElementById('fpe-type').value;
+  const val   = parseFloat(document.getElementById('fpe-val').value);
+  const until = document.getElementById('fpe-until').value;
+  if (!code || !val) return toast('Codice e valore obbligatori');
+  const {data, error} = await db.rpc('admin_update_promo', {
+    p_admin_id: currentUser.id, p_promo_id: id,
+    p_code: code, p_description: desc||null, p_type: type, p_value: val,
+    p_valid_until: until || null
+  });
+  if (error||!data.ok) return toast((error&&error.message)||data.error);
+  toast('Promo aggiornata!', 'ok');
+  document.getElementById('fpe-form').style.display = 'none';
+  loadAGest();
+}
+async function deletePromo(id, code) {
+  modalConfirm(`Eliminare la promo [${code}]?`, async () => {
+    const {data, error} = await db.rpc('admin_delete_promo', {p_admin_id: currentUser.id, p_promo_id: id});
+    if (error||!data.ok) return toast((error&&error.message)||data.error);
+    toast('Promo eliminata', 'ok');
+    loadAGest();
+  });
 }
 </script>
 </body>
