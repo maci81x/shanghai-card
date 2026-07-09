@@ -11,7 +11,7 @@
 <meta http-equiv="Cache-Control" content="no-cache">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=21">
+<link rel="stylesheet" href="style.css?v=22">
 </head>
 <body>
 
@@ -548,7 +548,7 @@
                 <div class="fg"><label>Stock</label><input id="fg-stock" type="number" min="0" placeholder="10"></div>
               </div>
               <div class="fg"><label>URL immagine (opz.)</label><input id="fg-img" type="url" placeholder="https://..."></div>
-              <button class="btn btn-p w100" onclick="createGadget()">Crea Gadget</button>
+              <button class="btn btn-p w100" data-action="create-gadget">Crea Gadget</button>
             </div>
             <div id="gs-gad-list"></div>
           </div>
@@ -578,7 +578,7 @@
                 <div class="fg"><label>Valida fino</label><input id="fp-until" type="date"></div>
                 <div class="fg"><label>Max usi (0=∞)</label><input id="fp-maxu" type="number" min="0" placeholder="0"></div>
               </div>
-              <button class="btn btn-p w100" onclick="createPromo()">Crea Promo</button>
+              <button class="btn btn-p w100" data-action="create-promo">Crea Promo</button>
             </div>
             <div id="gs-pro-list"></div>
           </div>
@@ -748,6 +748,6 @@
 </script>
 <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-<script src="app.js?v=21"></script>
+<script src="app.js?v=22"></script>
 </body>
 </html>

@@ -2,6 +2,17 @@ const SB_URL = 'https://kbcrtwqtzuipcsfiyupu.supabase.co';
 const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtiY3J0d3F0enVpcGNzZml5dXB1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1MTc3NzEsImV4cCI6MjA5OTA5Mzc3MX0.BYpoUqhiqREsA7MosC2jnLCkvXbcwjTeBdT7LhRS1UA';
 let db, currentUser = null, staffTarget = null, allAdminUsers = [], staffOps = [];
 
+// ── EVENT DELEGATION (bottoni generati da innerHTML) ──────────────────
+document.addEventListener('click', function(e) {
+  const btn = e.target.closest('[data-action]');
+  if (!btn) return;
+  const action = btn.dataset.action;
+  if (action === 'create-event')  adminCreateEvent();
+  if (action === 'delete-event')  adminDeleteEvent(btn.dataset.eventId, btn.dataset.eventTitle);
+  if (action === 'create-gadget') createGadget();
+  if (action === 'create-promo')  createPromo();
+});
+
 // ── NAV ───────────────────────────────────────────────────────────────
 function showNav(role) {
   const nav = document.getElementById('app-nav');
@@ -1519,7 +1530,7 @@ async function loadAGest() {
           <input type="checkbox" id="fe-public" style="width:18px;height:18px;accent-color:var(--gold)">
           <label for="fe-public">🌐 Apri iscrizioni esterne (link pubblico)</label>
         </div>
-        <button class="btn btn-p w100" onclick="adminCreateEvent()">Crea Evento</button>
+        <button class="btn btn-p w100" data-action="create-event">Crea Evento</button>
       </div>
       <div id="gs-ev-list"></div>`;
   }
@@ -1549,7 +1560,7 @@ async function loadAGest() {
           <button class="btn-sm" onclick="adminToggleVisibility('${e.id}',${e.visible!==false})">${e.visible===false?'🔓 Mostra':'🔒 Nascondi'}</button>
           <button class="btn-sm" onclick="toggleEventGuests('${e.id}','${e.title.replace(/'/g,"\\'")}',this)">👥 Iscritti</button>
           <button class="btn-sm" onclick="exportEventCSV('${e.id}','${e.title.replace(/'/g,"\\'")}')">📥 CSV</button>
-          <button class="btn-sm" style="color:var(--neg)" onclick="adminDeleteEvent('${e.id}','${e.title.replace(/'/g,"\\'")}')">🗑️ Elimina</button>
+          <button class="btn-sm" style="color:var(--neg)" data-action="delete-event" data-event-id="${e.id}" data-event-title="${_esc(e.title)}">🗑️ Elimina</button>
         </div>
         <div id="guests-${e.id}" style="display:none;margin-top:10px"></div>
       </div>`).join('');
@@ -1703,6 +1714,7 @@ function _slugify(s) {
     .replace(/-+/g,'-');
 }
 async function adminCreateEvent() {
+  alert('FUNZIONE CHIAMATA');
   try {
     const title  = document.getElementById('fe-title').value.trim();
     const desc   = document.getElementById('fe-desc').value.trim();
