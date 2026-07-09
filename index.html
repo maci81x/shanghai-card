@@ -2181,7 +2181,21 @@ async function toggleEventGuests(eventId, eventTitle, btn) {
 async function exportEventCSV(eventId, eventTitle) {
   const {data, error} = await db.rpc('admin_export_event_csv', {p_event_id: eventId});
   if (error) return toast(error.message);
-  const rows = Array.isArray(data) ? data : [];
+  const raw = (data && Array.isArray(data.iscritti)) ? data.iscritti : [];
+  if (!raw.length) return toast('Nessun iscritto da esportare');
+  const statusLabel = s => ({da_saldare:'Da saldare',saldato_credito:'Credito',saldato_sumup:'SumUp',saldato_contanti:'Contanti',annullato:'Annullato',gratuito:'Gratuito'}[s]||s||'—');
+  const rows = raw.map(r => ({
+    tipo:             r.tipo||'',
+    tessera:          r.card_id||'',
+    nome:             r.nome||'',
+    cognome:          r.cognome||'',
+    telefono:         r.telefono||'',
+    email:            r.email||'',
+    importo:          Number(r.amount||0).toFixed(2),
+    stato_pagamento:  statusLabel(r.payment_status),
+    presenza:         r.checked_in ? 'Sì' : 'No',
+    operatore:        r.operatore||''
+  }));
   const today = new Date().toISOString().slice(0,10);
   const safeName = (eventTitle||'evento').replace(/[^a-zA-Z0-9]/g,'_').toLowerCase();
   downloadCSV(rows, `iscritti_${safeName}_${today}.csv`);
