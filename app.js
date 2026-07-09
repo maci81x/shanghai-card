@@ -1521,6 +1521,7 @@ async function loadAGest() {
           <button class="btn-sm" onclick="adminToggleVisibility('${e.id}',${e.visible!==false})">${e.visible===false?'🔓 Mostra':'🔒 Nascondi'}</button>
           <button class="btn-sm" onclick="toggleEventGuests('${e.id}','${e.title.replace(/'/g,"\\'")}',this)">👥 Iscritti</button>
           <button class="btn-sm" onclick="exportEventCSV('${e.id}','${e.title.replace(/'/g,"\\'")}')">📥 CSV</button>
+          <button class="btn-sm" style="color:var(--neg)" onclick="adminDeleteEvent('${e.id}','${e.title.replace(/'/g,"\\'")}')">🗑️ Elimina</button>
         </div>
         <div id="guests-${e.id}" style="display:none;margin-top:10px"></div>
       </div>`).join('');
@@ -1652,6 +1653,16 @@ async function adminToggleVisibility(eventId, currentVisible) {
     loadAGest();
   });
 }
+async function adminDeleteEvent(eventId, eventTitle) {
+  modalConfirm(`Eliminare definitivamente "${eventTitle}"?\n\nTutte le iscrizioni e accompagnatori verranno cancellati.`, async () => {
+    try {
+      const {data, error} = await db.rpc('admin_delete_event', {p_admin_id: currentUser.id, p_event_id: eventId});
+      if (error || !data || !data.ok) return toast((error&&error.message)||(data&&data.error)||'Errore eliminazione');
+      toast('Evento eliminato', 'ok');
+      loadAGest();
+    } catch(e) { toast(e.message||'Errore'); }
+  });
+}
 function copyPublicLink(slug) {
   const link = `https://maci81x.github.io/shanghai-card/?event=${slug}`;
   navigator.clipboard?.writeText(link).then(()=>toast('Link copiato!','ok')).catch(()=>toast(link));
@@ -1664,39 +1675,40 @@ function _slugify(s) {
     .replace(/-+/g,'-');
 }
 async function adminCreateEvent() {
-  const title  = document.getElementById('fe-title').value.trim();
-  const desc   = document.getElementById('fe-desc').value.trim();
-  const date   = document.getElementById('fe-date').value;
-  const loc    = document.getElementById('fe-loc').value.trim();
-  const maxp   = parseInt(document.getElementById('fe-maxp').value)||null;
-  const price  = parseFloat(document.getElementById('fe-price').value)||0;
-  const pub    = document.getElementById('fe-public').checked;
-  const sumup  = document.getElementById('fe-sumup').value.trim();
-  let   slug   = document.getElementById('fe-slug').value.trim();
-  if (!title) return toast('Inserisci il titolo');
-  // Auto-slug dal titolo se le iscrizioni esterne sono attive e slug vuoto
-  if (pub && !slug) slug = _slugify(title);
-  const {data, error} = await db.rpc('admin_create_event', {
-    p_admin_id: currentUser.id,
-    p_title: title, p_description: desc||null,
-    p_event_date: date ? new Date(date).toISOString() : null,
-    p_location: loc||null, p_max_participants: maxp, p_price: price,
-    p_sumup_link: sumup||null, p_slug: slug||null,
-    p_public_registration: pub
-  });
-  if (error||!data||!data.ok) return toast((error&&error.message)||(data&&data.error)||'Errore creazione evento');
-  ['fe-title','fe-desc','fe-date','fe-loc','fe-maxp','fe-price','fe-sumup','fe-slug'].forEach(id=>document.getElementById(id).value='');
-  document.getElementById('fe-public').checked = false;
-  document.getElementById('fe-form').style.display='none';
-  loadAGest();
-  if (data.public_link) {
-    const link = data.public_link;
-    modalInfo(`✅ Evento creato!\n\n🔗 Link pubblico:\n${link}\n\nCondividi questo link per le iscrizioni esterne.`, () => {
-      navigator.clipboard?.writeText(link).then(()=>toast('Link copiato!','ok')).catch(()=>{});
-    }, '📋 Copia link');
-  } else {
-    toast('Evento creato!', 'ok');
-  }
+  try {
+    const title  = document.getElementById('fe-title').value.trim();
+    const desc   = document.getElementById('fe-desc').value.trim();
+    const date   = document.getElementById('fe-date').value;
+    const loc    = document.getElementById('fe-loc').value.trim();
+    const maxp   = parseInt(document.getElementById('fe-maxp').value)||null;
+    const price  = parseFloat(document.getElementById('fe-price').value)||0;
+    const pub    = document.getElementById('fe-public').checked;
+    const sumup  = document.getElementById('fe-sumup').value.trim();
+    let   slug   = document.getElementById('fe-slug').value.trim();
+    if (!title) return toast('Inserisci il titolo');
+    if (pub && !slug) slug = _slugify(title);
+    const {data, error} = await db.rpc('admin_create_event', {
+      p_admin_id: currentUser.id,
+      p_title: title, p_description: desc||null,
+      p_event_date: date ? new Date(date).toISOString() : null,
+      p_location: loc||null, p_max_participants: maxp, p_price: price,
+      p_sumup_link: sumup||null, p_slug: slug||null,
+      p_public_registration: pub
+    });
+    if (error||!data||!data.ok) return toast((error&&error.message)||(data&&data.error)||'Errore creazione evento');
+    ['fe-title','fe-desc','fe-date','fe-loc','fe-maxp','fe-price','fe-sumup','fe-slug'].forEach(id=>document.getElementById(id).value='');
+    document.getElementById('fe-public').checked = false;
+    document.getElementById('fe-form').style.display='none';
+    loadAGest();
+    if (data.public_link) {
+      const link = data.public_link;
+      modalInfo(`✅ Evento creato!\n\n🔗 Link pubblico:\n${link}\n\nCondividi questo link per le iscrizioni esterne.`, () => {
+        navigator.clipboard?.writeText(link).then(()=>toast('Link copiato!','ok')).catch(()=>{});
+      }, '📋 Copia link');
+    } else {
+      toast('Evento creato!', 'ok');
+    }
+  } catch(e) { toast(e.message||'Errore imprevisto'); }
 }
 async function createGadget() {
   const name  = document.getElementById('fg-name').value.trim();
