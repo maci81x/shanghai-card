@@ -545,6 +545,11 @@ body.nav-sidebar .screen .hdr{padding-left:80px}
       <div id="s-pending-list"></div>
     </div>
 
+    <div id="s-checkin-wrap" style="display:none">
+      <div class="sec-title" style="margin-bottom:8px">✅ Check-in eventi</div>
+      <div id="s-checkin-list"></div>
+    </div>
+
     <div id="s-tx-wrap" style="display:none">
       <div class="sec-title" style="margin-bottom:8px">📋 Ultime transazioni</div>
       <div id="s-tx-list" class="tx-list"></div>
@@ -1336,6 +1341,7 @@ async function staffLookup() {
   document.getElementById('s-result').style.display = 'block';
   await Promise.all([
     loadStaffPendingEvents(data.user.card_id),
+    loadStaffCheckin(data.user.card_id),
     loadStaffUserTx(data.user.card_id)
   ]);
 }
@@ -1371,6 +1377,31 @@ async function loadStaffPendingEvents(cardId) {
         <button class="btn btn-q" style="flex:1;min-width:100px" onclick="staffPayEvent('${r.registration_id}','contanti','${r.evento}',${r.amount})">💵 Contanti</button>
       </div>
     </div>`).join('');
+}
+async function loadStaffCheckin(cardId) {
+  const wrap = document.getElementById('s-checkin-wrap');
+  const list = document.getElementById('s-checkin-list');
+  const {data, error} = await db.rpc('staff_list_active_registrations', {p_operator_id: currentUser.id, p_card_id: cardId});
+  if (error || !data || !data.ok || !data.registrations.length) { wrap.style.display='none'; return; }
+  const pending = data.registrations.filter(r => !r.checked_in);
+  if (!pending.length) { wrap.style.display='none'; return; }
+  wrap.style.display = 'block';
+  list.innerHTML = pending.map(r => `
+    <div class="card" style="margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+      <div>
+        <div style="font-weight:700;font-size:14px">${_esc(r.evento)}</div>
+        <div style="font-size:11px;color:var(--mut)">${r.event_date?fdt(r.event_date):'—'} · ${r.payment_status}</div>
+      </div>
+      <button class="btn btn-g" style="flex-shrink:0" onclick="staffCheckin('${r.registration_id}','${r.evento.replace(/'/g,"\\'")}',this)">✅ Check-in</button>
+    </div>`).join('');
+}
+async function staffCheckin(regId, eventName, btn) {
+  btn.disabled = true; btn.textContent = '⏳';
+  const {data, error} = await db.rpc('staff_checkin_event', {p_operator_id: currentUser.id, p_registration_id: regId});
+  if (error || !data.ok) { btn.disabled=false; btn.textContent='✅ Check-in'; return toast((error&&error.message)||data.error); }
+  toast(data.already_in ? 'Già presente' : `✅ ${data.message}`, 'ok');
+  btn.textContent = '✅ Fatto'; btn.style.opacity = '0.5';
+  await loadStaffCheckin(staffTarget?.card_id);
 }
 async function staffPayEvent(regId, method, eventName, amount) {
   const label = {credito:'credito',sumup:'SumUp',contanti:'contanti'}[method];
@@ -1496,11 +1527,19 @@ async function loadAcPendingEvents(cardId) {
 async function loadAcCheckin(cardId) {
   const wrap = document.getElementById('ac-checkin-wrap');
   const list = document.getElementById('ac-checkin-list');
-  const {data, error} = await db.rpc('staff_get_user_transactions', {p_operator_id:currentUser.id, p_card_id:cardId});
-  wrap.style.display = 'none';
-  if (error || !data || !data.ok) return;
-  // Cerca registrazioni attive per check-in tramite staff_list_pending_events già caricati
-  // Il check-in completo è gestito da loadAcActiveReg
+  const {data, error} = await db.rpc('staff_list_active_registrations', {p_operator_id:currentUser.id, p_card_id:cardId});
+  if (error || !data || !data.ok || !data.registrations.length) { wrap.style.display='none'; return; }
+  const pending = data.registrations.filter(r => !r.checked_in);
+  if (!pending.length) { wrap.style.display='none'; return; }
+  wrap.style.display = 'block';
+  list.innerHTML = pending.map(r => `
+    <div class="card" style="margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+      <div>
+        <div style="font-weight:700;font-size:14px">${_esc(r.evento)}</div>
+        <div style="font-size:11px;color:var(--mut)">${r.event_date?fdt(r.event_date):'—'} · ${r.payment_status}</div>
+      </div>
+      <button class="btn btn-g" style="flex-shrink:0" onclick="adminCheckinRegBtn('${r.registration_id}','${r.evento.replace(/'/g,"\\'")}',this)">✅ Check-in</button>
+    </div>`).join('');
 }
 async function loadAcUserTx(cardId) {
   const wrap = document.getElementById('ac-tx-wrap');
@@ -1895,6 +1934,28 @@ async function doResetPin() {
 }
 
 // ── EVENTI OSPITI ────────────────────────────────────────────────────
+async function adminCheckinReg(regId, btn) {
+  btn.disabled = true; btn.textContent = '⏳';
+  const {data, error} = await db.rpc('staff_checkin_event', {p_operator_id:currentUser.id, p_registration_id:regId});
+  if (error || !data.ok) { btn.disabled=false; btn.textContent='Check-in'; return toast((error&&error.message)||data.error); }
+  toast(data.already_in ? 'Già presente' : `✅ ${data.message}`, 'ok');
+  btn.parentElement.innerHTML = `<span style="color:var(--grn);font-weight:700">✅</span>`;
+}
+async function adminCheckinGuest(guestId, btn) {
+  btn.disabled = true; btn.textContent = '⏳';
+  const {data, error} = await db.rpc('staff_checkin_guest', {p_operator_id:currentUser.id, p_guest_id:guestId});
+  if (error || !data.ok) { btn.disabled=false; btn.textContent='Check-in'; return toast((error&&error.message)||data.error); }
+  toast(data.already_in ? 'Già presente' : `✅ ${data.message}`, 'ok');
+  btn.parentElement.innerHTML = `<span style="color:var(--grn);font-weight:700">✅</span>`;
+}
+async function adminCheckinRegBtn(regId, eventName, btn) {
+  btn.disabled = true; btn.textContent = '⏳';
+  const {data, error} = await db.rpc('staff_checkin_event', {p_operator_id:currentUser.id, p_registration_id:regId});
+  if (error || !data.ok) { btn.disabled=false; btn.textContent='✅ Check-in'; return toast((error&&error.message)||data.error); }
+  toast(data.already_in ? 'Già presente' : `✅ ${data.message}`, 'ok');
+  btn.textContent = '✅ Fatto'; btn.style.opacity='0.5'; btn.disabled=true;
+  if (staffTarget) await loadAcCheckin(staffTarget.card_id);
+}
 async function loadEvDash(eventId) {
   const el = document.getElementById('ev-dash-' + eventId);
   if (!el) return;
@@ -1921,24 +1982,29 @@ async function toggleEventGuests(eventId, eventTitle, btn) {
   let html = `<div style="font-size:12px;color:var(--mut);margin-bottom:8px">${total} iscritti totali</div>`;
   if (soci.length) {
     html += `<div class="sec-lbl" style="margin-bottom:6px">Soci (${soci.length})</div>`;
-    html += `<div class="tbl-wrap"><table><thead><tr><th>Tessera</th><th>Nome</th><th>Importo</th><th>Stato</th><th>Operatore</th></tr></thead><tbody>`
+    html += `<div class="tbl-wrap"><table><thead><tr><th>Tessera</th><th>Nome</th><th>Importo</th><th>Stato</th><th>Presenza</th></tr></thead><tbody>`
       + soci.map(r=>`<tr>
           <td class="mono">${r.card_id}</td>
           <td>${r.display_name}</td>
           <td>${eur(r.amount)}</td>
           <td style="color:${statusColor(r.payment_status)}">${statusLabel(r.payment_status)}</td>
-          <td style="font-size:11px">${r.operatore||'—'}</td>
+          <td>${r.checked_in
+            ? `<span style="color:var(--grn);font-weight:700">✅</span>`
+            : `<button class="btn-sm" onclick="adminCheckinReg('${r.registration_id}',this)">Check-in</button>`}</td>
         </tr>`).join('')
       + `</tbody></table></div>`;
   }
   if (ospiti.length) {
     html += `<div class="sec-lbl" style="margin:10px 0 6px">Ospiti esterni (${ospiti.length})</div>`;
-    html += `<div class="tbl-wrap"><table><thead><tr><th>Nome</th><th>Cognome</th><th>Tel</th><th>Importo</th><th>Stato</th></tr></thead><tbody>`
+    html += `<div class="tbl-wrap"><table><thead><tr><th>Nome</th><th>Cognome</th><th>Tel</th><th>Importo</th><th>Stato</th><th>Presenza</th></tr></thead><tbody>`
       + ospiti.map(g=>`<tr>
           <td>${g.nome}</td><td>${g.cognome}</td>
           <td style="font-size:12px">${g.telefono||'—'}</td>
           <td>${eur(g.amount)}</td>
           <td style="color:${statusColor(g.payment_status)}">${statusLabel(g.payment_status)}</td>
+          <td>${g.checked_in
+            ? `<span style="color:var(--grn);font-weight:700">✅</span>`
+            : `<button class="btn-sm" onclick="adminCheckinGuest('${g.id}',this)">Check-in</button>`}</td>
         </tr>`).join('')
       + `</tbody></table></div>`;
   }
