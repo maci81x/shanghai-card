@@ -1677,10 +1677,12 @@ async function adminCreateEvent() {
   // Auto-slug dal titolo se le iscrizioni esterne sono attive e slug vuoto
   if (pub && !slug) slug = _slugify(title);
   const {data, error} = await db.rpc('admin_create_event', {
+    p_admin_id: currentUser.id,
     p_title: title, p_description: desc||null,
     p_event_date: date ? new Date(date).toISOString() : null,
     p_location: loc||null, p_max_participants: maxp, p_price: price,
-    p_public_registration: pub, p_sumup_link: sumup||null, p_slug: slug||null
+    p_sumup_link: sumup||null, p_slug: slug||null,
+    p_public_registration: pub
   });
   if (error||!data||!data.ok) return toast((error&&error.message)||(data&&data.error)||'Errore creazione evento');
   ['fe-title','fe-desc','fe-date','fe-loc','fe-maxp','fe-price','fe-sumup','fe-slug'].forEach(id=>document.getElementById(id).value='');
