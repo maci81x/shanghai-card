@@ -11,7 +11,7 @@
 <meta http-equiv="Cache-Control" content="no-cache">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=24">
+<link rel="stylesheet" href="style.css?v=25">
 </head>
 <body>
 
@@ -327,7 +327,10 @@
         </div>
 
         <div id="s-hist-wrap" style="display:none">
-          <div class="sec-title">Operazioni sessione</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+            <div class="sec-title" style="margin-bottom:0">Operazioni sessione</div>
+            <button class="btn-sm" style="font-size:11px;color:var(--mut)" data-action="clear-session">🧹 Svuota</button>
+          </div>
           <div id="s-hist" class="tx-list"></div>
         </div>
       </div>
@@ -748,6 +751,6 @@
 </script>
 <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-<script src="app.js?v=24"></script>
+<script src="app.js?v=25"></script>
 </body>
 </html>

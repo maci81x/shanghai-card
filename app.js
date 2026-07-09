@@ -11,6 +11,7 @@ document.addEventListener('click', function(e) {
   if (action === 'delete-event')  adminDeleteEvent(btn.dataset.eventId, btn.dataset.eventTitle);
   if (action === 'create-gadget') createGadget();
   if (action === 'create-promo')  createPromo();
+  if (action === 'clear-session') clearSession();
 });
 
 // ── NAV ───────────────────────────────────────────────────────────────
@@ -189,6 +190,7 @@ function route(role) {
 }
 function logout() {
   currentUser = null; staffTarget = null;
+  staffOps = []; localStorage.removeItem('s_ops');
   sessionStorage.removeItem('sh_u'); sessionStorage.removeItem('sh_r');
   document.getElementById('l-pin').value = '';
   hideNav();
@@ -1063,6 +1065,14 @@ function renderStaffHist() {
       <div class="tx-inf"><div class="tx-dsc">${o.name} (${o.card})${o.desc?' — '+o.desc:''}</div><div class="tx-dt">${fdt(o.ts)}</div></div>
       <div class="tx-amt ${o.amount>=0?'pos':'neg-c'}">${o.amount>=0?'+':''}${eur(o.amount)}</div>
     </div>`).join('');
+}
+function clearSession() {
+  modalConfirm('Svuotare la lista operazioni sessione?', () => {
+    staffOps = [];
+    localStorage.removeItem('s_ops');
+    renderStaffHist();
+    toast('Operazioni sessione svuotate', 'ok');
+  });
 }
 
 // ── STAFF EVENTI ─────────────────────────────────────────────────────
