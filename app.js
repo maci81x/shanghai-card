@@ -1495,6 +1495,34 @@ async function loadAGest() {
   // Pre-load SumUp links if tab is active
   const sumupPanel = document.getElementById('gs-sumup');
   if (sumupPanel && sumupPanel.classList.contains('active')) loadAdminSumupLinks();
+  // Genera il form eventi nel pannello gs-ev (onclick inline garantito)
+  const gsEv = document.getElementById('gs-ev');
+  if (gsEv) {
+    gsEv.innerHTML = `
+      <button class="btn-sm p" style="margin-bottom:10px" onclick="toggleEl('fe-form')">+ Nuovo Evento</button>
+      <div id="fe-form" class="card" style="display:none;margin-bottom:10px">
+        <div class="fg"><label>Titolo</label><input id="fe-title" type="text" placeholder="Nome evento"></div>
+        <div class="fg"><label>Descrizione</label><input id="fe-desc" type="text" placeholder="Descrizione"></div>
+        <div class="form-row">
+          <div class="fg"><label>Data e ora</label><input id="fe-date" type="datetime-local"></div>
+          <div class="fg"><label>Luogo</label><input id="fe-loc" type="text" placeholder="Luogo"></div>
+        </div>
+        <div class="form-row">
+          <div class="fg"><label>Max posti (0=∞)</label><input id="fe-maxp" type="number" min="0" placeholder="0"></div>
+          <div class="fg"><label>Prezzo €</label><input id="fe-price" type="number" min="0" step="0.50" placeholder="0.00"></div>
+        </div>
+        <div class="form-row">
+          <div class="fg"><label>Link SumUp (opz.)</label><input id="fe-sumup" type="url" placeholder="https://..."></div>
+          <div class="fg"><label>Slug (opz.)</label><input id="fe-slug" type="text" placeholder="es. yoga-giugno-2026"></div>
+        </div>
+        <div class="fg" style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="fe-public" style="width:18px;height:18px;accent-color:var(--gold)">
+          <label for="fe-public">🌐 Apri iscrizioni esterne (link pubblico)</label>
+        </div>
+        <button class="btn btn-p w100" onclick="adminCreateEvent()">Crea Evento</button>
+      </div>
+      <div id="gs-ev-list"></div>`;
+  }
   const evList  = document.getElementById('gs-ev-list');
   const gadList = document.getElementById('gs-gad-list');
   const proList = document.getElementById('gs-pro-list');
