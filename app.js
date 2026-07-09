@@ -1714,41 +1714,65 @@ function _slugify(s) {
     .replace(/-+/g,'-');
 }
 async function adminCreateEvent() {
-  alert('FUNZIONE CHIAMATA');
   try {
-    const title  = document.getElementById('fe-title').value.trim();
-    const desc   = document.getElementById('fe-desc').value.trim();
-    const date   = document.getElementById('fe-date').value;
-    const loc    = document.getElementById('fe-loc').value.trim();
-    const maxp   = parseInt(document.getElementById('fe-maxp').value)||null;
-    const price  = parseFloat(document.getElementById('fe-price').value)||0;
-    const pub    = document.getElementById('fe-public').checked;
-    const sumup  = document.getElementById('fe-sumup').value.trim();
-    let   slug   = document.getElementById('fe-slug').value.trim();
-    if (!title) return toast('Inserisci il titolo');
+    const get = (id) => {
+      const el = document.getElementById(id);
+      if (!el) throw new Error('Campo mancante nel DOM: #' + id);
+      return el.value;
+    };
+    const title = get('fe-title').trim();
+    const desc  = get('fe-desc').trim();
+    const date  = get('fe-date');
+    const loc   = get('fe-loc').trim();
+    const maxp  = parseInt(get('fe-maxp')) || null;
+    const price = parseFloat(get('fe-price')) || 0;
+    const sumup = get('fe-sumup').trim();
+    let   slug  = get('fe-slug').trim();
+    const pubEl = document.getElementById('fe-public');
+    if (!pubEl) throw new Error('Campo mancante nel DOM: #fe-public');
+    const pub = pubEl.checked;
+
+    if (!title) { modalInfo('⚠️ Inserisci il titolo'); return; }
     if (pub && !slug) slug = _slugify(title);
-    const {data, error} = await db.rpc('admin_create_event', {
-      p_admin_id: currentUser.id,
-      p_title: title, p_description: desc||null,
-      p_event_date: date ? new Date(date).toISOString() : null,
-      p_location: loc||null, p_max_participants: maxp, p_price: price,
-      p_sumup_link: sumup||null, p_slug: slug||null,
+
+    const { data, error } = await db.rpc('admin_create_event', {
+      p_admin_id:            currentUser.id,
+      p_title:               title,
+      p_description:         desc || null,
+      p_event_date:          date ? new Date(date).toISOString() : null,
+      p_location:            loc || null,
+      p_max_participants:    maxp,
+      p_price:               price,
+      p_sumup_link:          sumup || null,
+      p_slug:                slug || null,
       p_public_registration: pub
     });
-    if (error||!data||!data.ok) return toast((error&&error.message)||(data&&data.error)||'Errore creazione evento');
-    ['fe-title','fe-desc','fe-date','fe-loc','fe-maxp','fe-price','fe-sumup','fe-slug'].forEach(id=>document.getElementById(id).value='');
-    document.getElementById('fe-public').checked = false;
-    document.getElementById('fe-form').style.display='none';
+
+    console.log('adminCreateEvent RPC:', { data, error });
+
+    if (error) throw new Error('Errore RPC: ' + error.message);
+    if (!data || data.ok === false) throw new Error('RPC ko: ' + (data?.error || JSON.stringify(data)));
+
+    // Reset form
+    ['fe-title','fe-desc','fe-date','fe-loc','fe-maxp','fe-price','fe-sumup','fe-slug']
+      .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+    if (pubEl) pubEl.checked = false;
+    const fEl = document.getElementById('fe-form');
+    if (fEl) fEl.style.display = 'none';
     loadAGest();
+
     if (data.public_link) {
       const link = data.public_link;
       modalInfo(`✅ Evento creato!\n\n🔗 Link pubblico:\n${link}\n\nCondividi questo link per le iscrizioni esterne.`, () => {
-        navigator.clipboard?.writeText(link).then(()=>toast('Link copiato!','ok')).catch(()=>{});
+        navigator.clipboard?.writeText(link).then(() => toast('Link copiato!', 'ok')).catch(() => {});
       }, '📋 Copia link');
     } else {
-      toast('Evento creato!', 'ok');
+      modalInfo('✅ Evento creato!');
     }
-  } catch(e) { toast(e.message||'Errore imprevisto'); }
+  } catch (err) {
+    console.error('adminCreateEvent:', err);
+    modalInfo('❌ Errore\n\n' + err.message);
+  }
 }
 async function createGadget() {
   const name  = document.getElementById('fg-name').value.trim();
