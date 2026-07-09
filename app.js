@@ -1689,8 +1689,8 @@ async function adminCreateEvent() {
   document.getElementById('fe-public').checked = false;
   document.getElementById('fe-form').style.display='none';
   loadAGest();
-  if (pub && data.slug) {
-    const link = `https://maci81x.github.io/shanghai-card/?event=${data.slug}`;
+  if (data.public_link) {
+    const link = data.public_link;
     modalInfo(`✅ Evento creato!\n\n🔗 Link pubblico:\n${link}\n\nCondividi questo link per le iscrizioni esterne.`, () => {
       navigator.clipboard?.writeText(link).then(()=>toast('Link copiato!','ok')).catch(()=>{});
     }, '📋 Copia link');
