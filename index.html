@@ -728,8 +728,9 @@ body.nav-sidebar .screen .hdr{padding-left:80px}
               </div>
               <div class="form-row">
                 <div class="fg"><label>Link SumUp (opz.)</label><input id="fe-sumup" type="url" placeholder="https://..."></div>
-                <div class="fg" style="display:flex;align-items:center;gap:8px;padding-top:22px"><input type="checkbox" id="fe-public" style="width:18px;height:18px;accent-color:var(--gold)"><label for="fe-public">Reg. pubblica</label></div>
+                <div class="fg"><label>Slug (opz.)</label><input id="fe-slug" type="text" placeholder="es. yoga-giugno-2026"></div>
               </div>
+              <div class="fg" style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="fe-public" style="width:18px;height:18px;accent-color:var(--gold)"><label for="fe-public">🌐 Apri iscrizioni esterne (link pubblico)</label></div>
               <button class="btn btn-p w100" onclick="createEvent()">Crea Evento</button>
             </div>
             <div id="gs-ev-list"></div>
@@ -1736,43 +1737,60 @@ async function loadATx() {
     + '</tbody></table></div>';
 }
 async function loadAGest() {
-  const {data} = await db.rpc('get_catalog');
-  if (!data) return;
+  const [{data: evData}, {data: catData}] = await Promise.all([
+    db.rpc('admin_list_events'),
+    db.rpc('get_catalog')
+  ]);
   const evList  = document.getElementById('gs-ev-list');
   const gadList = document.getElementById('gs-gad-list');
   const proList = document.getElementById('gs-pro-list');
-  const evs = data.events||[];
+  const evs = evData||[];
   if (!evs.length) { evList.innerHTML='<div class="empty">Nessun evento</div>'; }
   else {
     evList.innerHTML = evs.map(e=>`
-      <div class="card" style="margin-bottom:10px">
-        <div style="font-weight:700;margin-bottom:4px">${_esc(e.title)}</div>
+      <div class="card" style="margin-bottom:10px;opacity:${e.visible===false?0.55:1}">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+          <span style="font-weight:700;flex:1">${_esc(e.title)}</span>
+          <span style="font-size:11px;padding:2px 8px;border-radius:12px;background:${e.visible===false?'rgba(239,68,68,.15)':'rgba(34,197,94,.15)'};color:${e.visible===false?'var(--neg)':'var(--grn)'}">
+            ${e.visible===false?'👁‍🗨 Nascosto':'👁 Visibile'}
+          </span>
+        </div>
         <div style="font-size:12px;color:var(--mut)">${e.event_date?fdt(e.event_date):'—'} · ${_esc(e.location||'—')} · ${e.price>0?eur(e.price):'Gratuito'} · ${e.max_participants||'∞'} posti</div>
         ${e.slug&&e.public_registration?`<div style="font-size:11px;margin-top:6px">🔗 <a href="?event=${e.slug}" target="_blank" class="reg-link">?event=${e.slug}</a></div>`:''}
         <div id="ev-dash-${e.id}" class="ev-mini-dash" style="margin-top:10px;display:flex;gap:12px;flex-wrap:wrap;padding:10px;background:var(--bg);border-radius:8px">
           <span style="font-size:11px;color:var(--mut)">⏳ carico…</span>
         </div>
         <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn-sm" onclick="adminToggleVisibility('${e.id}',${e.visible!==false})">${e.visible===false?'🔓 Mostra':'🔒 Nascondi'}</button>
           <button class="btn-sm" onclick="toggleEventGuests('${e.id}','${e.title.replace(/'/g,"\\'")}',this)">👥 Iscritti</button>
           <button class="btn-sm" onclick="exportEventCSV('${e.id}','${e.title.replace(/'/g,"\\'")}')">📥 CSV</button>
         </div>
         <div id="guests-${e.id}" style="display:none;margin-top:10px"></div>
       </div>`).join('');
-    // Carica i dashboard di tutti gli eventi in parallelo
     await Promise.all(evs.map(e => loadEvDash(e.id)));
   }
-  const gads = data.gadgets||[];
+  const cat = catData||{};
+  const gads = cat.gadgets||[];
   gadList.innerHTML = gads.length
     ? `<div class="tbl-wrap"><table><thead><tr><th>Nome</th><th>Prezzo</th><th>Stock</th></tr></thead><tbody>`
         + gads.map(g=>`<tr><td>${g.name}</td><td>${eur(g.price)}</td><td>${g.stock}</td></tr>`).join('')
         + '</tbody></table></div>'
     : '<div class="empty">Nessun gadget</div>';
-  const prs = data.promos||[];
+  const prs = cat.promos||[];
   proList.innerHTML = prs.length
     ? `<div class="tbl-wrap"><table><thead><tr><th>Codice</th><th>Descrizione</th><th>Sconto</th><th>Valida fino</th></tr></thead><tbody>`
         + prs.map(p=>`<tr><td class="mono">${p.code}</td><td>${p.description||'—'}</td><td>${p.discount_type==='percent'?p.discount_value+'%':eur(p.discount_value)}</td><td>${p.valid_until?fdt(p.valid_until).split(' ')[0]:'∞'}</td></tr>`).join('')
         + '</tbody></table></div>'
     : '<div class="empty">Nessuna promo</div>';
+}
+async function adminToggleVisibility(eventId, currentVisible) {
+  const label = currentVisible ? 'nascondere' : 'rendere visibile';
+  modalConfirm(`Vuoi ${label} questo evento nel catalogo?`, async () => {
+    const {data, error} = await db.rpc('admin_toggle_event_visibility', {p_event_id: eventId});
+    if (error||!data.ok) return toast((error&&error.message)||data.error);
+    toast(`Evento ${data.visible?'visibile':'nascosto'}`, 'ok');
+    loadAGest();
+  });
 }
 async function createEvent() {
   const title  = document.getElementById('fe-title').value.trim();
@@ -1783,12 +1801,13 @@ async function createEvent() {
   const price  = parseFloat(document.getElementById('fe-price').value)||0;
   const pub    = document.getElementById('fe-public').checked;
   const sumup  = document.getElementById('fe-sumup').value.trim();
+  const slug   = document.getElementById('fe-slug').value.trim();
   if (!title) return toast('Inserisci il titolo');
-  const {data, error} = await db.rpc('admin_create_event', {p_title:title, p_description:desc||null, p_event_date:date?new Date(date).toISOString():null, p_location:loc||null, p_max_participants:maxp, p_price:price, p_public_registration:pub, p_sumup_link:sumup||null});
+  const {data, error} = await db.rpc('admin_create_event', {p_title:title, p_description:desc||null, p_event_date:date?new Date(date).toISOString():null, p_location:loc||null, p_max_participants:maxp, p_price:price, p_public_registration:pub, p_sumup_link:sumup||null, p_slug:slug||null});
   if (error||!data.ok) return toast((error&&error.message)||data.error);
   if (pub && data.public_link) toast(`Evento creato! Link: ${data.public_link}`, 'ok');
   else toast('Evento creato!', 'ok');
-  ['fe-title','fe-desc','fe-date','fe-loc','fe-maxp','fe-price','fe-sumup'].forEach(id=>document.getElementById(id).value='');
+  ['fe-title','fe-desc','fe-date','fe-loc','fe-maxp','fe-price','fe-sumup','fe-slug'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('fe-public').checked = false;
   document.getElementById('fe-form').style.display='none';
   loadAGest();
