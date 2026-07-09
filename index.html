@@ -580,10 +580,65 @@ body.nav-sidebar .screen .hdr{padding-left:80px}
 
     <div class="tab-wrap">
       <div class="tabs" id="atabs">
-        <button class="tab active" data-p="at-dash" onclick="switchTab(this,'atabs');loadDash()">📊 Dashboard</button>
-        <button class="tab" data-p="at-users" onclick="switchTab(this,'atabs');loadAUsers()">👥 Utenti</button>
-        <button class="tab" data-p="at-tx" onclick="switchTab(this,'atabs');loadATx()">📋 Trans.</button>
-        <button class="tab" data-p="at-gest" onclick="switchTab(this,'atabs');loadAGest()">⚙️ Gestione</button>
+        <button class="tab active" data-p="at-dash" onclick="switchTab(this,'atabs');loadDash()">📊 Dash</button>
+        <button class="tab" data-p="at-cassa" onclick="switchTab(this,'atabs')">🏪 Cassa</button>
+        <button class="tab" data-p="at-users" onclick="switchTab(this,'atabs');loadAUsers()">👥 Soci</button>
+        <button class="tab" data-p="at-tx" onclick="switchTab(this,'atabs');loadATx()">📋 Tx</button>
+        <button class="tab" data-p="at-gest" onclick="switchTab(this,'atabs');loadAGest()">⚙️ Gest.</button>
+      </div>
+
+      <!-- CASSA (admin) -->
+      <div id="at-cassa" class="tab-panel">
+        <div class="card">
+          <div class="sec-lbl">Cerca tessera</div>
+          <div class="inp-row">
+            <input id="ac-lookup" type="text" placeholder="SH-001" oninput="this.value=this.value.toUpperCase()" style="flex:1">
+            <button class="btn btn-p" onclick="adminCassaLookup()">Cerca</button>
+            <button class="btn btn-g" onclick="toggleAcScanner()" id="ac-scan-btn">📷</button>
+          </div>
+          <div id="ac-scanner-wrap" style="display:none;margin-top:12px">
+            <div id="ac-scanner-reader" style="border-radius:8px;overflow:hidden"></div>
+            <button class="btn btn-q w100" style="margin-top:8px" onclick="stopAcScanner()">Chiudi fotocamera</button>
+          </div>
+        </div>
+        <div id="ac-result" style="display:none">
+          <div class="card card-gold">
+            <div class="res-name" id="ac-res-name"></div>
+            <div class="res-sub" id="ac-res-card"></div>
+            <div class="res-bal" id="ac-res-bal"></div>
+          </div>
+          <div class="card">
+            <div class="sec-lbl">Ricarica rapida</div>
+            <div class="quick-grid">
+              <button class="btn-amt" onclick="adminCassaRecharge(5)">€5</button>
+              <button class="btn-amt" onclick="adminCassaRecharge(10)">€10</button>
+              <button class="btn-amt" onclick="adminCassaRecharge(20)">€20</button>
+              <button class="btn-amt" onclick="adminCassaRecharge(50)">€50</button>
+            </div>
+            <div class="inp-row" style="margin-top:12px">
+              <input id="ac-custom" type="number" placeholder="Importo €" min="1" step="0.50" style="flex:1">
+              <button class="btn btn-p" onclick="adminCassaRechargeCustom()">Ricarica</button>
+            </div>
+          </div>
+          <div class="card">
+            <div class="sec-lbl">Addebito</div>
+            <div class="fg"><label>Importo €</label><input id="ac-charge-amt" type="number" placeholder="0,00" min="0.01" step="0.01"></div>
+            <div class="fg"><label>Descrizione</label><input id="ac-charge-desc" type="text" value="Consumazione" placeholder="es. Consumazione"></div>
+            <button class="btn btn-neg w100" onclick="adminCassaCharge()">Addebita</button>
+          </div>
+        </div>
+        <div id="ac-pending-wrap" style="display:none">
+          <div class="sec-title" style="margin-bottom:8px">Da saldare</div>
+          <div id="ac-pending-list"></div>
+        </div>
+        <div id="ac-checkin-wrap" style="display:none">
+          <div class="sec-title" style="margin-bottom:8px">Check-in disponibili</div>
+          <div id="ac-checkin-list"></div>
+        </div>
+        <div id="ac-tx-wrap" style="display:none">
+          <div class="sec-title" style="margin-bottom:8px">📋 Ultime transazioni</div>
+          <div id="ac-tx-list" class="tx-list"></div>
+        </div>
       </div>
 
       <!-- DASHBOARD -->
@@ -1378,6 +1433,123 @@ function renderStaffHist() {
       <div class="tx-inf"><div class="tx-dsc">${o.name} (${o.card})${o.desc?' — '+o.desc:''}</div><div class="tx-dt">${fdt(o.ts)}</div></div>
       <div class="tx-amt ${o.amount>=0?'pos':'neg-c'}">${o.amount>=0?'+':''}${eur(o.amount)}</div>
     </div>`).join('');
+}
+
+// ── ADMIN CASSA ───────────────────────────────────────────────────────
+let _acScanner = null;
+function toggleAcScanner() {
+  const wrap = document.getElementById('ac-scanner-wrap');
+  if (wrap.style.display === 'none') {
+    wrap.style.display = 'block';
+    _acScanner = new Html5Qrcode('ac-scanner-reader');
+    _acScanner.start(
+      {facingMode:'environment'}, {fps:10, qrbox:{width:240,height:240}},
+      text => { stopAcScanner(); document.getElementById('ac-lookup').value=text.toUpperCase(); adminCassaLookup(); },
+      ()=>{}
+    ).catch(()=>{ toast('Fotocamera non disponibile'); stopAcScanner(); });
+  } else { stopAcScanner(); }
+}
+function stopAcScanner() {
+  document.getElementById('ac-scanner-wrap').style.display='none';
+  if (_acScanner) { _acScanner.stop().catch(()=>{}).finally(()=>{ _acScanner.clear(); _acScanner=null; }); }
+}
+async function adminCassaLookup() {
+  const card = document.getElementById('ac-lookup').value.trim().toUpperCase();
+  if (!card) return toast('Inserisci il codice tessera');
+  const {data, error} = await db.rpc('staff_lookup', {p_card_id: card});
+  if (error||!data.ok) return toast((error&&error.message)||data.error);
+  staffTarget = data.user;
+  document.getElementById('ac-res-name').textContent = data.user.display_name;
+  document.getElementById('ac-res-card').textContent = data.user.card_id;
+  document.getElementById('ac-res-bal').textContent  = eur(data.user.balance);
+  document.getElementById('ac-result').style.display = 'block';
+  await Promise.all([
+    loadAcPendingEvents(data.user.card_id),
+    loadAcCheckin(data.user.card_id),
+    loadAcUserTx(data.user.card_id)
+  ]);
+}
+async function loadAcPendingEvents(cardId) {
+  const wrap = document.getElementById('ac-pending-wrap');
+  const list = document.getElementById('ac-pending-list');
+  const {data, error} = await db.rpc('staff_list_pending_events', {p_card_id: cardId});
+  if (error || !data || !data.length) { wrap.style.display='none'; return; }
+  wrap.style.display = 'block';
+  list.innerHTML = data.map(r => `
+    <div class="card ev-card-pending" style="margin-bottom:8px">
+      <div class="ev-status ev-pending">⏳ Da saldare · <strong>${eur(r.amount)}</strong></div>
+      <div style="font-weight:700;margin:6px 0 2px">${_esc(r.evento)}</div>
+      <div style="font-size:12px;color:var(--mut);margin-bottom:10px">${r.event_date?fdt(r.event_date):'—'}</div>
+      <div class="ev-pay-grid">
+        <button class="btn btn-p" onclick="adminCassaPayEvent('${r.registration_id}','credito','${r.evento.replace(/'/g,"\\'")}',${r.amount})">💳 Credito</button>
+        <button class="btn btn-g" onclick="adminCassaPayEvent('${r.registration_id}','sumup','${r.evento.replace(/'/g,"\\'")}',${r.amount})">📱 SumUp</button>
+        <button class="btn btn-q" onclick="adminCassaPayEvent('${r.registration_id}','contanti','${r.evento.replace(/'/g,"\\'")}',${r.amount})">💵 Contanti</button>
+      </div>
+    </div>`).join('');
+}
+async function loadAcCheckin(cardId) {
+  const wrap = document.getElementById('ac-checkin-wrap');
+  const list = document.getElementById('ac-checkin-list');
+  const {data, error} = await db.rpc('staff_get_user_transactions', {p_operator_id:currentUser.id, p_card_id:cardId});
+  wrap.style.display = 'none';
+  if (error || !data || !data.ok) return;
+  // Cerca registrazioni attive per check-in tramite staff_list_pending_events già caricati
+  // Il check-in completo è gestito da loadAcActiveReg
+}
+async function loadAcUserTx(cardId) {
+  const wrap = document.getElementById('ac-tx-wrap');
+  const list = document.getElementById('ac-tx-list');
+  const {data, error} = await db.rpc('staff_get_user_transactions', {p_operator_id:currentUser.id, p_card_id:cardId});
+  if (error || !data || !data.ok || !data.transactions.length) { wrap.style.display='none'; return; }
+  wrap.style.display = 'block';
+  list.innerHTML = data.transactions.map(t => `
+    <div class="tx-row">
+      <span class="tx-ic">${txic(t.type)}</span>
+      <div class="tx-inf">
+        <div class="tx-dsc">${t.description||t.type}</div>
+        <div class="tx-dt">${fdt(t.created_at)}${t.operator_name?' · '+t.operator_name:''}</div>
+      </div>
+      <div class="tx-amt ${t.amount>=0?'pos':'neg-c'}">${t.amount>=0?'+':''}${eur(t.amount)}</div>
+    </div>`).join('');
+}
+async function adminCassaRecharge(amount) {
+  if (!staffTarget) return toast('Cerca prima una tessera');
+  const {data, error} = await db.rpc('staff_recharge', {p_operator_id:currentUser.id, p_card_id:staffTarget.card_id, p_amount:amount});
+  if (error||!data.ok) return toast((error&&error.message)||data.error);
+  toast(`Ricarica ok! ${eur(staffTarget.balance)} → ${eur(data.new_balance)}`, 'ok');
+  staffTarget.balance = data.new_balance;
+  document.getElementById('ac-res-bal').textContent = eur(data.new_balance);
+}
+async function adminCassaRechargeCustom() {
+  const v = parseFloat(document.getElementById('ac-custom').value);
+  if (!v||v<=0) return toast('Importo non valido');
+  await adminCassaRecharge(v);
+  document.getElementById('ac-custom').value = '';
+}
+async function adminCassaCharge() {
+  if (!staffTarget) return toast('Cerca prima una tessera');
+  const v    = parseFloat(document.getElementById('ac-charge-amt').value);
+  const desc = document.getElementById('ac-charge-desc').value.trim()||'Addebito';
+  if (!v||v<=0) return toast('Importo non valido');
+  modalConfirm(`Addebitare ${eur(v)} a ${staffTarget.display_name}?`, async () => {
+    const {data, error} = await db.rpc('staff_charge', {p_operator_id:currentUser.id, p_card_id:staffTarget.card_id, p_amount:v, p_description:desc});
+    if (error||!data.ok) return toast((error&&error.message)||data.error);
+    toast(`Addebito ok! ${eur(data.old_balance)} → ${eur(data.new_balance)}`, 'ok');
+    staffTarget.balance = data.new_balance;
+    document.getElementById('ac-res-bal').textContent = eur(data.new_balance);
+    document.getElementById('ac-charge-amt').value = '';
+  });
+}
+async function adminCassaPayEvent(regId, method, eventName, amount) {
+  const label = {credito:'credito',sumup:'SumUp',contanti:'contanti'}[method];
+  modalConfirm(`Salda "${eventName}" (${eur(amount)}) con ${label}?`, async () => {
+    const {data, error} = await db.rpc('staff_pay_event', {p_operator_id:currentUser.id, p_registration_id:regId, p_method:method});
+    if (error||!data.ok) return toast((error&&error.message)||data.error);
+    toast(`✓ ${data.message}`, 'ok');
+    staffTarget.balance = data.new_balance;
+    document.getElementById('ac-res-bal').textContent = eur(data.new_balance);
+    await loadAcPendingEvents(staffTarget.card_id);
+  });
 }
 
 // ── ADMIN AREA ────────────────────────────────────────────────────────
