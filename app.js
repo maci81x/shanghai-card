@@ -777,15 +777,19 @@ function stopAdminScanner() {
 async function adminLookup() {
   const card = document.getElementById('a-lookup').value.trim().toUpperCase();
   if (!card) return toast('Inserisci il codice tessera');
-  const {data, error} = await db.rpc('staff_lookup', {p_card_id: card});
-  const el = document.getElementById('a-lookup-result');
-  if (error || !data.ok) { el.style.display='none'; return toast((error&&error.message)||data.error); }
-  el.style.display = 'block';
-  el.innerHTML = `<div class="card card-gold" style="margin-bottom:0">
-    <div class="res-name">${data.user.display_name}</div>
-    <div class="res-sub">${data.user.card_id}</div>
-    <div class="res-bal">${eur(data.user.balance)}</div>
-  </div>`;
+  try {
+    const cassaTabBtn = document.querySelector('#atabs .tab[data-p="at-cassa"]');
+    if (cassaTabBtn) switchTab(cassaTabBtn, 'atabs');
+    const acLookup = document.getElementById('ac-lookup');
+    if (acLookup) acLookup.value = card;
+    document.getElementById('a-lookup-result').style.display = 'none';
+    await adminCassaLookup();
+    const acResult = document.getElementById('ac-result');
+    if (acResult) acResult.scrollIntoView({behavior:'smooth', block:'start'});
+  } catch (e) {
+    console.error('adminLookup', e);
+    toast('Errore lookup: ' + (e.message||e));
+  }
 }
 
 // ── STAFF AREA ────────────────────────────────────────────────────────
@@ -1324,11 +1328,16 @@ async function loadAcUserTx(cardId) {
 }
 async function adminCassaRecharge(amount) {
   if (!staffTarget) return toast('Cerca prima una tessera');
-  const {data, error} = await db.rpc('staff_recharge', {p_operator_id:currentUser.id, p_card_id:staffTarget.card_id, p_amount:amount});
-  if (error||!data.ok) return toast((error&&error.message)||data.error);
-  toast(`Ricarica ok! ${eur(staffTarget.balance)} → ${eur(data.new_balance)}`, 'ok');
-  staffTarget.balance = data.new_balance;
-  document.getElementById('ac-res-bal').textContent = eur(data.new_balance);
+  try {
+    const {data, error} = await db.rpc('staff_recharge', {p_operator_id:currentUser.id, p_card_id:staffTarget.card_id, p_amount:amount});
+    if (error||!data.ok) { console.error('staff_recharge', error, data); return toast((error&&error.message)||(data&&data.error)||'Errore ricarica'); }
+    toast(`Ricarica ok! ${eur(staffTarget.balance)} → ${eur(data.new_balance)}`, 'ok');
+    staffTarget.balance = data.new_balance;
+    document.getElementById('ac-res-bal').textContent = eur(data.new_balance);
+  } catch (e) {
+    console.error('adminCassaRecharge', e);
+    toast('Errore ricarica: ' + (e.message||e));
+  }
 }
 async function adminCassaRechargeCustom() {
   const v = parseFloat(document.getElementById('ac-custom').value);
@@ -1449,6 +1458,25 @@ function renderAUsers(role) {
         <td><button class="btn-sm" onclick="openPinModal('${u.card_id}')">🔑</button></td>
       </tr>`).join('')
     + '</tbody></table></div>';
+}
+async function openNewUserForm() {
+  const form = document.getElementById('nu-form');
+  if (form.style.display === 'block') { form.style.display = 'none'; return; }
+  try {
+    let users = allAdminUsers;
+    if (!users || !users.length) {
+      const {data} = await db.rpc('admin_list_users');
+      users = data || [];
+    }
+    let max = 0;
+    users.forEach(u => {
+      const m = (u.card_id||'').match(/^SH-(\d+)$/i);
+      if (m) { const n = parseInt(m[1], 10); if (n > max) max = n; }
+    });
+    document.getElementById('nu-card').value = 'SH-' + String(max + 1).padStart(3, '0');
+  } catch (e) { console.error('openNewUserForm', e); }
+  form.style.display = 'block';
+  document.getElementById('nu-name').focus();
 }
 async function createUser() {
   const card = document.getElementById('nu-card').value.trim().toUpperCase();
