@@ -11,7 +11,7 @@
 <meta http-equiv="Cache-Control" content="no-cache">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=27">
+<link rel="stylesheet" href="style.css?v=28">
 </head>
 <body>
 
@@ -235,9 +235,9 @@
       <!-- ── TAB: TESSERE ── -->
       <div id="st-tessere" class="tab-panel active">
         <div class="card">
-          <div class="sec-lbl">Cerca tessera</div>
+          <div class="sec-lbl">Cerca socio</div>
           <div class="inp-row">
-            <input id="s-lookup" type="text" placeholder="SH-001" oninput="this.value=this.value.toUpperCase()" style="flex:1">
+            <input id="s-lookup" type="text" placeholder="SH- oppure nome/cognome" style="flex:1">
             <button class="btn btn-p" onclick="staffLookup()">Cerca</button>
             <button class="btn btn-g" onclick="toggleScanner()" id="s-scan-btn">📷</button>
           </div>
@@ -371,9 +371,9 @@
   <div class="content">
     <!-- Admin QR lookup -->
     <div class="card" style="margin-bottom:12px">
-      <div class="sec-lbl">Cerca socio (tessera o QR)</div>
+      <div class="sec-lbl">Cerca socio (tessera, nome o QR)</div>
       <div class="inp-row">
-        <input id="a-lookup" type="text" placeholder="SH-001" oninput="this.value=this.value.toUpperCase()" style="flex:1">
+        <input id="a-lookup" type="text" placeholder="SH- oppure nome/cognome" style="flex:1">
         <button class="btn btn-p" onclick="adminLookup()">Cerca</button>
         <button class="btn btn-g" onclick="toggleAdminScanner()" id="a-scan-btn">📷</button>
       </div>
@@ -396,9 +396,9 @@
       <!-- CASSA (admin) -->
       <div id="at-cassa" class="tab-panel">
         <div class="card">
-          <div class="sec-lbl">Cerca tessera</div>
+          <div class="sec-lbl">Cerca socio</div>
           <div class="inp-row">
-            <input id="ac-lookup" type="text" placeholder="SH-001" oninput="this.value=this.value.toUpperCase()" style="flex:1">
+            <input id="ac-lookup" type="text" placeholder="SH- oppure nome/cognome" style="flex:1">
             <button class="btn btn-p" onclick="adminCassaLookup()">Cerca</button>
             <button class="btn btn-g" onclick="toggleAcScanner()" id="ac-scan-btn">📷</button>
           </div>
@@ -751,6 +751,6 @@
 </script>
 <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-<script src="app.js?v=27"></script>
+<script src="app.js?v=28"></script>
 </body>
 </html>

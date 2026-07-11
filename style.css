@@ -22,6 +22,13 @@ label{display:block;font-size:11px;color:var(--mut);margin-bottom:5px;font-weigh
 input:not([type=checkbox]):not([type=radio]),select,textarea{width:100%;background:#0f0f0f;border:1px solid var(--brd);border-radius:8px;padding:11px 13px;color:var(--txt);font-family:inherit;font-size:16px;outline:none;transition:border-color .2s;-webkit-appearance:none}
 input:not([type=checkbox]):not([type=radio]):focus,select:focus,textarea:focus{border-color:var(--gold)}
 input[type=checkbox],input[type=radio]{-webkit-appearance:auto;appearance:auto;width:auto;padding:0;margin:0;background:transparent;border:none;cursor:pointer;accent-color:var(--gold)}
+
+/* RISULTATI RICERCA CASSA (nome/cognome) */
+.search-results{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}
+.search-result-item{display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--bgc);border:1px solid var(--brd);border-radius:10px;padding:12px 14px;cursor:pointer;transition:border-color .15s,background .15s;color:var(--txt)}
+.search-result-item:hover{border-color:var(--gold);background:#1a1a1a}
+:root.light .search-result-item{background:#FFFFFF;color:#0A0A0A}
+:root.light .search-result-item:hover{background:#F5F5F5;border-color:var(--gold)}
 select option{background:var(--bgc)}
 
 /* BUTTONS */

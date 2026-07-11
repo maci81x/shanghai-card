@@ -93,6 +93,8 @@ window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('modal-ok').addEventListener('click', () => { const cb = window._mcb; modalCancel(); cb && cb(); });
   document.getElementById('l-pin').addEventListener('keydown', e => { if(e.key==='Enter') doLogin('user'); });
   document.getElementById('s-lookup').addEventListener('keydown', e => { if(e.key==='Enter') staffLookup(); });
+  document.getElementById('a-lookup')?.addEventListener('keydown', e => { if(e.key==='Enter') adminLookup(); });
+  document.getElementById('ac-lookup')?.addEventListener('keydown', e => { if(e.key==='Enter') adminCassaLookup(); });
 
   // Rilevamento landing evento pubblica
   const eventSlug = new URLSearchParams(window.location.search).get('event');
@@ -775,17 +777,19 @@ function stopAdminScanner() {
   if (_adminScanner) { _adminScanner.stop().catch(()=>{}).finally(() => { _adminScanner.clear(); _adminScanner = null; }); }
 }
 async function adminLookup() {
-  const card = document.getElementById('a-lookup').value.trim().toUpperCase();
-  if (!card) return toast('Inserisci il codice tessera');
+  const raw = document.getElementById('a-lookup').value.trim();
+  if (!raw) return toast('Inserisci codice tessera o nome');
   try {
     const cassaTabBtn = document.querySelector('#atabs .tab[data-p="at-cassa"]');
     if (cassaTabBtn) switchTab(cassaTabBtn, 'atabs');
     const acLookup = document.getElementById('ac-lookup');
-    if (acLookup) acLookup.value = card;
+    if (acLookup) acLookup.value = raw;
     document.getElementById('a-lookup-result').style.display = 'none';
     await adminCassaLookup();
-    const acResult = document.getElementById('ac-result');
-    if (acResult) acResult.scrollIntoView({behavior:'smooth', block:'start'});
+    const target = document.getElementById('ac-result').style.display !== 'none'
+      ? document.getElementById('ac-result')
+      : document.getElementById('ac-sr');
+    if (target) target.scrollIntoView({behavior:'smooth', block:'start'});
   } catch (e) {
     console.error('adminLookup', e);
     toast('Errore lookup: ' + (e.message||e));
@@ -825,10 +829,79 @@ function gotoStaff() {
   showScreen('screen-staff');
   renderStaffHist();
 }
+// ── RICERCA SOCI: card_id + nome/cognome ─────────────────────────────
+function _normalizeCardInput(q) {
+  const u = (q||'').trim().toUpperCase();
+  let m;
+  if ((m = u.match(/^SH-?(\d+)$/))) return 'SH-' + m[1].padStart(3, '0');
+  if (/^\d+$/.test(u))              return 'SH-' + u.padStart(3, '0');
+  return null;
+}
+async function _searchUsersByName(q) {
+  const needle = (q||'').trim().toLowerCase();
+  if (!needle) return [];
+  const {data} = await db.rpc('admin_list_users');
+  if (!data) return [];
+  return data
+    .filter(u => u.role === 'user' && u.active !== false && (u.display_name||'').toLowerCase().includes(needle))
+    .sort((a,b) => (a.display_name||'').localeCompare(b.display_name||''));
+}
+function _renderCassaSearch(prefix, matches) {
+  const id = prefix + '-sr';
+  let el = document.getElementById(id);
+  if (!el) {
+    el = document.createElement('div');
+    el.id = id;
+    el.className = 'search-results';
+    const inp = document.getElementById(prefix + '-lookup');
+    const card = inp.closest('.card');
+    card.parentNode.insertBefore(el, card.nextSibling);
+  }
+  if (!matches.length) {
+    el.innerHTML = '<div class="empty" style="padding:14px;text-align:center">Nessun socio trovato</div>';
+  } else {
+    el.innerHTML = matches.map(u => `
+      <div class="search-result-item" onclick="pickSearchResult('${u.card_id}','${prefix}')">
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600;font-size:14px">${_esc(u.display_name)}</div>
+          <div style="font-size:11px;color:var(--mut);font-family:monospace">${u.card_id}</div>
+        </div>
+        <div style="font-size:13px;color:var(--gold);font-weight:600">${eur(u.balance||0)}</div>
+      </div>`).join('');
+  }
+  el.style.display = 'block';
+  const result = document.getElementById(prefix + '-result');
+  if (result) result.style.display = 'none';
+}
+function _hideCassaSearch(prefix) {
+  const el = document.getElementById(prefix + '-sr');
+  if (el) el.style.display = 'none';
+}
+function pickSearchResult(cardId, prefix) {
+  const inp = document.getElementById(prefix + '-lookup');
+  if (inp) inp.value = cardId;
+  _hideCassaSearch(prefix);
+  if (prefix === 's')  return staffLookup();
+  if (prefix === 'ac') return adminCassaLookup();
+}
 async function staffLookup() {
-  const card = document.getElementById('s-lookup').value.trim().toUpperCase();
-  if (!card) return toast('Inserisci il codice tessera');
-  const {data, error} = await db.rpc('staff_lookup', {p_card_id: card});
+  const raw = document.getElementById('s-lookup').value;
+  const cardId = _normalizeCardInput(raw);
+  if (!cardId) {
+    const q = (raw||'').trim();
+    if (!q) return toast('Inserisci codice tessera o nome');
+    const matches = await _searchUsersByName(q);
+    if (matches.length === 1) {
+      document.getElementById('s-lookup').value = matches[0].card_id;
+      _hideCassaSearch('s');
+      return staffLookup();
+    }
+    _renderCassaSearch('s', matches);
+    return;
+  }
+  document.getElementById('s-lookup').value = cardId;
+  _hideCassaSearch('s');
+  const {data, error} = await db.rpc('staff_lookup', {p_card_id: cardId});
   if (error||!data.ok) return toast((error&&error.message)||data.error);
   staffTarget = data.user;
   document.getElementById('s-res-name').textContent = data.user.display_name;
@@ -1190,9 +1263,23 @@ function stopAcScanner() {
   if (_acScanner) { _acScanner.stop().catch(()=>{}).finally(()=>{ _acScanner.clear(); _acScanner=null; }); }
 }
 async function adminCassaLookup() {
-  const card = document.getElementById('ac-lookup').value.trim().toUpperCase();
-  if (!card) return toast('Inserisci il codice tessera');
-  const {data, error} = await db.rpc('staff_lookup', {p_card_id: card});
+  const raw = document.getElementById('ac-lookup').value;
+  const cardId = _normalizeCardInput(raw);
+  if (!cardId) {
+    const q = (raw||'').trim();
+    if (!q) return toast('Inserisci codice tessera o nome');
+    const matches = await _searchUsersByName(q);
+    if (matches.length === 1) {
+      document.getElementById('ac-lookup').value = matches[0].card_id;
+      _hideCassaSearch('ac');
+      return adminCassaLookup();
+    }
+    _renderCassaSearch('ac', matches);
+    return;
+  }
+  document.getElementById('ac-lookup').value = cardId;
+  _hideCassaSearch('ac');
+  const {data, error} = await db.rpc('staff_lookup', {p_card_id: cardId});
   if (error||!data.ok) return toast((error&&error.message)||data.error);
   staffTarget = data.user;
   document.getElementById('ac-res-name').textContent = data.user.display_name;
