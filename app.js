@@ -2478,7 +2478,10 @@ const _GUIDE = {
 <p><strong>👤 PROFILO</strong><br>
 • Vedi i tuoi dati, la tessera e il QR<br>
 • Cambia il PIN<br>
-• Scegli tema chiaro o scuro</p>`,
+• Scegli tema chiaro o scuro</p>
+<p><strong>📤 INVITA GLI AMICI</strong><br>
+• Condividi l'app col link breve: <a href="https://bit.ly/shanghai-card" target="_blank" rel="noopener" style="color:var(--gold)">bit.ly/shanghai-card</a><br>
+• Suggerisci "Aggiungi a Home" dopo l'apertura — l'app si installa come una vera app</p>`,
 
   staff: `<h3 style="color:var(--gold);margin:0 0 16px">🏪 GUIDA CASSA — Staff</h3>
 <p><strong>📷 CERCA SOCIO</strong><br>
@@ -2511,7 +2514,9 @@ const _GUIDE = {
 • 🔒/🔓: nascondi o mostra un evento</p>
 <p><strong>🏷️ PROMO</strong><br>
 • Vedi le promo attive — le promo si applicano automaticamente sugli addebiti<br>
-• Solo l'admin può creare/modificare/eliminare promo</p>`,
+• Solo l'admin può creare/modificare/eliminare promo</p>
+<p><strong>📤 INVITA NUOVI SOCI</strong><br>
+• Link app per passaparola e volantini: <a href="https://bit.ly/shanghai-card" target="_blank" rel="noopener" style="color:var(--gold)">bit.ly/shanghai-card</a></p>`,
 
   admin: `<h3 style="color:var(--gold);margin:0 0 16px">⚙️ GUIDA AMMINISTRAZIONE</h3>
 <p><strong>📊 DASHBOARD</strong><br>
@@ -2548,7 +2553,9 @@ const _GUIDE = {
 • Gestisci i link SumUp del Rione (etichetta, URL, importo opzionale)<br>
 • I link sono visibili ai soci nella sezione Catalogo → SumUp</p>
 <p><strong>📥 EXPORT</strong><br>
-• Esporta tutti i dati (soci, transazioni, iscritti eventi) in CSV</p>`
+• Esporta tutti i dati (soci, transazioni, iscritti eventi) in CSV</p>
+<p><strong>📤 LINK APP</strong><br>
+• Link breve per volantini, social, passaparola: <a href="https://bit.ly/shanghai-card" target="_blank" rel="noopener" style="color:var(--gold)">bit.ly/shanghai-card</a></p>`
 };
 function openGuide(role) {
   document.getElementById('guide-content').innerHTML = _GUIDE[role] || '';
