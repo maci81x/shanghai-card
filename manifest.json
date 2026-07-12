@@ -1,0 +1,25 @@
+{
+  "name": "Shanghai Card",
+  "short_name": "Shanghai",
+  "description": "Card prepagata Rione Shanghai - Associazione il Dragone",
+  "start_url": "/shanghai-card/",
+  "scope": "/shanghai-card/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#1E1E1E",
+  "theme_color": "#FFD60A",
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

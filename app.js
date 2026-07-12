@@ -1,3 +1,83 @@
+// PWA Service Worker
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+
+// PWA Install prompt
+let deferredPrompt;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  showInstallBanner();
+});
+
+function showInstallBanner() {
+  if (window.matchMedia('(display-mode: standalone)').matches) return;
+  if (sessionStorage.getItem('install-dismissed')) return;
+  const banner = document.createElement('div');
+  banner.id = 'install-banner';
+  banner.innerHTML = `
+    <div style="position:fixed;bottom:20px;left:50%;transform:translateX(-50%);
+      background:#FFD60A;color:#1E1E1E;padding:12px 20px;border-radius:12px;
+      display:flex;align-items:center;gap:12px;box-shadow:0 4px 20px rgba(0,0,0,0.4);
+      z-index:9999;max-width:90%;font-family:sans-serif;">
+      <span style="font-size:24px;">📲</span>
+      <div>
+        <div style="font-weight:bold;font-size:14px;">Installa Shanghai Card</div>
+        <div style="font-size:12px;">Aggiungila alla schermata Home!</div>
+      </div>
+      <button onclick="installPWA()" style="background:#1E1E1E;color:#FFD60A;border:none;
+        padding:8px 16px;border-radius:8px;font-weight:bold;cursor:pointer;">Installa</button>
+      <button onclick="dismissInstall()" style="background:none;border:none;color:#1E1E1E;
+        font-size:18px;cursor:pointer;padding:4px;">✕</button>
+    </div>
+  `;
+  document.body.appendChild(banner);
+}
+
+window.installPWA = async function() {
+  if (deferredPrompt) {
+    deferredPrompt.prompt();
+    await deferredPrompt.userChoice;
+    deferredPrompt = null;
+    document.getElementById('install-banner')?.remove();
+  }
+};
+
+window.dismissInstall = function() {
+  document.getElementById('install-banner')?.remove();
+  sessionStorage.setItem('install-dismissed', '1');
+};
+
+// iOS install hint (Safari non supporta beforeinstallprompt)
+(function(){
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+  const isInStandalone = window.matchMedia('(display-mode: standalone)').matches
+    || window.navigator.standalone === true;
+  if (isIOS && !isInStandalone && !sessionStorage.getItem('install-dismissed')) {
+    setTimeout(() => {
+      if (document.getElementById('install-banner')) return;
+      const banner = document.createElement('div');
+      banner.id = 'install-banner';
+      banner.innerHTML = `
+        <div style="position:fixed;bottom:20px;left:50%;transform:translateX(-50%);
+          background:#FFD60A;color:#1E1E1E;padding:12px 20px;border-radius:12px;
+          display:flex;align-items:center;gap:12px;box-shadow:0 4px 20px rgba(0,0,0,0.4);
+          z-index:9999;max-width:90%;font-family:sans-serif;">
+          <span style="font-size:24px;">📲</span>
+          <div>
+            <div style="font-weight:bold;font-size:13px;">Installa Shanghai Card</div>
+            <div style="font-size:11px;">Tocca <strong>Condividi ⬆️</strong> poi <strong>"Aggiungi a Home"</strong></div>
+          </div>
+          <button onclick="dismissInstall()" style="background:none;border:none;color:#1E1E1E;
+            font-size:18px;cursor:pointer;padding:4px;">✕</button>
+        </div>
+      `;
+      document.body.appendChild(banner);
+    }, 3000);
+  }
+})();
+
 const SB_URL = 'https://kbcrtwqtzuipcsfiyupu.supabase.co';
 const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtiY3J0d3F0enVpcGNzZml5dXB1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1MTc3NzEsImV4cCI6MjA5OTA5Mzc3MX0.BYpoUqhiqREsA7MosC2jnLCkvXbcwjTeBdT7LhRS1UA';
 let db, currentUser = null, staffTarget = null, allAdminUsers = [], staffOps = [];
