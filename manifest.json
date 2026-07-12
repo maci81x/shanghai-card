@@ -1,6 +1,6 @@
 {
   "name": "Shanghai Card",
-  "short_name": "Shanghai",
+  "short_name": "Shanghai Card",
   "description": "Card prepagata Rione Shanghai - Associazione il Dragone",
   "start_url": "/shanghai-card/",
   "scope": "/shanghai-card/",
