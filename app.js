@@ -81,6 +81,7 @@ window.dismissInstall = function() {
 const SB_URL = 'https://kbcrtwqtzuipcsfiyupu.supabase.co';
 const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtiY3J0d3F0enVpcGNzZml5dXB1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1MTc3NzEsImV4cCI6MjA5OTA5Mzc3MX0.BYpoUqhiqREsA7MosC2jnLCkvXbcwjTeBdT7LhRS1UA';
 let db, currentUser = null, staffTarget = null, allAdminUsers = [], staffOps = [];
+let _gadgetsAdminCache = {}, _promosAdminCache = {}, _eventsAdminCache = {}, _unseenEventsQueue = [];
 
 // ── EVENT DELEGATION (bottoni generati da innerHTML) ──────────────────
 document.addEventListener('click', function(e) {
@@ -180,6 +181,13 @@ window.addEventListener('DOMContentLoaded', () => {
   const eventSlug = new URLSearchParams(window.location.search).get('event');
   if (eventSlug) { loadPublicEvent(eventSlug); return; }
 
+  // Monta image uploader nei form statici admin (gadget/promo/edit modals/edit event/edit user non hanno uploader)
+  mountImageUploader('fg-img-mount',  'fg-img',  'gadgets');
+  mountImageUploader('fp-img-mount',  'fp-img',  'promos');
+  mountImageUploader('fpe-img-mount', 'fpe-img', 'promos');
+  mountImageUploader('gae-img-mount', 'gae-img', 'gadgets');
+  mountImageUploader('eve-img-mount', 'eve-img', 'events');
+
   const saved = sessionStorage.getItem('sh_u');
   const role  = sessionStorage.getItem('sh_r');
   if (saved && role) { currentUser = JSON.parse(saved); route(role); }
@@ -266,7 +274,7 @@ async function doLogin(role) {
   route(role);
 }
 function route(role) {
-  if (role==='user')  gotoUser();
+  if (role==='user')  { gotoUser(); setTimeout(checkUnseenEvents, 600); }
   else if (role==='staff') gotoStaff();
   else gotoAdmin();
 }
@@ -1622,7 +1630,11 @@ function renderAUsers(role) {
         <td><span class="role-badge r${u.role[0]}">${u.role}</span></td>
         <td class="${u.balance>0?'pos':''}">${eur(u.balance)}</td>
         <td style="font-size:11px;color:${u.active?'var(--grn)':'var(--neg)'}">${u.active?'attivo':'disattivo'}</td>
-        <td><button class="btn-sm" onclick="openPinModal('${u.card_id}')">🔑</button></td>
+        <td style="white-space:nowrap">
+          <button class="btn-sm" title="Reset PIN" onclick="openPinModal('${u.card_id}')">🔑</button>
+          <button class="btn-sm" title="Modifica" onclick="openEditUser('${u.id}')">✏️</button>
+          <button class="btn-sm" title="Elimina" style="color:var(--neg)" onclick="adminDeleteUser('${u.id}','${_esc(u.card_id)}','${_esc((u.display_name||'').replace(/'/g,"\\'"))}')">🗑️</button>
+        </td>
       </tr>`).join('')
     + '</tbody></table></div>';
 }
@@ -1692,14 +1704,23 @@ function _renderAdminTx() {
   });
   const el = document.getElementById('a-tx-list');
   if (!list.length) { el.innerHTML='<div class="empty">Nessuna transazione</div>'; return; }
-  el.innerHTML = `<div class="tbl-wrap"><table><thead><tr><th>Data</th><th>Tessera</th><th>Tipo</th><th>Importo</th><th>Operatore</th></tr></thead><tbody>`
-    + list.map(t=>`<tr>
+  el.innerHTML = `<div class="tbl-wrap"><table><thead><tr><th>Data</th><th>Tessera</th><th>Tipo</th><th>Descrizione</th><th>Importo</th><th>Operatore</th><th></th></tr></thead><tbody>`
+    + list.map(t=>{
+      const canVoid = t.type !== 'refund';
+      const dscRaw = (t.description||'').replace(/'/g,"\\'");
+      return `<tr>
         <td class="dt-cell">${fdt(t.created_at)}</td>
         <td class="mono">${t.card_id}</td>
         <td>${txic(t.type)} ${t.type}</td>
+        <td style="font-size:12px;color:var(--mut);max-width:220px;word-break:break-word">${_esc(t.description||'')}</td>
         <td class="${t.amount>=0?'pos':'neg-c'}">${t.amount>=0?'+':''}${eur(t.amount)}</td>
         <td>${t.operator_name||'—'}</td>
-      </tr>`).join('')
+        <td style="white-space:nowrap">
+          <button class="btn-sm" title="Modifica descrizione" onclick="adminEditTxDesc('${t.id}','${dscRaw}')">✏️</button>
+          ${canVoid ? `<button class="btn-sm" title="Storna" style="color:var(--neg)" onclick="adminVoidTx('${t.id}',${t.amount},'${dscRaw}','${_esc(t.card_id)}')">↩️</button>` : ''}
+        </td>
+      </tr>`;
+    }).join('')
     + '</tbody></table></div>';
 }
 async function loadAGest() {
@@ -1735,9 +1756,11 @@ async function loadAGest() {
           <input type="checkbox" id="fe-public" style="width:18px;height:18px;accent-color:var(--gold)">
           <label for="fe-public">🌐 Apri iscrizioni esterne (link pubblico)</label>
         </div>
+        <div class="fg"><label>Immagine (opz.)</label><div id="fe-img-mount"></div><input type="hidden" id="fe-img"></div>
         <button class="btn btn-p w100" data-action="create-event">Crea Evento</button>
       </div>
       <div id="gs-ev-list"></div>`;
+    mountImageUploader('fe-img-mount', 'fe-img', 'events');
   }
   const evList  = document.getElementById('gs-ev-list');
   const gadList = document.getElementById('gs-gad-list');
@@ -1762,6 +1785,7 @@ async function loadAGest() {
           <span style="font-size:11px;color:var(--mut)">⏳ carico…</span>
         </div>
         <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn-sm" onclick="openEditEvent('${e.id}')">✏️ Modifica</button>
           <button class="btn-sm" onclick="adminToggleVisibility('${e.id}',${e.visible!==false})">${e.visible===false?'🔓 Mostra':'🔒 Nascondi'}</button>
           <button class="btn-sm" onclick="toggleEventGuests('${e.id}','${e.title.replace(/'/g,"\\'")}',this)">👥 Iscritti</button>
           <button class="btn-sm" onclick="exportEventCSV('${e.id}','${e.title.replace(/'/g,"\\'")}')">📥 CSV</button>
@@ -1773,6 +1797,8 @@ async function loadAGest() {
   }
   const cat = catData||{};
   const gads = cat.gadgets||[];
+  _gadgetsAdminCache = {}; gads.forEach(g => _gadgetsAdminCache[g.id] = g);
+  _eventsAdminCache = {}; (evs||[]).forEach(e => _eventsAdminCache[e.id] = e);
   const gadSummary = (gadSum && gadSum.gadgets) ? gadSum.gadgets : [];
   const gadSumMap = {};
   gadSummary.forEach(g => { gadSumMap[g.id] = g; });
@@ -1806,6 +1832,7 @@ async function loadAGest() {
     el.dataset.pren = JSON.stringify(g.prenotazioni || []);
   });
   const prs = cat.promos||[];
+  _promosAdminCache = {}; prs.forEach(p => _promosAdminCache[p.id] = p);
   proList.innerHTML = prs.length
     ? prs.map(p => {
         const sconto = p.discount_type==='percent' ? p.discount_value+'%' : eur(p.discount_value);
@@ -1940,6 +1967,8 @@ async function adminCreateEvent() {
     if (!title) { modalInfo('⚠️ Inserisci il titolo'); return; }
     if (pub && !slug) slug = _slugify(title);
 
+    const imgUrl = (document.getElementById('fe-img')?.value || '').trim();
+
     const { data, error } = await db.rpc('admin_create_event', {
       p_admin_id:            currentUser.id,
       p_title:               title,
@@ -1958,9 +1987,14 @@ async function adminCreateEvent() {
     if (error) throw new Error('Errore RPC: ' + error.message);
     if (!data || data.ok === false) throw new Error('RPC ko: ' + (data?.error || JSON.stringify(data)));
 
+    if (imgUrl && data.event_id) {
+      await db.rpc('admin_update_event', {p_admin_id: currentUser.id, p_event_id: data.event_id, p_image_url: imgUrl});
+    }
+
     // Reset form
-    ['fe-title','fe-desc','fe-date','fe-loc','fe-maxp','fe-price','fe-sumup','fe-slug']
+    ['fe-title','fe-desc','fe-date','fe-loc','fe-maxp','fe-price','fe-sumup','fe-slug','fe-img']
       .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+    resetImageUploader('fe-img-mount');
     if (pubEl) pubEl.checked = false;
     const fEl = document.getElementById('fe-form');
     if (fEl) fEl.style.display = 'none';
@@ -1990,6 +2024,7 @@ async function createGadget() {
   if (error||!data.ok) return toast((error&&error.message)||data.error);
   toast('Gadget creato!', 'ok');
   ['fg-name','fg-desc','fg-price','fg-stock','fg-img'].forEach(id=>document.getElementById(id).value='');
+  resetImageUploader('fg-img-mount');
   document.getElementById('fg-form').style.display='none';
   loadAGest();
 }
@@ -2018,6 +2053,10 @@ function openEditGadget(id, name, price, desc, stock) {
   document.getElementById('gae-price').value = price;
   document.getElementById('gae-desc').value  = desc;
   document.getElementById('gae-stock').value = stock;
+  const gCached = (typeof _gadgetsAdminCache !== 'undefined' && _gadgetsAdminCache[id]) || {};
+  const curImg = gCached.image_url || '';
+  document.getElementById('gae-img').value = curImg;
+  setImageUploaderPreview('gae-img-mount', curImg);
   document.getElementById('gad-edit-bg').style.display = 'flex';
 }
 function closeEditGadget() { document.getElementById('gad-edit-bg').style.display = 'none'; }
@@ -2027,9 +2066,15 @@ async function saveEditGadget() {
   const price = parseFloat(document.getElementById('gae-price').value);
   const desc  = document.getElementById('gae-desc').value.trim();
   const stock = parseInt(document.getElementById('gae-stock').value)||0;
+  const img   = document.getElementById('gae-img').value.trim();
   if (!name || !price) return toast('Nome e prezzo obbligatori');
   const {data, error} = await db.rpc('admin_update_gadget', {p_admin_id: currentUser.id, p_gadget_id: id, p_name: name, p_price: price, p_description: desc||null, p_stock: stock});
   if (error||!data||!data.ok) return toast((error&&error.message)||(data&&data.error)||'Errore');
+  const cachedImg = ((typeof _gadgetsAdminCache !== 'undefined' && _gadgetsAdminCache[id]) || {}).image_url || '';
+  if (img !== cachedImg) {
+    const {data: imgRes, error: imgErr} = await db.rpc('admin_set_gadget_image', {p_admin_id: currentUser.id, p_gadget_id: id, p_image_url: img || null});
+    if (imgErr || !imgRes || !imgRes.ok) { toast('Salvato ma immagine non aggiornata'); }
+  }
   toast('Gadget aggiornato!', 'ok');
   closeEditGadget();
   loadAGest();
@@ -2575,11 +2620,16 @@ async function createPromo() {
   const val   = parseInt(document.getElementById('fp-val').value);
   const until = document.getElementById('fp-until').value;
   const maxu  = parseInt(document.getElementById('fp-maxu').value)||null;
+  const img   = document.getElementById('fp-img').value.trim();
   if (!code||!val) return toast('Inserisci codice e valore');
   const {data, error} = await db.rpc('admin_create_promo', {p_code:code, p_description:desc||null, p_discount_type:type, p_discount_value:val, p_valid_until:until?new Date(until+'T23:59:59').toISOString():null, p_max_uses:maxu});
   if (error||!data.ok) return toast((error&&error.message)||data.error);
+  if (img && data.promo_id) {
+    await db.rpc('admin_set_promo_image', {p_admin_id: currentUser.id, p_promo_id: data.promo_id, p_image_url: img});
+  }
   toast('Promo creata!', 'ok');
-  ['fp-code','fp-desc','fp-val','fp-until','fp-maxu'].forEach(id=>document.getElementById(id).value='');
+  ['fp-code','fp-desc','fp-val','fp-until','fp-maxu','fp-img'].forEach(id=>document.getElementById(id).value='');
+  resetImageUploader('fp-img-mount');
   document.getElementById('fp-form').style.display='none';
   loadAGest();
 }
@@ -2590,6 +2640,10 @@ function openEditPromo(id, code, desc, type, val, until) {
   document.getElementById('fpe-type').value = type;
   document.getElementById('fpe-val').value  = val;
   document.getElementById('fpe-until').value= until;
+  const pCached = (typeof _promosAdminCache !== 'undefined' && _promosAdminCache[id]) || {};
+  const curImg = pCached.image_url || '';
+  document.getElementById('fpe-img').value = curImg;
+  setImageUploaderPreview('fpe-img-mount', curImg);
   document.getElementById('fpe-bg').style.display = 'block';
 }
 function closeEditPromo() {
@@ -2602,6 +2656,7 @@ async function saveEditPromo() {
   const type  = document.getElementById('fpe-type').value;
   const val   = parseFloat(document.getElementById('fpe-val').value);
   const until = document.getElementById('fpe-until').value;
+  const img   = document.getElementById('fpe-img').value.trim();
   if (!code || !val) return toast('Codice e valore obbligatori');
   const {data, error} = await db.rpc('admin_update_promo', {
     p_admin_id: currentUser.id, p_promo_id: id,
@@ -2609,6 +2664,10 @@ async function saveEditPromo() {
     p_valid_until: until || null
   });
   if (error||!data.ok) return toast((error&&error.message)||data.error);
+  const cachedImg = ((typeof _promosAdminCache !== 'undefined' && _promosAdminCache[id]) || {}).image_url || '';
+  if (img !== cachedImg) {
+    await db.rpc('admin_set_promo_image', {p_admin_id: currentUser.id, p_promo_id: id, p_image_url: img || null});
+  }
   toast('Promo aggiornata!', 'ok');
   closeEditPromo();
   if (currentUser.role === 'admin') loadAGest(); else loadStaffPromos();
@@ -2620,4 +2679,280 @@ async function deletePromo(id, code) {
     toast('Promo eliminata', 'ok');
     loadAGest();
   });
+}
+
+// =====================================================================
+// ADMIN EXTENSIONS (17/07/2026)
+// Aggiunte: image uploader, edit socio, delete socio, edit evento,
+// storno/edit transazione, popup nuovi eventi per soci.
+// =====================================================================
+
+// ── IMAGE UPLOADER ──────────────────────────────────────────────────
+async function uploadImageToBucket(file, folder) {
+  if (!file) return null;
+  if (file.size > 2 * 1024 * 1024) { toast('Immagine troppo grande (max 2 MB)'); return null; }
+  const ok = ['image/jpeg','image/png','image/webp'].includes(file.type);
+  if (!ok) { toast('Formato non supportato (jpg, png, webp)'); return null; }
+  const ext = ({'image/jpeg':'jpg','image/png':'png','image/webp':'webp'})[file.type];
+  const name = `${crypto.randomUUID()}.${ext}`;
+  const path = `${folder}/${name}`;
+  const { error } = await db.storage.from('images').upload(path, file, {
+    cacheControl: '31536000', upsert: false, contentType: file.type
+  });
+  if (error) { console.error('upload error', error); toast('Upload fallito: ' + error.message); return null; }
+  const { data } = db.storage.from('images').getPublicUrl(path);
+  return data?.publicUrl || null;
+}
+function mountImageUploader(mountId, hiddenId, folder) {
+  const host = document.getElementById(mountId);
+  if (!host) return;
+  host.dataset.folder = folder;
+  host.dataset.hidden = hiddenId;
+  host.innerHTML = `
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <label class="btn-sm" style="cursor:pointer;margin:0">
+        📷 Scegli immagine
+        <input type="file" accept="image/jpeg,image/png,image/webp" style="display:none" onchange="_onImagePicked(this,'${mountId}')">
+      </label>
+      <button type="button" class="btn-sm" style="color:var(--neg);display:none" data-role="rm" onclick="_clearImage('${mountId}')">🗑️ Rimuovi</button>
+      <span data-role="status" style="font-size:11px;color:var(--mut)"></span>
+    </div>
+    <div data-role="preview" style="margin-top:8px;display:none">
+      <img data-role="img" src="" style="max-width:100%;max-height:140px;border-radius:8px;border:1px solid var(--brd)">
+    </div>`;
+}
+function setImageUploaderPreview(mountId, url) {
+  const host = document.getElementById(mountId);
+  if (!host) return;
+  const preview = host.querySelector('[data-role="preview"]');
+  const img = host.querySelector('[data-role="img"]');
+  const rm = host.querySelector('[data-role="rm"]');
+  if (url) { img.src = url; preview.style.display = 'block'; if (rm) rm.style.display = ''; }
+  else { img.src = ''; preview.style.display = 'none'; if (rm) rm.style.display = 'none'; }
+}
+function resetImageUploader(mountId) {
+  const host = document.getElementById(mountId);
+  if (!host) return;
+  const hiddenId = host.dataset.hidden;
+  if (hiddenId) { const h = document.getElementById(hiddenId); if (h) h.value = ''; }
+  setImageUploaderPreview(mountId, '');
+  const status = host.querySelector('[data-role="status"]');
+  if (status) status.textContent = '';
+}
+async function _onImagePicked(input, mountId) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  const host = document.getElementById(mountId);
+  const status = host.querySelector('[data-role="status"]');
+  const folder = host.dataset.folder || 'misc';
+  const hiddenId = host.dataset.hidden;
+  status.textContent = 'Carico…';
+  const url = await uploadImageToBucket(file, folder);
+  input.value = ''; // reset per permettere upload dello stesso file dopo
+  if (!url) { status.textContent = ''; return; }
+  if (hiddenId) { const h = document.getElementById(hiddenId); if (h) h.value = url; }
+  setImageUploaderPreview(mountId, url);
+  status.textContent = '✓ Caricata';
+  setTimeout(() => { status.textContent = ''; }, 2000);
+}
+function _clearImage(mountId) {
+  resetImageUploader(mountId);
+}
+
+// ── EDIT SOCIO ──────────────────────────────────────────────────────
+function openEditUser(userId) {
+  const u = (allAdminUsers || []).find(x => x.id === userId);
+  if (!u) { toast('Utente non trovato'); return; }
+  document.getElementById('ue-id').value      = u.id;
+  document.getElementById('ue-card').textContent = u.card_id || '';
+  document.getElementById('ue-display').value = u.display_name || '';
+  document.getElementById('ue-nome').value    = u.nome || '';
+  document.getElementById('ue-cognome').value = u.cognome || '';
+  document.getElementById('ue-email').value   = u.email || '';
+  document.getElementById('ue-tel').value     = u.telefono || '';
+  document.getElementById('ue-role').value    = u.role || 'user';
+  document.getElementById('ue-active').value  = String(u.active !== false);
+  document.getElementById('u-edit-bg').style.display = 'block';
+}
+function closeEditUser() {
+  document.getElementById('u-edit-bg').style.display = 'none';
+}
+async function saveEditUser() {
+  const id = document.getElementById('ue-id').value;
+  if (!id) return;
+  const payload = {
+    p_admin_id:    currentUser.id,
+    p_user_id:     id,
+    p_display_name:document.getElementById('ue-display').value.trim() || null,
+    p_nome:        document.getElementById('ue-nome').value.trim() || null,
+    p_cognome:     document.getElementById('ue-cognome').value.trim() || null,
+    p_email:       document.getElementById('ue-email').value.trim() || null,
+    p_telefono:    document.getElementById('ue-tel').value.trim() || null,
+    p_role:        document.getElementById('ue-role').value,
+    p_active:      document.getElementById('ue-active').value === 'true'
+  };
+  const { data, error } = await db.rpc('admin_update_user', payload);
+  if (error) return toast(error.message);
+  if (!data || !data.ok) return toast(data?.error || 'Errore');
+  toast('Socio aggiornato', 'ok');
+  closeEditUser();
+  loadAUsers();
+}
+
+// ── DELETE SOCIO ────────────────────────────────────────────────────
+async function adminDeleteUser(userId, cardId, displayName) {
+  modalConfirm(`Eliminare il socio ${cardId} – ${displayName}?\n\nOperazione irreversibile.`, async () => {
+    const { data, error } = await db.rpc('admin_delete_user', {p_admin_id: currentUser.id, p_user_id: userId});
+    if (error) return modalInfo('❌ Errore\n\n' + error.message);
+    if (!data || !data.ok) {
+      const code = data?.error;
+      if (code === 'cannot_delete_admin')     return modalInfo('❌ Impossibile eliminare\n\nNon si può eliminare un amministratore.');
+      if (code === 'has_transactions')        return _offerDeactivate(userId, cardId, `Il socio ha ${data.count} transazioni collegate. Non può essere eliminato per motivi contabili.`);
+      if (code === 'has_event_registrations') return _offerDeactivate(userId, cardId, `Il socio ha ${data.count} iscrizioni a eventi. Non può essere eliminato.`);
+      if (code === 'not_found')               return modalInfo('❌ Socio non trovato');
+      return modalInfo('❌ Errore\n\n' + (code || 'sconosciuto'));
+    }
+    toast('Socio eliminato', 'ok');
+    loadAUsers();
+  });
+}
+function _offerDeactivate(userId, cardId, reasonMsg) {
+  modalConfirm(`${reasonMsg}\n\nVuoi disattivarlo invece?`, async () => {
+    const { data, error } = await db.rpc('admin_update_user', {p_admin_id: currentUser.id, p_user_id: userId, p_active: false});
+    if (error || !data?.ok) return toast(error?.message || data?.error || 'Errore');
+    toast(`${cardId} disattivato`, 'ok');
+    loadAUsers();
+  });
+}
+
+// ── EDIT EVENTO ─────────────────────────────────────────────────────
+function openEditEvent(eventId) {
+  const e = _eventsAdminCache[eventId];
+  if (!e) { toast('Evento non trovato'); return; }
+  document.getElementById('eve-id').value    = e.id;
+  document.getElementById('eve-title').value = e.title || '';
+  document.getElementById('eve-desc').value  = e.description || '';
+  // datetime-local vuole "YYYY-MM-DDTHH:MM"
+  document.getElementById('eve-date').value  = e.event_date ? new Date(e.event_date).toISOString().slice(0,16) : '';
+  document.getElementById('eve-loc').value   = e.location || '';
+  document.getElementById('eve-maxp').value  = e.max_participants || 0;
+  document.getElementById('eve-price').value = e.price || 0;
+  document.getElementById('eve-sumup').value = e.sumup_link || '';
+  document.getElementById('eve-slug').value  = e.slug || '';
+  document.getElementById('eve-public').checked = !!e.public_registration;
+  const curImg = e.image_url || '';
+  document.getElementById('eve-img').value = curImg;
+  setImageUploaderPreview('eve-img-mount', curImg);
+  document.getElementById('ev-edit-bg').style.display = 'block';
+}
+function closeEditEvent() {
+  document.getElementById('ev-edit-bg').style.display = 'none';
+}
+async function saveEditEvent() {
+  const id = document.getElementById('eve-id').value;
+  if (!id) return;
+  const dateVal = document.getElementById('eve-date').value;
+  const payload = {
+    p_admin_id:            currentUser.id,
+    p_event_id:            id,
+    p_title:               document.getElementById('eve-title').value.trim() || null,
+    p_description:         document.getElementById('eve-desc').value.trim() || null,
+    p_event_date:          dateVal ? new Date(dateVal).toISOString() : null,
+    p_location:            document.getElementById('eve-loc').value.trim() || null,
+    p_max_participants:    parseInt(document.getElementById('eve-maxp').value) || 0,
+    p_price:               parseFloat(document.getElementById('eve-price').value) || 0,
+    p_sumup_link:          document.getElementById('eve-sumup').value.trim() || null,
+    p_slug:                document.getElementById('eve-slug').value.trim() || null,
+    p_public_registration: document.getElementById('eve-public').checked,
+    p_image_url:           document.getElementById('eve-img').value.trim() || null
+  };
+  const { data, error } = await db.rpc('admin_update_event', payload);
+  if (error) return toast(error.message);
+  if (!data || !data.ok) return toast(data?.error || 'Errore');
+  toast('Evento aggiornato', 'ok');
+  closeEditEvent();
+  loadAGest();
+}
+
+// ── STORNO / EDIT TX ────────────────────────────────────────────────
+function adminVoidTx(txId, amount, desc, cardId) {
+  const amt = Number(amount||0);
+  const label = (amt >= 0 ? '+' : '') + eur(amt);
+  const reason = prompt(`Storna transazione di ${label} su ${cardId}?\n\nDescrizione: ${desc || '(vuota)'}\n\nMotivo dello storno:`, 'Storno admin');
+  if (reason === null) return;
+  modalConfirm(`Confermi lo storno di ${label} per ${cardId}?\n\nMotivo: ${reason || 'Storno admin'}\n\nVerrà creata una transazione inversa e aggiornato il saldo.`, async () => {
+    const { data, error } = await db.rpc('admin_void_transaction', {p_admin_id: currentUser.id, p_transaction_id: txId, p_reason: reason || 'Storno admin'});
+    if (error) return modalInfo('❌ Errore\n\n' + error.message);
+    if (!data || !data.ok) {
+      if (data?.error === 'already_refund') return modalInfo('❌ Questa è già una transazione di storno.');
+      return modalInfo('❌ Errore\n\n' + (data?.error || 'sconosciuto'));
+    }
+    toast('Transazione stornata', 'ok');
+    loadATx();
+  });
+}
+async function adminEditTxDesc(txId, currentDesc) {
+  const next = prompt('Modifica descrizione transazione:', currentDesc || '');
+  if (next === null) return;
+  const { data, error } = await db.rpc('admin_update_transaction_description', {p_admin_id: currentUser.id, p_transaction_id: txId, p_description: next});
+  if (error) return toast(error.message);
+  if (!data || !data.ok) return toast(data?.error || 'Errore');
+  toast('Descrizione aggiornata', 'ok');
+  loadATx();
+}
+
+// ── POPUP NUOVI EVENTI PER SOCI ─────────────────────────────────────
+async function checkUnseenEvents() {
+  if (!currentUser || currentUser.role !== 'user') return;
+  try {
+    const { data, error } = await db.rpc('user_unseen_events', {p_user_id: currentUser.id});
+    if (error) { console.warn('user_unseen_events', error); return; }
+    if (!Array.isArray(data) || !data.length) return;
+    _unseenEventsQueue = data;
+    openEventPopup(data[0], data.length);
+  } catch (e) { console.warn('checkUnseenEvents', e); }
+}
+function openEventPopup(ev, total) {
+  if (!ev) return;
+  const imgWrap = document.getElementById('evp-img-wrap');
+  const img = document.getElementById('evp-img');
+  if (ev.image_url) { img.src = ev.image_url; imgWrap.style.display = ''; }
+  else { imgWrap.style.display = 'none'; img.src = ''; }
+  document.getElementById('evp-title').textContent = ev.title || 'Nuovo evento';
+  const meta = [];
+  if (ev.event_date) meta.push('📅 ' + fdt(ev.event_date));
+  if (ev.location)   meta.push('📍 ' + ev.location);
+  if (ev.price > 0)  meta.push('💶 ' + eur(ev.price));
+  else if (ev.price === 0) meta.push('🎁 Gratuito');
+  document.getElementById('evp-meta').textContent = meta.join(' · ');
+  document.getElementById('evp-desc').textContent = ev.description || '';
+  const more = document.getElementById('evp-more');
+  if (total > 1) { more.textContent = `E altri ${total - 1} nuovi eventi in bacheca.`; more.style.display = ''; }
+  else { more.style.display = 'none'; }
+  document.getElementById('ev-popup-bg').dataset.eventId   = ev.id;
+  document.getElementById('ev-popup-bg').dataset.eventSlug = ev.slug || '';
+  document.getElementById('ev-popup-bg').style.display = 'block';
+  document.body.style.overflow = 'hidden';
+}
+async function closeEventPopup() {
+  const bg = document.getElementById('ev-popup-bg');
+  const eventId = bg.dataset.eventId;
+  bg.style.display = 'none';
+  document.body.style.overflow = '';
+  if (eventId && currentUser) {
+    try { await db.rpc('user_mark_event_seen', {p_user_id: currentUser.id, p_event_id: eventId}); }
+    catch (e) { console.warn('mark_event_seen', e); }
+  }
+}
+async function goToEventFromPopup() {
+  const bg = document.getElementById('ev-popup-bg');
+  const eventId = bg.dataset.eventId;
+  await closeEventPopup();
+  if (typeof navGo === 'function') navGo('eventi');
+  if (eventId) {
+    setTimeout(() => {
+      const card = document.getElementById('ev-item-' + eventId) || document.querySelector(`[data-event-id="${eventId}"]`);
+      if (card && card.scrollIntoView) card.scrollIntoView({behavior:'smooth', block:'center'});
+    }, 350);
+  }
 }

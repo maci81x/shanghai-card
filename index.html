@@ -553,7 +553,7 @@
                 <div class="fg"><label>Prezzo €</label><input id="fg-price" type="number" min="0.01" step="0.50" placeholder="5.00"></div>
                 <div class="fg"><label>Stock</label><input id="fg-stock" type="number" min="0" placeholder="10"></div>
               </div>
-              <div class="fg"><label>URL immagine (opz.)</label><input id="fg-img" type="url" placeholder="https://..."></div>
+              <div class="fg"><label>Immagine (opz.)</label><div id="fg-img-mount"></div><input type="hidden" id="fg-img"></div>
               <button class="btn btn-p w100" data-action="create-gadget">Crea Gadget</button>
             </div>
             <div id="gs-gad-list"></div>
@@ -584,6 +584,7 @@
                 <div class="fg"><label>Valida fino</label><input id="fp-until" type="date"></div>
                 <div class="fg"><label>Max usi (0=∞)</label><input id="fp-maxu" type="number" min="0" placeholder="0"></div>
               </div>
+              <div class="fg"><label>Immagine (opz.)</label><div id="fp-img-mount"></div><input type="hidden" id="fp-img"></div>
               <button class="btn btn-p w100" data-action="create-promo">Crea Promo</button>
             </div>
             <div id="gs-pro-list"></div>
@@ -672,6 +673,7 @@
       <div class="fg"><label>Valore</label><input id="fpe-val" type="number" min="0.01" step="0.01"></div>
     </div>
     <div class="fg"><label>Valida fino</label><input id="fpe-until" type="date"></div>
+    <div class="fg"><label>Immagine (opz.)</label><div id="fpe-img-mount"></div><input type="hidden" id="fpe-img"></div>
     <div style="display:flex;gap:8px;margin-top:12px">
       <button class="btn btn-q" style="flex:1" onclick="closeEditPromo()">Annulla</button>
       <button class="btn btn-p" style="flex:2" onclick="saveEditPromo()">Salva modifiche</button>
@@ -688,9 +690,89 @@
     <div class="fg"><label>Prezzo €</label><input id="gae-price" type="number" min="0.01" step="0.50"></div>
     <div class="fg"><label>Descrizione</label><input id="gae-desc" type="text" placeholder="Descrizione (opz.)"></div>
     <div class="fg"><label>Stock</label><input id="gae-stock" type="number" min="0"></div>
+    <div class="fg"><label>Immagine (opz.)</label><div id="gae-img-mount"></div><input type="hidden" id="gae-img"></div>
     <div style="display:flex;gap:8px;margin-top:12px">
       <button class="btn btn-q" style="flex:1" onclick="closeEditGadget()">Annulla</button>
       <button class="btn btn-p" style="flex:2" onclick="saveEditGadget()">Salva</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODALE MODIFICA SOCIO -->
+<div id="u-edit-bg" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:2000;overflow-y:auto;padding:20px 12px">
+  <div style="max-width:480px;margin:0 auto;background:var(--bgc);border-radius:var(--r);padding:24px 20px;position:relative;border:1px solid var(--gold)">
+    <button onclick="closeEditUser()" style="position:absolute;top:14px;right:14px;background:transparent;border:none;font-size:20px;cursor:pointer;color:var(--mut)">✕</button>
+    <div class="sec-lbl" style="margin-bottom:14px">✏️ Modifica Socio <span id="ue-card" class="mono" style="color:var(--gold)"></span></div>
+    <input type="hidden" id="ue-id">
+    <div class="fg"><label>Nome visualizzato</label><input id="ue-display" type="text"></div>
+    <div class="form-row">
+      <div class="fg"><label>Nome</label><input id="ue-nome" type="text"></div>
+      <div class="fg"><label>Cognome</label><input id="ue-cognome" type="text"></div>
+    </div>
+    <div class="form-row">
+      <div class="fg"><label>Email</label><input id="ue-email" type="email"></div>
+      <div class="fg"><label>Telefono</label><input id="ue-tel" type="tel"></div>
+    </div>
+    <div class="form-row">
+      <div class="fg"><label>Ruolo</label><select id="ue-role"><option value="user">user</option><option value="staff">staff</option><option value="admin">admin</option></select></div>
+      <div class="fg"><label>Stato</label><select id="ue-active"><option value="true">Attivo</option><option value="false">Disattivo</option></select></div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn btn-q" style="flex:1" onclick="closeEditUser()">Annulla</button>
+      <button class="btn btn-p" style="flex:2" onclick="saveEditUser()">Salva</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODALE MODIFICA EVENTO -->
+<div id="ev-edit-bg" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:2000;overflow-y:auto;padding:20px 12px">
+  <div style="max-width:520px;margin:0 auto;background:var(--bgc);border-radius:var(--r);padding:24px 20px;position:relative;border:1px solid var(--gold)">
+    <button onclick="closeEditEvent()" style="position:absolute;top:14px;right:14px;background:transparent;border:none;font-size:20px;cursor:pointer;color:var(--mut)">✕</button>
+    <div class="sec-lbl" style="margin-bottom:14px">✏️ Modifica Evento</div>
+    <input type="hidden" id="eve-id">
+    <div class="fg"><label>Titolo</label><input id="eve-title" type="text"></div>
+    <div class="fg"><label>Descrizione</label><input id="eve-desc" type="text"></div>
+    <div class="form-row">
+      <div class="fg"><label>Data e ora</label><input id="eve-date" type="datetime-local"></div>
+      <div class="fg"><label>Luogo</label><input id="eve-loc" type="text"></div>
+    </div>
+    <div class="form-row">
+      <div class="fg"><label>Max posti (0=∞)</label><input id="eve-maxp" type="number" min="0"></div>
+      <div class="fg"><label>Prezzo €</label><input id="eve-price" type="number" min="0" step="0.50"></div>
+    </div>
+    <div class="form-row">
+      <div class="fg"><label>Link SumUp</label><input id="eve-sumup" type="url"></div>
+      <div class="fg"><label>Slug pubblico</label><input id="eve-slug" type="text"></div>
+    </div>
+    <div class="fg" style="display:flex;align-items:center;gap:8px">
+      <input type="checkbox" id="eve-public" style="width:18px;height:18px;accent-color:var(--gold)">
+      <label for="eve-public">🌐 Iscrizioni esterne (link pubblico)</label>
+    </div>
+    <div class="fg"><label>Immagine (opz.)</label><div id="eve-img-mount"></div><input type="hidden" id="eve-img"></div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn btn-q" style="flex:1" onclick="closeEditEvent()">Annulla</button>
+      <button class="btn btn-p" style="flex:2" onclick="saveEditEvent()">Salva</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODALE POPUP NUOVO EVENTO PER SOCIO -->
+<div id="ev-popup-bg" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:2100;overflow-y:auto;padding:20px 12px">
+  <div style="max-width:440px;margin:24px auto;background:var(--bgc);border-radius:var(--r);position:relative;border:1px solid var(--gold);overflow:hidden">
+    <button onclick="closeEventPopup()" style="position:absolute;top:12px;right:12px;background:rgba(0,0,0,.4);border:none;width:32px;height:32px;border-radius:50%;font-size:16px;cursor:pointer;color:#fff;z-index:2">✕</button>
+    <div id="evp-img-wrap" style="display:none">
+      <img id="evp-img" src="" style="width:100%;display:block;max-height:220px;object-fit:cover">
+    </div>
+    <div style="padding:22px 20px">
+      <div style="font-size:11px;color:var(--gold);font-weight:700;letter-spacing:.08em;margin-bottom:6px">🆕 NUOVO EVENTO</div>
+      <div id="evp-title" style="font-size:20px;font-weight:800;margin-bottom:8px"></div>
+      <div id="evp-meta" style="font-size:13px;color:var(--mut);margin-bottom:12px"></div>
+      <div id="evp-desc" style="font-size:14px;line-height:1.5;color:var(--txt);margin-bottom:14px"></div>
+      <div id="evp-more" style="font-size:12px;color:var(--mut);margin-bottom:14px;display:none"></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-q" style="flex:1" onclick="closeEventPopup()">Chiudi</button>
+        <button class="btn btn-p" style="flex:2" onclick="goToEventFromPopup()">📅 Vai all'evento</button>
+      </div>
     </div>
   </div>
 </div>
@@ -754,6 +836,6 @@
 </script>
 <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-<script src="app.js?v=31"></script>
+<script src="app.js?v=32"></script>
 </body>
 </html>
