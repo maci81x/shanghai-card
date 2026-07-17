@@ -269,7 +269,10 @@ async function doLogin(role) {
   const { data, error } = await db.rpc(rpc, {p_card_id: card, p_pin: pin});
   if (error) return toast(error.message);
   if (!data.ok) return toast(data.error);
-  currentUser = data.user;
+  currentUser = data.user || {
+    id: data.id, card_id: data.card_id, display_name: data.display_name,
+    balance: data.balance, is_staff: data.is_staff, role: data.role
+  };
   sessionStorage.setItem('sh_u', JSON.stringify(currentUser));
   sessionStorage.setItem('sh_r', role);
   route(role);
