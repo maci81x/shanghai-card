@@ -144,6 +144,7 @@
   <div class="hdr">
     <svg height="34" style="display:block"><use href="#drago"/></svg>
     <div style="flex:1"></div>
+    <button class="btn-ico" id="u-staff-toggle" onclick="switchToStaffMode()" title="Modalità Staff" style="display:none">🎽 Cassa</button>
     <button class="btn-ico" onclick="toggleTheme()" id="theme-btn" title="Cambia tema">🌙</button>
     <button class="btn-ico" onclick="openGuide('user')" title="Guida">❓</button>
     <button class="btn-ico" onclick="logout()">Esci</button>
@@ -238,6 +239,7 @@
       <div class="hdr-name" style="color:var(--gold)">CASSA</div>
       <div class="hdr-sub" id="s-name"></div>
     </div>
+    <button class="btn-ico" id="s-socio-toggle" onclick="switchToSocioMode()" title="Modalità Socio" style="display:none">👤 Socio</button>
     <button class="btn-ico" onclick="toggleTheme()" id="theme-btn" title="Cambia tema">🌙</button>
     <button class="btn-ico" onclick="openGuide('staff')" title="Guida">❓</button>
     <button class="btn-ico" onclick="logout()">Esci</button>
@@ -871,6 +873,6 @@
 </script>
 <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-<script src="app.js?v=35"></script>
+<script src="app.js?v=36"></script>
 </body>
 </html>

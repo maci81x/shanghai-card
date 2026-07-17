@@ -368,6 +368,8 @@ async function gotoUser() {
   document.getElementById('u-name').textContent = currentUser.display_name;
   document.getElementById('u-card').textContent = currentUser.card_id;
   showScreen('screen-user');
+  const toggle = document.getElementById('u-staff-toggle');
+  if (toggle) toggle.style.display = currentUser.is_staff ? '' : 'none';
   showNav('user');
   navGo('home');
   renderQR(currentUser.card_id);
@@ -916,7 +918,20 @@ function stopScanner() {
 function gotoStaff() {
   document.getElementById('s-name').textContent = currentUser.display_name;
   showScreen('screen-staff');
+  const backToggle = document.getElementById('s-socio-toggle');
+  if (backToggle) backToggle.style.display = currentUser.is_staff ? '' : 'none';
   renderStaffHist();
+}
+function switchToStaffMode() {
+  if (!currentUser || !currentUser.is_staff) return;
+  sessionStorage.setItem('sh_r', 'staff');
+  gotoStaff();
+}
+function switchToSocioMode() {
+  if (!currentUser) return;
+  sessionStorage.setItem('sh_r', 'user');
+  gotoUser();
+  setTimeout(checkUnseenEvents, 400);
 }
 // ── RICERCA SOCI: card_id + nome/cognome ─────────────────────────────
 function _normalizeCardInput(q) {
@@ -1626,7 +1641,9 @@ async function loadAUsers() {
 }
 function renderAUsers(role) {
   const el = document.getElementById('a-users-list');
-  const us = role==='all' ? allAdminUsers : allAdminUsers.filter(u=>u.role===role);
+  const us = role==='all' ? allAdminUsers
+    : role==='staff' ? allAdminUsers.filter(u => u.is_staff === true)
+    : allAdminUsers.filter(u => u.role === role);
   if (!us.length) { el.innerHTML='<div class="empty">Nessun utente</div>'; return; }
   el.innerHTML = `<div class="tbl-wrap"><table><thead><tr><th>Tessera</th><th>Nome</th><th>Ruolo</th><th>Saldo</th><th>Stato</th><th></th></tr></thead><tbody>`
     + us.map(u=>{
@@ -1643,13 +1660,15 @@ function renderAUsers(role) {
           <div>${u.display_name}${badge}</div>
           ${(u.email||u.nome)?`<div style="font-size:11px;color:var(--mut)">${[u.nome&&u.cognome?u.nome+' '+u.cognome:'',u.email].filter(Boolean).join(' · ')}</div>`:''}
         </td>
-        <td><span class="role-badge r${u.role[0]}">${u.role}</span></td>
+        <td style="white-space:nowrap">
+          <span class="role-badge r${u.role[0]}">${u.role}</span>${u.is_staff ? ' <span class="role-badge rs" title="Puo\' operare come staff">staff</span>' : ''}
+        </td>
         <td class="${u.balance>0?'pos':''}">${eur(u.balance)}</td>
         <td style="font-size:11px;color:${u.active?'var(--grn)':'var(--neg)'}">${u.active?'attivo':'disattivo'}</td>
         <td style="white-space:nowrap">
           <button class="btn-sm" title="Reset PIN" onclick="openPinModal('${u.card_id}')">🔑</button>
           <button class="btn-sm" title="Modifica" onclick="openEditUser('${u.id}')">✏️</button>
-          ${u.role === 'staff' ? `<button class="btn-sm" title="Rimuovi da staff" onclick="demoteFromStaff('${u.id}','${_esc(u.card_id)}','${_esc((u.display_name||'').replace(/'/g,"\\'"))}')">⬇️</button>` : ''}
+          ${u.is_staff ? `<button class="btn-sm" title="Rimuovi da staff" onclick="demoteFromStaff('${u.id}','${_esc(u.card_id)}','${_esc((u.display_name||'').replace(/'/g,"\\'"))}')">⬇️</button>` : ''}
           <button class="btn-sm" title="Elimina" style="color:var(--neg)" onclick="adminDeleteUser('${u.id}','${_esc(u.card_id)}','${_esc((u.display_name||'').replace(/'/g,"\\'"))}')">🗑️</button>
         </td>
       </tr>`;
@@ -3032,7 +3051,7 @@ function closeAddStaffModal() {
 }
 function _filterAddStaffCandidates(query) {
   const q = (query || '').toLowerCase().trim();
-  const list = (allAdminUsers || []).filter(u => u.role === 'user' && u.active !== false);
+  const list = (allAdminUsers || []).filter(u => u.role === 'user' && u.active !== false && u.is_staff !== true);
   const filtered = q
     ? list.filter(u =>
         (u.display_name || '').toLowerCase().includes(q) ||
@@ -3084,7 +3103,7 @@ async function promoteSelectedToStaff() {
     if (code === 'not_found')     return toast('Socio non trovato');
     return toast(code || 'Errore');
   }
-  toast(`${u.display_name || 'Socio'} è ora anche Staff`, 'ok');
+  toast(`${u.display_name || 'Socio'} può ora operare come staff`, 'ok');
   closeAddStaffModal();
   loadAUsers();
 }
