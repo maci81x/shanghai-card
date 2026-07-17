@@ -461,10 +461,17 @@ function renderEvents(evs) {
     const isRegistered = _myEventIds.has(e.id);
     const t = _esc(e.title);
     const tj = e.title.replace(/'/g,"\\'");
-    const img = e.image_url ? `<img src="${e.image_url}" class="event-img" alt="${t}">` : '';
+    const hasImg = !!e.image_url;
+    const img = hasImg ? `<img src="${e.image_url}" class="event-img" alt="${t}">` : '';
+    const cardCls = ['cat-card'];
+    if (hasImg) cardCls.push('has-img');
+    const bodyOpen  = hasImg ? '<div class="cat-body">' : '';
+    const bodyClose = hasImg ? '</div>' : '';
     if (pend) {
-      return `<div class="cat-card ev-card-pending">
+      cardCls.push('ev-card-pending');
+      return `<div class="${cardCls.join(' ')}">
         ${img}
+        ${bodyOpen}
         <div class="ev-status ev-pending">⏳ Da saldare · <strong>${eur(pend.amount)}</strong></div>
         <div class="cat-title">${t}</div>
         <div class="cat-sub">${e.event_date?fdt(e.event_date):'—'}${e.location?' · '+_esc(e.location):''}</div>
@@ -474,9 +481,12 @@ function renderEvents(evs) {
             ?`<a href="${pend.sumup_link}" target="_blank" rel="noopener" class="btn btn-g">📱 SumUp</a>`
             :`<button class="btn btn-g" onclick="toast('Paga con SumUp in cassa: lo staff registrerà il pagamento.','ok')">📱 SumUp</button>`}
           <button class="btn btn-q" onclick="toast('Recati in cassa con il tuo QR per saldare','ok')">🏠 In cassa</button>
-        </div></div>`;
+        </div>
+        ${bodyClose}
+      </div>`;
     }
     if (isRegistered) {
+      cardCls.push('ev-card-paid');
       const reg = _myEventRegs[e.id] || {};
       const pSz = reg.party_size || 1;
       const regId = reg.registration_id || '';
@@ -484,24 +494,29 @@ function renderEvents(evs) {
       const compDisp = companions.length
         ? `<div style="font-size:12px;color:var(--mut);margin-top:4px">👥 ${companions.map(c=>_esc(c.nome)+' '+_esc(c.cognome)).join(', ')}</div>`
         : '';
-      return `<div class="cat-card ev-card-paid">
+      return `<div class="${cardCls.join(' ')}">
         ${img}
+        ${bodyOpen}
         <div class="ev-status ev-paid">✓ Iscritto${pSz>1?' · 👥 '+pSz+' persone':''}</div>
         <div class="cat-title">${t}</div>
         <div class="cat-sub">${e.event_date?fdt(e.event_date):'—'}${e.location?' · '+_esc(e.location):''}</div>
         ${compDisp}
         ${regId?`<button class="btn-sm" style="margin-top:8px" onclick="openCompanionsModal('${regId}')">👥 Gestisci gruppo</button>`:''}
+        ${bodyClose}
       </div>`;
     }
-    return `<div class="cat-card">
+    return `<div class="${cardCls.join(' ')}">
       ${img}
+      ${bodyOpen}
       <div class="cat-title">${t}</div>
       <div class="cat-sub">${e.event_date?fdt(e.event_date):'—'}${e.location?' · '+_esc(e.location):''}</div>
       ${e.max_participants?`<div class="cat-sub">Max ${e.max_participants} posti</div>`:''}
       <div class="cat-foot">
         <div class="cat-price">${isFree?'Gratuito':eur(e.price)}</div>
         <button class="btn-sm p" onclick="registerEvent('${e.id}','${tj}',${e.price||0})">${isFree?'🎁 Iscriviti gratis':'Iscriviti'}</button>
-      </div></div>`;
+      </div>
+      ${bodyClose}
+    </div>`;
   }).join('');
 }
 function renderGadgets(gads) {
