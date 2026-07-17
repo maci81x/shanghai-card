@@ -143,7 +143,7 @@
   <div class="hdr">
     <svg height="34" style="display:block"><use href="#drago"/></svg>
     <div style="flex:1"></div>
-    <button class="btn-ico" id="u-staff-toggle" onclick="switchToStaffMode()" title="Modalità Staff" style="display:none">🎽 Cassa</button>
+    <button class="btn-ico" id="u-staff-toggle" onclick="switchToStaffMode()" title="Modalità Staff" style="display:none">🎽 Staff</button>
     <button class="btn-ico" onclick="toggleTheme()" id="theme-btn" title="Cambia tema">🌙</button>
     <button class="btn-ico" onclick="openGuide('user')" title="Guida">❓</button>
     <button class="btn-ico" onclick="logout()">Esci</button>
@@ -235,7 +235,7 @@
   <div class="hdr">
     <svg height="34" style="display:block"><use href="#drago"/></svg>
     <div class="hdr-info">
-      <div class="hdr-name" style="color:var(--gold)">CASSA</div>
+      <div class="hdr-name" style="color:var(--gold)">STAFF</div>
       <div class="hdr-sub" id="s-name"></div>
     </div>
     <button class="btn-ico" id="s-socio-toggle" onclick="switchToSocioMode()" title="Modalità Socio" style="display:none">👤 Socio</button>
@@ -275,6 +275,15 @@
           </div>
           <div class="card">
             <div class="sec-lbl">Ricarica rapida</div>
+            <div class="fg">
+              <label>Metodo pagamento</label>
+              <select id="s-recharge-pm">
+                <option value="contanti" selected>Contanti</option>
+                <option value="pos">POS / SumUp</option>
+                <option value="bonifico">Bonifico</option>
+                <option value="altro">Altro</option>
+              </select>
+            </div>
             <div class="quick-grid">
               <button class="btn-amt" onclick="staffRecharge(5)">€5</button>
               <button class="btn-amt" onclick="staffRecharge(10)">€10</button>
@@ -293,8 +302,20 @@
               <input id="s-charge-amt" type="number" placeholder="0,00" min="0.01" step="0.01">
             </div>
             <div class="fg">
-              <label>Descrizione</label>
-              <input id="s-charge-desc" type="text" value="Consumazione" placeholder="es. Consumazione">
+              <label>Categoria</label>
+              <select id="s-charge-cat">
+                <option value="consumazione" selected>Consumazione</option>
+                <option value="bar">Bar</option>
+                <option value="cena">Cena</option>
+                <option value="evento">Evento</option>
+                <option value="gadget">Gadget</option>
+                <option value="quota">Quota associativa</option>
+                <option value="altro">Altro</option>
+              </select>
+            </div>
+            <div class="fg">
+              <label>Note (facoltative)</label>
+              <input id="s-charge-desc" type="text" placeholder="Dettagli aggiuntivi">
             </div>
             <button class="btn btn-neg w100" onclick="staffCharge()">Addebita</button>
           </div>
@@ -327,6 +348,11 @@
         <div id="s-checkin-wrap" style="display:none">
           <div class="sec-title" style="margin-bottom:8px">✅ Check-in eventi</div>
           <div id="s-checkin-list"></div>
+        </div>
+
+        <div id="s-eventregs-wrap" style="display:none">
+          <div class="sec-title" style="margin-bottom:8px">🎫 Iscrizioni eventi</div>
+          <div id="s-eventregs-list"></div>
         </div>
 
         <div id="s-tx-wrap" style="display:none">
@@ -407,7 +433,7 @@
     <div class="tab-wrap">
       <div class="tabs" id="atabs">
         <button class="tab active" data-p="at-dash" onclick="switchTab(this,'atabs');loadDash()">📊 Dash</button>
-        <button class="tab" data-p="at-cassa" onclick="switchTab(this,'atabs')">🏪 Cassa</button>
+        <button class="tab" data-p="at-cassa" onclick="switchTab(this,'atabs')">🏪 Staff</button>
         <button class="tab" data-p="at-users" onclick="switchTab(this,'atabs');loadAUsers()">👥 Soci</button>
         <button class="tab" data-p="at-tx" onclick="switchTab(this,'atabs');loadATx()">📋 Tx</button>
         <button class="tab" data-p="at-gest" onclick="switchTab(this,'atabs');loadAGest()">⚙️ Gest.</button>
@@ -435,6 +461,15 @@
           </div>
           <div class="card">
             <div class="sec-lbl">Ricarica rapida</div>
+            <div class="fg">
+              <label>Metodo pagamento</label>
+              <select id="ac-recharge-pm">
+                <option value="contanti" selected>Contanti</option>
+                <option value="pos">POS / SumUp</option>
+                <option value="bonifico">Bonifico</option>
+                <option value="altro">Altro</option>
+              </select>
+            </div>
             <div class="quick-grid">
               <button class="btn-amt" onclick="adminCassaRecharge(5)">€5</button>
               <button class="btn-amt" onclick="adminCassaRecharge(10)">€10</button>
@@ -449,7 +484,16 @@
           <div class="card">
             <div class="sec-lbl">Addebito</div>
             <div class="fg"><label>Importo €</label><input id="ac-charge-amt" type="number" placeholder="0,00" min="0.01" step="0.01"></div>
-            <div class="fg"><label>Descrizione</label><input id="ac-charge-desc" type="text" value="Consumazione" placeholder="es. Consumazione"></div>
+            <div class="fg"><label>Categoria</label><select id="ac-charge-cat">
+              <option value="consumazione" selected>Consumazione</option>
+              <option value="bar">Bar</option>
+              <option value="cena">Cena</option>
+              <option value="evento">Evento</option>
+              <option value="gadget">Gadget</option>
+              <option value="quota">Quota associativa</option>
+              <option value="altro">Altro</option>
+            </select></div>
+            <div class="fg"><label>Note (facoltative)</label><input id="ac-charge-desc" type="text" placeholder="Dettagli aggiuntivi"></div>
             <button class="btn btn-neg w100" onclick="adminCassaCharge()">Addebita</button>
           </div>
         </div>
@@ -476,6 +520,10 @@
         <div id="ac-checkin-wrap" style="display:none">
           <div class="sec-title" style="margin-bottom:8px">Check-in disponibili</div>
           <div id="ac-checkin-list"></div>
+        </div>
+        <div id="ac-eventregs-wrap" style="display:none">
+          <div class="sec-title" style="margin-bottom:8px">🎫 Iscrizioni eventi</div>
+          <div id="ac-eventregs-list"></div>
         </div>
         <div id="ac-tx-wrap" style="display:none">
           <div class="sec-title" style="margin-bottom:8px">📋 Ultime transazioni</div>
@@ -875,6 +923,6 @@
 </script>
 <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-<script src="app.js?v=40"></script>
+<script src="app.js?v=41"></script>
 </body>
 </html>
