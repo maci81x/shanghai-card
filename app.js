@@ -3023,9 +3023,6 @@ function openAddStaffModal() {
   document.getElementById('ast-search').value = '';
   document.getElementById('ast-detail').style.display = 'none';
   document.getElementById('ast-noresult').style.display = 'none';
-  document.getElementById('ast-also-user').checked = false;
-  document.getElementById('ast-create').style.display = 'none';
-  ['ast-card','ast-name','ast-pin'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   _filterAddStaffCandidates('');
   document.getElementById('add-staff-bg').style.display = 'block';
 }
@@ -3082,34 +3079,17 @@ async function promoteSelectedToStaff() {
   if (error) return toast(error.message);
   if (!data || !data.ok) {
     const code = data && data.error;
-    if (code === 'already_staff') return toast('È già staff');
-    if (code === 'is_admin')      return toast('Non puoi promuovere un admin');
+    if (code === 'already_staff') return toast('È già Staff');
+    if (code === 'is_admin')      return toast('Non puoi assegnare Staff a un admin');
     if (code === 'not_found')     return toast('Socio non trovato');
     return toast(code || 'Errore');
   }
-  toast(`${u.display_name || 'Socio'} è ora Staff`, 'ok');
-  closeAddStaffModal();
-  loadAUsers();
-}
-function _toggleAstCreate(checked) {
-  document.getElementById('ast-create').style.display = checked ? 'block' : 'none';
-  document.getElementById('ast-nocreate').style.display = checked ? 'none' : 'block';
-}
-async function createStaffFromScratch() {
-  const card = document.getElementById('ast-card').value.trim().toUpperCase();
-  const name = document.getElementById('ast-name').value.trim();
-  const pin  = document.getElementById('ast-pin').value.trim();
-  if (!card || !name || !pin) return toast('Compila tutti i campi');
-  if (pin.length < 4 || pin.length > 6 || !/^\d+$/.test(pin)) return toast('PIN 4-6 cifre');
-  const { data, error } = await db.rpc('admin_create_user', {p_card_id: card, p_display_name: name, p_pin: pin, p_role: 'staff'});
-  if (error) return toast(error.message);
-  if (!data || !data.ok) return toast(data?.error || 'Errore');
-  toast(`${card} creato come Staff`, 'ok');
+  toast(`${u.display_name || 'Socio'} è ora anche Staff`, 'ok');
   closeAddStaffModal();
   loadAUsers();
 }
 function demoteFromStaff(userId, cardId, displayName) {
-  modalConfirm(`Rimuovere ${displayName} (${cardId}) dallo staff?\n\nResta iscritto come socio, il ruolo torna a "user".`, async () => {
+  modalConfirm(`Rimuovere il ruolo staff a ${displayName} (${cardId})?\n\nResterà iscritto come socio.`, async () => {
     const { data, error } = await db.rpc('admin_demote_to_user', {p_admin_id: currentUser.id, p_user_id: userId});
     if (error) return toast(error.message);
     if (!data || !data.ok) {
@@ -3118,7 +3098,7 @@ function demoteFromStaff(userId, cardId, displayName) {
       if (code === 'not_found') return toast('Utente non trovato');
       return toast(code || 'Errore');
     }
-    toast('Rimosso dallo staff. Resta iscritto come socio.', 'ok');
+    toast(`Ruolo staff rimosso. Resta iscritto come socio con tessera ${cardId}.`, 'ok');
     loadAUsers();
   });
 }
