@@ -319,8 +319,11 @@ function renderMovimentiFiltered() {
   if (!list.length) { el.innerHTML='<div class="empty">Nessun movimento</div>'; return; }
   el.innerHTML = list.map(t=>`
     <div class="tx-row">
-      <span class="tx-ic">${txic(t.type)}</span>
-      <div class="tx-inf"><div class="tx-dsc">${t.description||t.type}</div><div class="tx-dt">${fdt(t.created_at)}</div></div>
+      <span class="tx-ic">${_txIconHtml(t)}</span>
+      <div class="tx-inf">
+        <div class="tx-dsc">${_esc(t.description||t.type)}</div>
+        ${_txMetaHtml(t, 'Operatore')}
+      </div>
       <div class="tx-amt ${t.amount>=0?'pos':'neg-c'}">${t.amount>=0?'+':''}${eur(t.amount)}</div>
     </div>`).join('');
 }
@@ -416,8 +419,11 @@ function renderTx(txs) {
   if (!txs.length) { el.innerHTML='<div class="empty">Nessuna transazione</div>'; return; }
   el.innerHTML = txs.map(t=>`
     <div class="tx-row">
-      <span class="tx-ic">${txic(t.type)}</span>
-      <div class="tx-inf"><div class="tx-dsc">${t.description||t.type}</div><div class="tx-dt">${fdt(t.created_at)}</div></div>
+      <span class="tx-ic">${_txIconHtml(t)}</span>
+      <div class="tx-inf">
+        <div class="tx-dsc">${_esc(t.description||t.type)}</div>
+        ${_txMetaHtml(t, 'Operatore')}
+      </div>
       <div class="tx-amt ${t.amount>=0?'pos':'neg-c'}">${t.amount>=0?'+':''}${eur(t.amount)}</div>
     </div>`).join('');
 }
@@ -455,7 +461,7 @@ function renderEvents(evs) {
     const isRegistered = _myEventIds.has(e.id);
     const t = _esc(e.title);
     const tj = e.title.replace(/'/g,"\\'");
-    const img = e.image_url ? `<img src="${e.image_url}" style="display:block;width:calc(100% + 32px);max-height:180px;object-fit:cover;border-radius:12px 12px 0 0;margin:-16px -16px 12px -16px" alt="${t}">` : '';
+    const img = e.image_url ? `<img src="${e.image_url}" class="event-img" alt="${t}">` : '';
     if (pend) {
       return `<div class="cat-card ev-card-pending">
         ${img}
@@ -1070,16 +1076,29 @@ function _renderStaffTx() {
   if (!list.length) { el.innerHTML='<div class="empty">Nessuna transazione</div>'; return; }
   el.innerHTML = list.map(t => _txRowHtml(t)).join('');
 }
+function _txIconHtml(t) {
+  const type = t.type || '';
+  if (type === 'recharge') return '<span style="color:var(--grn);font-weight:700">↑</span>';
+  if (type === 'refund')   return '<span style="color:var(--gold);font-weight:700">↩</span>';
+  if (type === 'purchase' || type === 'event_fee') return '<span style="color:var(--neg);font-weight:700">↓</span>';
+  return '<span>•</span>';
+}
+function _txMetaHtml(t, operatorLabel) {
+  const parts = [fdt(t.created_at)];
+  if (t.category)       parts.push(_capitalize(t.category));
+  if (t.type === 'recharge' && t.payment_method) parts.push(_capitalize(t.payment_method));
+  const main = parts.join(' · ');
+  const op = t.operator_name ? `${operatorLabel || 'Op'}: ${_esc(t.operator_name)}` : (operatorLabel === 'Operatore' ? 'Operatore: Sistema' : '');
+  return `<div class="tx-dt">${main}</div>${op ? `<div class="tx-dt" style="opacity:.7">${op}</div>` : ''}`;
+}
 function _txRowHtml(t) {
-  const cat = t.category ? _capitalize(t.category) : '';
-  const pm  = t.payment_method ? _capitalize(t.payment_method) : '';
-  const meta = [fdt(t.created_at), cat, pm, t.operator_name].filter(Boolean).join(' · ');
   const balAfter = (t.balance_after != null) ? ` · Saldo dopo: ${eur(t.balance_after)}` : '';
   return `<div class="tx-row">
-      <span class="tx-ic">${txic(t.type)}</span>
+      <span class="tx-ic">${_txIconHtml(t)}</span>
       <div class="tx-inf">
         <div class="tx-dsc">${_esc(t.description||t.type)}</div>
-        <div class="tx-dt">${meta}${balAfter}</div>
+        ${_txMetaHtml(t, 'Op')}
+        ${balAfter ? `<div class="tx-dt" style="opacity:.7">${balAfter.replace(/^ · /,'')}</div>` : ''}
       </div>
       <div class="tx-amt ${t.amount>=0?'pos':'neg-c'}">${t.amount>=0?'+':''}${eur(t.amount)}</div>
     </div>`;
@@ -1256,13 +1275,17 @@ async function staffPayEvent(regId, method, eventName, amount) {
 }
 async function staffRecharge(amount) {
   if (!staffTarget) return toast('Cerca prima una tessera');
-  const pm = (document.getElementById('s-recharge-pm')?.value || 'contanti').toLowerCase();
-  const {data, error} = await db.rpc('staff_recharge', {p_operator_id:currentUser.id, p_card_id:staffTarget.card_id, p_amount:amount, p_payment_method: pm});
-  if (error||!data.ok) return toast((error&&error.message)||data.error);
-  toast(`Ricarica ok! ${eur(staffTarget.balance)} → ${eur(data.new_balance)}`, 'ok');
-  document.getElementById('s-res-bal').textContent = eur(data.new_balance);
-  staffTarget.balance = data.new_balance;
-  addSOp({type:'recharge', card:staffTarget.card_id, name:staffTarget.display_name, amount, nb:data.new_balance});
+  const pmSel = document.getElementById('s-recharge-pm');
+  const pm = (pmSel?.value || 'contanti').toLowerCase();
+  const pmLabel = pmSel?.selectedOptions?.[0]?.text || _capitalize(pm);
+  modalConfirm(`Ricaricare ${eur(amount)} a ${staffTarget.display_name}?\n\nMetodo: ${pmLabel}`, async () => {
+    const {data, error} = await db.rpc('staff_recharge', {p_operator_id:currentUser.id, p_card_id:staffTarget.card_id, p_amount:amount, p_payment_method: pm});
+    if (error||!data.ok) return toast((error&&error.message)||data.error);
+    toast(`Ricarica ok! ${eur(staffTarget.balance)} → ${eur(data.new_balance)}`, 'ok');
+    document.getElementById('s-res-bal').textContent = eur(data.new_balance);
+    staffTarget.balance = data.new_balance;
+    addSOp({type:'recharge', card:staffTarget.card_id, name:staffTarget.display_name, amount, nb:data.new_balance});
+  });
 }
 async function staffRechargeCustom() {
   const v = parseFloat(document.getElementById('s-custom').value);
@@ -1588,17 +1611,21 @@ async function loadAcUserTx(cardId) {
 }
 async function adminCassaRecharge(amount) {
   if (!staffTarget) return toast('Cerca prima una tessera');
-  try {
-    const pm = (document.getElementById('ac-recharge-pm')?.value || 'contanti').toLowerCase();
-    const {data, error} = await db.rpc('admin_recharge', {p_admin_id: currentUser.id, p_card_id: staffTarget.card_id, p_amount: amount, p_description: 'Ricarica admin', p_payment_method: pm});
-    if (error||!data.ok) { console.error('admin_recharge', error, data); return toast((error&&error.message)||(data&&data.error)||'Errore ricarica'); }
-    toast(`Ricarica ok! ${eur(staffTarget.balance)} → ${eur(data.new_balance)}`, 'ok');
-    staffTarget.balance = data.new_balance;
-    document.getElementById('ac-res-bal').textContent = eur(data.new_balance);
-  } catch (e) {
-    console.error('adminCassaRecharge', e);
-    toast('Errore ricarica: ' + (e.message||e));
-  }
+  const pmSel = document.getElementById('ac-recharge-pm');
+  const pm = (pmSel?.value || 'contanti').toLowerCase();
+  const pmLabel = pmSel?.selectedOptions?.[0]?.text || _capitalize(pm);
+  modalConfirm(`Ricaricare ${eur(amount)} a ${staffTarget.display_name}?\n\nMetodo: ${pmLabel}`, async () => {
+    try {
+      const {data, error} = await db.rpc('admin_recharge', {p_admin_id: currentUser.id, p_card_id: staffTarget.card_id, p_amount: amount, p_description: 'Ricarica admin', p_payment_method: pm});
+      if (error||!data.ok) { console.error('admin_recharge', error, data); return toast((error&&error.message)||(data&&data.error)||'Errore ricarica'); }
+      toast(`Ricarica ok! ${eur(staffTarget.balance)} → ${eur(data.new_balance)}`, 'ok');
+      staffTarget.balance = data.new_balance;
+      document.getElementById('ac-res-bal').textContent = eur(data.new_balance);
+    } catch (e) {
+      console.error('adminCassaRecharge', e);
+      toast('Errore ricarica: ' + (e.message||e));
+    }
+  });
 }
 async function adminCassaRechargeCustom() {
   const v = parseFloat(document.getElementById('ac-custom').value);
