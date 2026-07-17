@@ -81,6 +81,22 @@
     </div>
 
     <div class="card" id="reg-form-area" style="width:100%;max-width:400px">
+      <div class="fg" style="margin-bottom:14px;padding:12px;background:var(--hov);border-radius:10px;border:1px solid var(--brd)">
+        <div style="font-size:13px;font-weight:600;margin-bottom:8px">Hai già una tessera Shanghai Card (cartacea)?</div>
+        <div style="display:flex;gap:8px;margin-bottom:8px">
+          <label style="flex:1;display:flex;align-items:center;gap:6px;padding:8px 10px;border:1px solid var(--brd);border-radius:8px;cursor:pointer;font-size:13px">
+            <input type="radio" name="r-mode" value="new" checked onchange="_toggleClaimMode(false)">
+            Nuova iscrizione
+          </label>
+          <label style="flex:1;display:flex;align-items:center;gap:6px;padding:8px 10px;border:1px solid var(--brd);border-radius:8px;cursor:pointer;font-size:13px">
+            <input type="radio" name="r-mode" value="claim" onchange="_toggleClaimMode(true)">
+            Reclama tessera
+          </label>
+        </div>
+        <div id="r-card-wrap" style="display:none">
+          <div class="fg" style="margin-bottom:0"><label>Codice tessera *</label><input id="r-card" type="text" placeholder="SH-015" maxlength="10" oninput="this.value=this.value.toUpperCase()"></div>
+        </div>
+      </div>
       <div class="form-row">
         <div class="fg"><label>Nome *</label><input id="r-nome" type="text" placeholder="Mario" autocomplete="given-name"></div>
         <div class="fg"><label>Cognome *</label><input id="r-cognome" type="text" placeholder="Rossi" autocomplete="family-name"></div>
@@ -836,6 +852,6 @@
 </script>
 <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-<script src="app.js?v=32"></script>
+<script src="app.js?v=33"></script>
 </body>
 </html>

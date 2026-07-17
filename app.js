@@ -82,6 +82,7 @@ const SB_URL = 'https://kbcrtwqtzuipcsfiyupu.supabase.co';
 const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtiY3J0d3F0enVpcGNzZml5dXB1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1MTc3NzEsImV4cCI6MjA5OTA5Mzc3MX0.BYpoUqhiqREsA7MosC2jnLCkvXbcwjTeBdT7LhRS1UA';
 let db, currentUser = null, staffTarget = null, allAdminUsers = [], staffOps = [];
 let _gadgetsAdminCache = {}, _promosAdminCache = {}, _eventsAdminCache = {}, _unseenEventsQueue = [];
+let _incompleteUsersMap = {};
 
 // ── EVENT DELEGATION (bottoni generati da innerHTML) ──────────────────
 document.addEventListener('click', function(e) {
@@ -1611,9 +1612,16 @@ async function loadDash() {
     </div>`).join('');
 }
 async function loadAUsers() {
-  const {data} = await db.rpc('admin_list_users');
+  const [{data}, {data: incomplete}] = await Promise.all([
+    db.rpc('admin_list_users'),
+    db.rpc('admin_list_incomplete_users', {p_admin_id: currentUser.id})
+  ]);
   if (!data) return;
   allAdminUsers = data;
+  _incompleteUsersMap = {};
+  if (Array.isArray(incomplete)) {
+    incomplete.forEach(u => { _incompleteUsersMap[u.card_id] = u; });
+  }
   renderAUsers('all');
 }
 function renderAUsers(role) {
@@ -1621,10 +1629,18 @@ function renderAUsers(role) {
   const us = role==='all' ? allAdminUsers : allAdminUsers.filter(u=>u.role===role);
   if (!us.length) { el.innerHTML='<div class="empty">Nessun utente</div>'; return; }
   el.innerHTML = `<div class="tbl-wrap"><table><thead><tr><th>Tessera</th><th>Nome</th><th>Ruolo</th><th>Saldo</th><th>Stato</th><th></th></tr></thead><tbody>`
-    + us.map(u=>`<tr>
+    + us.map(u=>{
+      const inc = _incompleteUsersMap[u.card_id];
+      let badge = '';
+      if (inc) {
+        const label = inc.missing_cf ? '⚠️ Da completare' : '📋 Privacy mancante';
+        const title = inc.missing_cf ? 'Codice fiscale mancante' : 'Consenso privacy non registrato';
+        badge = `<span title="${title}" style="display:inline-block;margin-left:6px;padding:2px 6px;border-radius:6px;font-size:10px;font-weight:600;background:rgba(255,183,3,.18);color:#e6a800;border:1px solid rgba(255,183,3,.35)">${label}</span>`;
+      }
+      return `<tr>
         <td class="mono">${u.card_id}</td>
         <td>
-          <div>${u.display_name}</div>
+          <div>${u.display_name}${badge}</div>
           ${(u.email||u.nome)?`<div style="font-size:11px;color:var(--mut)">${[u.nome&&u.cognome?u.nome+' '+u.cognome:'',u.email].filter(Boolean).join(' · ')}</div>`:''}
         </td>
         <td><span class="role-badge r${u.role[0]}">${u.role}</span></td>
@@ -1635,7 +1651,8 @@ function renderAUsers(role) {
           <button class="btn-sm" title="Modifica" onclick="openEditUser('${u.id}')">✏️</button>
           <button class="btn-sm" title="Elimina" style="color:var(--neg)" onclick="adminDeleteUser('${u.id}','${_esc(u.card_id)}','${_esc((u.display_name||'').replace(/'/g,"\\'"))}')">🗑️</button>
         </td>
-      </tr>`).join('')
+      </tr>`;
+    }).join('')
     + '</tbody></table></div>';
 }
 async function openNewUserForm() {
@@ -2224,7 +2241,17 @@ function showLogin() {
   document.getElementById('register-view').style.display = 'none';
   document.getElementById('login-view').style.display = '';
 }
+function _toggleClaimMode(isClaim) {
+  document.getElementById('r-card-wrap').style.display = isClaim ? 'block' : 'none';
+  const btn = document.getElementById('reg-btn');
+  if (btn) btn.textContent = isClaim ? 'Attiva la mia tessera' : 'Crea la mia card';
+}
+function _isClaimMode() {
+  const el = document.querySelector('input[name="r-mode"]:checked');
+  return el && el.value === 'claim';
+}
 async function doRegister() {
+  const claim   = _isClaimMode();
   const nome    = document.getElementById('r-nome').value.trim();
   const cognome = document.getElementById('r-cognome').value.trim();
   const cf      = document.getElementById('r-cf').value.trim();
@@ -2236,29 +2263,59 @@ async function doRegister() {
   const gdpr2   = document.getElementById('r-gdpr2').checked;
   const gdpr3   = document.getElementById('r-gdpr3').checked;
   const gdpr4   = document.getElementById('r-gdpr4').checked;
+  const cardIn  = document.getElementById('r-card').value.trim().toUpperCase();
 
+  if (claim && !cardIn) return toast('Inserisci il codice tessera (es. SH-015)');
   if (!nome || !cognome || !cf || !email) return toast('Compila tutti i campi obbligatori (*)');
   if (pin !== pin2) return toast('I PIN non coincidono');
   if (pin.length < 4 || pin.length > 6 || !/^\d+$/.test(pin)) return toast('Il PIN deve essere di 4-6 cifre numeriche');
   if (!gdpr1 || !gdpr2) return toast('Accetta i consensi obbligatori per continuare');
 
   const btn = document.getElementById('reg-btn');
-  btn.disabled = true; btn.textContent = 'Creazione in corso…';
+  const btnLabel = claim ? 'Attiva la mia tessera' : 'Crea la mia card';
+  btn.disabled = true; btn.textContent = claim ? 'Attivazione in corso…' : 'Creazione in corso…';
 
-  const {data, error} = await db.rpc('public_register', {
-    p_nome: nome, p_cognome: cognome, p_codice_fiscale: cf,
-    p_email: email, p_telefono: tel || null, p_pin: pin,
-    p_gdpr_trattamento: gdpr1, p_gdpr_privacy: gdpr2,
-    p_gdpr_comunicazioni: gdpr3, p_gdpr_immagini: gdpr4
-  });
+  let data, error;
+  if (claim) {
+    ({data, error} = await db.rpc('claim_account', {
+      p_card_id: cardIn,
+      p_nome: nome, p_cognome: cognome, p_codice_fiscale: cf,
+      p_email: email, p_telefono: tel || null, p_pin: pin,
+      p_gdpr_trattamento: gdpr1, p_gdpr_privacy_letta: gdpr2,
+      p_gdpr_comunicazioni: gdpr3, p_gdpr_immagini: gdpr4
+    }));
+  } else {
+    ({data, error} = await db.rpc('public_register', {
+      p_nome: nome, p_cognome: cognome, p_codice_fiscale: cf,
+      p_email: email, p_telefono: tel || null, p_pin: pin,
+      p_gdpr_trattamento: gdpr1, p_gdpr_privacy: gdpr2,
+      p_gdpr_comunicazioni: gdpr3, p_gdpr_immagini: gdpr4
+    }));
+  }
 
-  btn.disabled = false; btn.textContent = 'Crea la mia card';
-  if (error || !data.ok) return toast((error && error.message) || data.error);
+  btn.disabled = false; btn.textContent = btnLabel;
+
+  if (error) return toast(error.message);
+  if (!data || !data.ok) {
+    const code = data && data.error;
+    if (code === 'already_claimed') return toast('Questa tessera è già registrata. Accedi con il PIN.');
+    if (code === 'not_found')       return toast('Tessera non trovata. Verifica il codice.');
+    return toast((data && (data.message || data.error)) || 'Errore');
+  }
 
   document.getElementById('reg-form-area').style.display = 'none';
   document.getElementById('reg-success-code').textContent = data.card_id;
-  document.getElementById('reg-success').style.display = 'block';
-  toast('Tessera creata con successo!', 'ok');
+  const successBox = document.getElementById('reg-success');
+  successBox.style.display = 'block';
+  if (claim) {
+    successBox.querySelector('div[style*="font-size:40px"]').textContent = '✨';
+    successBox.querySelector('div[style*="font-weight:700"]').textContent = 'Tessera attivata!';
+    const info = successBox.querySelector('div[style*="margin-bottom:16px"]');
+    if (info) info.innerHTML = `Ciao <strong>${_esc(data.display_name || '')}</strong>!<br>Il tuo saldo residuo è <strong style="color:var(--gold)">${eur(data.balance||0)}</strong>.<br>Il tuo codice tessera è:`;
+    toast('Tessera attivata con successo!', 'ok');
+  } else {
+    toast('Tessera creata con successo!', 'ok');
+  }
 }
 
 // ── RESET PIN ────────────────────────────────────────────────────────
