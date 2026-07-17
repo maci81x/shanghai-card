@@ -1649,6 +1649,7 @@ function renderAUsers(role) {
         <td style="white-space:nowrap">
           <button class="btn-sm" title="Reset PIN" onclick="openPinModal('${u.card_id}')">🔑</button>
           <button class="btn-sm" title="Modifica" onclick="openEditUser('${u.id}')">✏️</button>
+          ${u.role === 'staff' ? `<button class="btn-sm" title="Rimuovi da staff" onclick="demoteFromStaff('${u.id}','${_esc(u.card_id)}','${_esc((u.display_name||'').replace(/'/g,"\\'"))}')">⬇️</button>` : ''}
           <button class="btn-sm" title="Elimina" style="color:var(--neg)" onclick="adminDeleteUser('${u.id}','${_esc(u.card_id)}','${_esc((u.display_name||'').replace(/'/g,"\\'"))}')">🗑️</button>
         </td>
       </tr>`;
@@ -3012,4 +3013,112 @@ async function goToEventFromPopup() {
       if (card && card.scrollIntoView) card.scrollIntoView({behavior:'smooth', block:'center'});
     }, 350);
   }
+}
+
+// ── ADD/REMOVE STAFF (promozione/degradazione soci) ─────────────────
+let _astSelectedUserId = null;
+
+function openAddStaffModal() {
+  _astSelectedUserId = null;
+  document.getElementById('ast-search').value = '';
+  document.getElementById('ast-detail').style.display = 'none';
+  document.getElementById('ast-noresult').style.display = 'none';
+  document.getElementById('ast-also-user').checked = false;
+  document.getElementById('ast-create').style.display = 'none';
+  ['ast-card','ast-name','ast-pin'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  _filterAddStaffCandidates('');
+  document.getElementById('add-staff-bg').style.display = 'block';
+}
+function closeAddStaffModal() {
+  document.getElementById('add-staff-bg').style.display = 'none';
+  _astSelectedUserId = null;
+}
+function _filterAddStaffCandidates(query) {
+  const q = (query || '').toLowerCase().trim();
+  const list = (allAdminUsers || []).filter(u => u.role === 'user' && u.active !== false);
+  const filtered = q
+    ? list.filter(u =>
+        (u.display_name || '').toLowerCase().includes(q) ||
+        (u.card_id || '').toLowerCase().includes(q) ||
+        ((u.nome || '') + ' ' + (u.cognome || '')).toLowerCase().includes(q))
+    : list;
+  const results = document.getElementById('ast-results');
+  const noresult = document.getElementById('ast-noresult');
+  const detail = document.getElementById('ast-detail');
+  if (!filtered.length) {
+    results.innerHTML = '';
+    noresult.style.display = q ? 'block' : 'none';
+    detail.style.display = 'none';
+    return;
+  }
+  noresult.style.display = 'none';
+  results.innerHTML = filtered.slice(0, 30).map(u => `
+    <div onclick="_selectAddStaffCandidate('${u.id}')" style="padding:10px 12px;border-bottom:1px solid var(--brd);cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:8px">
+      <div>
+        <span class="mono" style="color:var(--gold);font-weight:600">${_esc(u.card_id)}</span>
+        <span style="margin-left:8px">${_esc(u.display_name || '')}</span>
+      </div>
+      <span style="font-size:11px;color:var(--mut)">${eur(u.balance || 0)}</span>
+    </div>`).join('');
+}
+function _selectAddStaffCandidate(userId) {
+  const u = (allAdminUsers || []).find(x => x.id === userId);
+  if (!u) return;
+  _astSelectedUserId = userId;
+  document.getElementById('ast-detail-name').textContent = `${u.card_id} · ${u.display_name}`;
+  const meta = [];
+  if (u.nome && u.cognome) meta.push(`${u.nome} ${u.cognome}`);
+  if (u.email) meta.push(u.email);
+  meta.push('Saldo ' + eur(u.balance || 0));
+  document.getElementById('ast-detail-meta').textContent = meta.join(' · ');
+  document.getElementById('ast-detail').style.display = 'block';
+  document.getElementById('ast-noresult').style.display = 'none';
+  document.getElementById('ast-results').innerHTML = '';
+}
+async function promoteSelectedToStaff() {
+  if (!_astSelectedUserId) return toast('Seleziona un socio');
+  const u = (allAdminUsers || []).find(x => x.id === _astSelectedUserId) || {};
+  const { data, error } = await db.rpc('admin_promote_to_staff', {p_admin_id: currentUser.id, p_user_id: _astSelectedUserId});
+  if (error) return toast(error.message);
+  if (!data || !data.ok) {
+    const code = data && data.error;
+    if (code === 'already_staff') return toast('È già staff');
+    if (code === 'is_admin')      return toast('Non puoi promuovere un admin');
+    if (code === 'not_found')     return toast('Socio non trovato');
+    return toast(code || 'Errore');
+  }
+  toast(`${u.display_name || 'Socio'} è ora Staff`, 'ok');
+  closeAddStaffModal();
+  loadAUsers();
+}
+function _toggleAstCreate(checked) {
+  document.getElementById('ast-create').style.display = checked ? 'block' : 'none';
+  document.getElementById('ast-nocreate').style.display = checked ? 'none' : 'block';
+}
+async function createStaffFromScratch() {
+  const card = document.getElementById('ast-card').value.trim().toUpperCase();
+  const name = document.getElementById('ast-name').value.trim();
+  const pin  = document.getElementById('ast-pin').value.trim();
+  if (!card || !name || !pin) return toast('Compila tutti i campi');
+  if (pin.length < 4 || pin.length > 6 || !/^\d+$/.test(pin)) return toast('PIN 4-6 cifre');
+  const { data, error } = await db.rpc('admin_create_user', {p_card_id: card, p_display_name: name, p_pin: pin, p_role: 'staff'});
+  if (error) return toast(error.message);
+  if (!data || !data.ok) return toast(data?.error || 'Errore');
+  toast(`${card} creato come Staff`, 'ok');
+  closeAddStaffModal();
+  loadAUsers();
+}
+function demoteFromStaff(userId, cardId, displayName) {
+  modalConfirm(`Rimuovere ${displayName} (${cardId}) dallo staff?\n\nResta iscritto come socio, il ruolo torna a "user".`, async () => {
+    const { data, error } = await db.rpc('admin_demote_to_user', {p_admin_id: currentUser.id, p_user_id: userId});
+    if (error) return toast(error.message);
+    if (!data || !data.ok) {
+      const code = data && data.error;
+      if (code === 'not_staff') return toast('Non è staff');
+      if (code === 'not_found') return toast('Utente non trovato');
+      return toast(code || 'Errore');
+    }
+    toast('Rimosso dallo staff. Resta iscritto come socio.', 'ok');
+    loadAUsers();
+  });
 }
