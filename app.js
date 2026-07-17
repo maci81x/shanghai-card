@@ -1532,8 +1532,8 @@ async function loadAcUserTx(cardId) {
 async function adminCassaRecharge(amount) {
   if (!staffTarget) return toast('Cerca prima una tessera');
   try {
-    const {data, error} = await db.rpc('staff_recharge', {p_operator_id:currentUser.id, p_card_id:staffTarget.card_id, p_amount:amount});
-    if (error||!data.ok) { console.error('staff_recharge', error, data); return toast((error&&error.message)||(data&&data.error)||'Errore ricarica'); }
+    const {data, error} = await db.rpc('admin_recharge', {p_admin_id: currentUser.id, p_card_id: staffTarget.card_id, p_amount: amount, p_description: 'Ricarica admin'});
+    if (error||!data.ok) { console.error('admin_recharge', error, data); return toast((error&&error.message)||(data&&data.error)||'Errore ricarica'); }
     toast(`Ricarica ok! ${eur(staffTarget.balance)} → ${eur(data.new_balance)}`, 'ok');
     staffTarget.balance = data.new_balance;
     document.getElementById('ac-res-bal').textContent = eur(data.new_balance);
@@ -1558,9 +1558,12 @@ async function adminCassaCharge() {
     ? `\n\n⚡ Promo [${pv.promo_code}] attiva: -${eur(pv.promo_discount)}\nImporto originale: ${eur(v)} → Addebito finale: ${eur(pv.final_amount)} (sconto ${eur(pv.promo_discount)})`
     : '';
   modalConfirm(`Addebitare ${eur(v)} a ${staffTarget.display_name}?${promoLine}`, async () => {
-    const {data, error} = await db.rpc('staff_charge', {p_operator_id:currentUser.id, p_card_id:staffTarget.card_id, p_amount:v, p_description:desc});
-    if (error||!data.ok) return toast((error&&error.message)||data.error);
-    toast(`Addebito ok! ${eur(data.old_balance)} → ${eur(data.new_balance)}`, 'ok');
+    const {data, error} = await db.rpc('admin_charge', {p_admin_id: currentUser.id, p_card_id: staffTarget.card_id, p_amount: v, p_description: desc});
+    if (error||!data.ok) {
+      if (data?.error === 'insufficient_balance') return toast(`Saldo insufficiente (${eur(data.balance)})`);
+      return toast((error&&error.message)||data.error);
+    }
+    toast(`Addebito ok! ${eur(staffTarget.balance)} → ${eur(data.new_balance)}`, 'ok');
     staffTarget.balance = data.new_balance;
     document.getElementById('ac-res-bal').textContent = eur(data.new_balance);
     document.getElementById('ac-charge-amt').value = '';
