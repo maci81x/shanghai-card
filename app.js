@@ -83,6 +83,7 @@ const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
 let db, currentUser = null, staffTarget = null, allAdminUsers = [], staffOps = [];
 let _gadgetsAdminCache = {}, _promosAdminCache = {}, _eventsAdminCache = {}, _unseenEventsQueue = [];
 let _incompleteUsersMap = {};
+let _adminUsersRole = 'all', _adminUsersSearch = '', _adminUsersSort = {key: 'card_id', dir: 'asc'};
 
 // ── EVENT DELEGATION (bottoni generati da innerHTML) ──────────────────
 document.addEventListener('click', function(e) {
@@ -257,7 +258,8 @@ function toggleEl(id) { const el=document.getElementById(id); el.style.display=e
 function filterUsers(btn) {
   document.getElementById('a-filter').querySelectorAll('.fbtn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
-  renderAUsers(btn.dataset.role);
+  _adminUsersRole = btn.dataset.role;
+  renderAUsers(_adminUsersRole);
 }
 
 // ── LOGIN ────────────────────────────────────────────────────────────
@@ -453,8 +455,10 @@ function renderEvents(evs) {
     const isRegistered = _myEventIds.has(e.id);
     const t = _esc(e.title);
     const tj = e.title.replace(/'/g,"\\'");
+    const img = e.image_url ? `<img src="${e.image_url}" class="cat-img" alt="${t}">` : '';
     if (pend) {
       return `<div class="cat-card ev-card-pending">
+        ${img}
         <div class="ev-status ev-pending">⏳ Da saldare · <strong>${eur(pend.amount)}</strong></div>
         <div class="cat-title">${t}</div>
         <div class="cat-sub">${e.event_date?fdt(e.event_date):'—'}${e.location?' · '+_esc(e.location):''}</div>
@@ -475,6 +479,7 @@ function renderEvents(evs) {
         ? `<div style="font-size:12px;color:var(--mut);margin-top:4px">👥 ${companions.map(c=>_esc(c.nome)+' '+_esc(c.cognome)).join(', ')}</div>`
         : '';
       return `<div class="cat-card ev-card-paid">
+        ${img}
         <div class="ev-status ev-paid">✓ Iscritto${pSz>1?' · 👥 '+pSz+' persone':''}</div>
         <div class="cat-title">${t}</div>
         <div class="cat-sub">${e.event_date?fdt(e.event_date):'—'}${e.location?' · '+_esc(e.location):''}</div>
@@ -483,6 +488,7 @@ function renderEvents(evs) {
       </div>`;
     }
     return `<div class="cat-card">
+      ${img}
       <div class="cat-title">${t}</div>
       <div class="cat-sub">${e.event_date?fdt(e.event_date):'—'}${e.location?' · '+_esc(e.location):''}</div>
       ${e.max_participants?`<div class="cat-sub">Max ${e.max_participants} posti</div>`:''}
@@ -780,6 +786,7 @@ function renderPromos(prs) {
   if (!prs.length) { el.innerHTML='<div class="empty">Nessuna promo attiva</div>'; return; }
   el.innerHTML = prs.map(p=>`
     <div class="promo-row">
+      ${p.image_url?`<img src="${p.image_url}" class="cat-img" alt="${_esc(p.code)}">`:''}
       <div class="promo-code">${p.code}</div>
       <div class="promo-desc">${p.description||''}</div>
       <div class="promo-detail">${p.discount_type==='percent'?p.discount_value+'%':eur(p.discount_value)} di sconto${p.valid_until?' · fino al '+fdt(p.valid_until).split(' ')[0]:''}</div>
@@ -1640,15 +1647,70 @@ async function loadAUsers() {
   if (Array.isArray(incomplete)) {
     incomplete.forEach(u => { _incompleteUsersMap[u.card_id] = u; });
   }
-  renderAUsers('all');
+  _updateAUsersCounts();
+  renderAUsers(_adminUsersRole);
+}
+function _updateAUsersCounts() {
+  const all = allAdminUsers || [];
+  const counts = {
+    all:   all.length,
+    user:  all.filter(u => u.role === 'user' && !u.is_staff).length,
+    staff: all.filter(u => u.is_staff === true).length,
+    admin: all.filter(u => u.role === 'admin').length
+  };
+  document.querySelectorAll('#a-filter .fbtn-cnt').forEach(el => {
+    const k = el.dataset.cnt;
+    el.textContent = counts[k] != null ? counts[k] : 0;
+  });
+}
+function _onAdminUsersSearch(val) {
+  _adminUsersSearch = (val || '').toLowerCase().trim();
+  renderAUsers(_adminUsersRole);
+}
+function _setAdminUsersSort(key) {
+  if (_adminUsersSort.key === key) {
+    _adminUsersSort.dir = _adminUsersSort.dir === 'asc' ? 'desc' : 'asc';
+  } else {
+    _adminUsersSort = {key, dir: 'asc'};
+  }
+  renderAUsers(_adminUsersRole);
 }
 function renderAUsers(role) {
   const el = document.getElementById('a-users-list');
-  const us = role==='all' ? allAdminUsers
+  let us = role==='all' ? allAdminUsers.slice()
     : role==='staff' ? allAdminUsers.filter(u => u.is_staff === true)
+    : role==='user'  ? allAdminUsers.filter(u => u.role === 'user' && !u.is_staff)
     : allAdminUsers.filter(u => u.role === role);
-  if (!us.length) { el.innerHTML='<div class="empty">Nessun utente</div>'; return; }
-  el.innerHTML = `<div class="tbl-wrap"><table><thead><tr><th>Tessera</th><th>Nome</th><th>Ruolo</th><th>Saldo</th><th>Stato</th><th></th></tr></thead><tbody>`
+  const q = _adminUsersSearch;
+  if (q) {
+    us = us.filter(u =>
+      (u.display_name || '').toLowerCase().includes(q) ||
+      (u.card_id      || '').toLowerCase().includes(q) ||
+      ((u.nome || '') + ' ' + (u.cognome || '')).toLowerCase().includes(q) ||
+      (u.email        || '').toLowerCase().includes(q));
+  }
+  const s = _adminUsersSort;
+  us.sort((a, b) => {
+    let va = a[s.key], vb = b[s.key];
+    if (s.key === 'balance') { va = Number(va || 0); vb = Number(vb || 0); return s.dir === 'asc' ? va - vb : vb - va; }
+    va = (va || '').toString().toLowerCase();
+    vb = (vb || '').toString().toLowerCase();
+    if (va < vb) return s.dir === 'asc' ? -1 : 1;
+    if (va > vb) return s.dir === 'asc' ?  1 : -1;
+    return 0;
+  });
+  if (!us.length) {
+    el.innerHTML = q ? '<div class="empty">Nessun risultato per la ricerca</div>' : '<div class="empty">Nessun utente</div>';
+    return;
+  }
+  const arr = (col) => `<span class="sort-arr${s.key===col?' on':''}">${s.key===col ? (s.dir==='asc'?'↑':'↓') : '↕'}</span>`;
+  el.innerHTML = `<div class="tbl-wrap"><table><thead><tr>
+    <th class="sort-th" onclick="_setAdminUsersSort('card_id')">Tessera ${arr('card_id')}</th>
+    <th class="sort-th" onclick="_setAdminUsersSort('display_name')">Nome ${arr('display_name')}</th>
+    <th>Ruolo</th>
+    <th class="sort-th" onclick="_setAdminUsersSort('balance')">Saldo ${arr('balance')}</th>
+    <th>Stato</th>
+    <th></th></tr></thead><tbody>`
     + us.map(u=>{
       const inc = _incompleteUsersMap[u.card_id];
       let badge = '';
@@ -2184,6 +2246,7 @@ async function loadPublicEvent(slug) {
     ? `<div style="margin-top:8px"><span class="badge ${_publicEvent.spots_left>0?'bg':'br'}">${_publicEvent.spots_left>0?_publicEvent.spots_left+' posti disponibili':'Sold out'}</span></div>`
     : '';
   document.getElementById('ev-info').innerHTML = `
+    ${_publicEvent.image_url?`<img src="${_publicEvent.image_url}" style="width:100%;max-height:220px;object-fit:cover;border-radius:10px;margin-bottom:12px" alt="${_esc(_publicEvent.title)}">`:''}
     <div style="font-size:15px;font-weight:700;margin-bottom:6px">${_publicEvent.title}</div>
     ${_publicEvent.description?`<div style="font-size:13px;color:var(--mut);margin-bottom:8px">${_publicEvent.description}</div>`:''}
     <div style="font-size:13px;margin-bottom:3px">📅 ${dateStr}</div>

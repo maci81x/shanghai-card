@@ -64,7 +64,6 @@
       </div>
       <div class="login-btns">
         <button class="btn btn-p" onclick="doLogin('user')">Socio</button>
-        <button class="btn btn-g" onclick="doLogin('staff')">Staff</button>
         <button class="btn btn-q" onclick="doLogin('admin')">Admin</button>
       </div>
       <div style="text-align:center;margin-top:16px;font-size:13px;color:var(--mut)">Non hai una card? <a href="#" class="reg-link" onclick="showRegister();return false">Registrati</a></div>
@@ -506,14 +505,17 @@
       <div id="at-users" class="tab-panel">
         <div class="sec-hdr">
           <div class="filter-row" id="a-filter">
-            <button class="fbtn active" data-role="all" onclick="filterUsers(this)">Tutti</button>
-            <button class="fbtn" data-role="user" onclick="filterUsers(this)">Soci</button>
-            <button class="fbtn" data-role="staff" onclick="filterUsers(this)">Staff</button>
-            <button class="fbtn" data-role="admin" onclick="filterUsers(this)">Admin</button>
+            <button class="fbtn active" data-role="all"   onclick="filterUsers(this)">Tutti <span class="fbtn-cnt" data-cnt="all">0</span></button>
+            <button class="fbtn"        data-role="user"  onclick="filterUsers(this)">Soci <span class="fbtn-cnt" data-cnt="user">0</span></button>
+            <button class="fbtn"        data-role="staff" onclick="filterUsers(this)">Staff <span class="fbtn-cnt" data-cnt="staff">0</span></button>
+            <button class="fbtn"        data-role="admin" onclick="filterUsers(this)">Admin <span class="fbtn-cnt" data-cnt="admin">0</span></button>
           </div>
           <button class="btn-sm" onclick="exportCSVUsers()">📥 CSV</button>
           <button class="btn-sm" onclick="openAddStaffModal()">+ Staff</button>
           <button class="btn-sm p" onclick="openNewUserForm()">+ Socio</button>
+        </div>
+        <div style="margin-bottom:8px">
+          <input id="a-users-search" type="text" placeholder="🔍 Cerca per nome o tessera…" oninput="_onAdminUsersSearch(this.value)" style="width:100%;background:var(--bg);color:var(--txt);border:1px solid var(--brd);border-radius:8px;padding:8px 12px;font-size:13px">
         </div>
         <div id="nu-form" class="card" style="display:none;margin-bottom:12px">
           <div class="sec-lbl">Nuovo socio</div>
@@ -873,6 +875,6 @@
 </script>
 <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-<script src="app.js?v=37"></script>
+<script src="app.js?v=38"></script>
 </body>
 </html>

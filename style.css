@@ -149,6 +149,12 @@ button{cursor:pointer;font-family:inherit;transition:opacity .2s}
 .filter-row{display:flex;gap:6px;flex-wrap:wrap}
 .fbtn{background:transparent;border:1px solid var(--brd);border-radius:6px;padding:5px 12px;font-family:inherit;font-size:12px;color:var(--mut);transition:all .2s}
 .fbtn.active{border-color:var(--red);color:var(--red)}
+.fbtn-cnt{display:inline-block;margin-left:4px;padding:1px 6px;border-radius:999px;background:rgba(255,255,255,.08);font-size:10px;font-weight:600;color:inherit;opacity:.85}
+.fbtn.active .fbtn-cnt{background:rgba(196,30,58,.18)}
+.sort-th{cursor:pointer;user-select:none}
+.sort-th:hover{color:var(--gold)}
+.sort-arr{opacity:.5;font-size:10px;margin-left:3px}
+.sort-arr.on{opacity:1;color:var(--gold)}
 .form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 
 /* TABLE */
