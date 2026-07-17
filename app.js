@@ -455,7 +455,7 @@ function renderEvents(evs) {
     const isRegistered = _myEventIds.has(e.id);
     const t = _esc(e.title);
     const tj = e.title.replace(/'/g,"\\'");
-    const img = e.image_url ? `<img src="${e.image_url}" class="cat-img" alt="${t}">` : '';
+    const img = e.image_url ? `<img src="${e.image_url}" style="width:100%;border-radius:12px;margin-bottom:12px;max-height:200px;object-fit:cover" alt="${t}">` : '';
     if (pend) {
       return `<div class="cat-card ev-card-pending">
         ${img}
@@ -506,7 +506,7 @@ function renderGadgets(gads) {
   </div>` +
   gads.map(g=>`
     <div class="cat-card">
-      ${g.image_url?`<img src="${g.image_url}" class="cat-img" alt="${g.name}">` : ''}
+      ${g.image_url?`<img src="${g.image_url}" style="width:100%;border-radius:12px;margin-bottom:12px;max-height:200px;object-fit:cover" alt="${_esc(g.name)}">` : ''}
       <div class="cat-title">${_esc(g.name)}</div>
       <div class="cat-sub">${_esc(g.description||'')}</div>
       <div class="cat-foot">
@@ -786,7 +786,7 @@ function renderPromos(prs) {
   if (!prs.length) { el.innerHTML='<div class="empty">Nessuna promo attiva</div>'; return; }
   el.innerHTML = prs.map(p=>`
     <div class="promo-row">
-      ${p.image_url?`<img src="${p.image_url}" class="cat-img" alt="${_esc(p.code)}">`:''}
+      ${p.image_url?`<img src="${p.image_url}" style="width:100%;border-radius:12px;margin-bottom:12px;max-height:200px;object-fit:cover" alt="${_esc(p.code)}">`:''}
       <div class="promo-code">${p.code}</div>
       <div class="promo-desc">${p.description||''}</div>
       <div class="promo-detail">${p.discount_type==='percent'?p.discount_value+'%':eur(p.discount_value)} di sconto${p.valid_until?' · fino al '+fdt(p.valid_until).split(' ')[0]:''}</div>
@@ -1017,18 +1017,19 @@ async function staffLookup() {
   _hideCassaSearch('s');
   const {data, error} = await db.rpc('staff_lookup', {p_card_id: cardId});
   if (error||!data.ok) return toast((error&&error.message)||data.error);
-  staffTarget = data.user;
-  document.getElementById('s-res-name').textContent = data.user.display_name;
-  document.getElementById('s-res-card').textContent = data.user.card_id;
-  document.getElementById('s-res-bal').textContent  = eur(data.user.balance);
+  const u = data.user || data;
+  staffTarget = u;
+  document.getElementById('s-res-name').textContent = u.display_name;
+  document.getElementById('s-res-card').textContent = u.card_id;
+  document.getElementById('s-res-bal').textContent  = eur(u.balance);
   document.getElementById('s-result').style.display = 'block';
   await Promise.all([
-    loadStaffPendingEvents(data.user.card_id),
-    loadStaffCheckin(data.user.card_id),
-    loadStaffUserTx(data.user.card_id)
+    loadStaffPendingEvents(u.card_id),
+    loadStaffCheckin(u.card_id),
+    loadStaffUserTx(u.card_id)
   ]);
-  loadStaffGadgetReservationsForUser(data.user.id);
-  loadStaffRegisterEventDropdown(data.user.card_id);
+  loadStaffGadgetReservationsForUser(u.id);
+  loadStaffRegisterEventDropdown(u.card_id);
 }
 async function loadStaffUserTx(cardId) {
   const wrap = document.getElementById('s-tx-wrap');
@@ -1124,7 +1125,7 @@ async function staffFulfillGadget(resId, method, name, total) {
       ? `✅ Consegnato! Promo ${data.promo_code}: -${eur(data.discount)} → Addebitato ${eur(data.charged)}`
       : `✅ Consegnato! ${eur(data.amount)} (${label})`;
     toast(msg, 'ok');
-    if (staffTarget) { const {data: u} = await db.rpc('staff_lookup', {p_card_id: staffTarget.card_id}); if (u?.ok) { staffTarget = u.user; document.getElementById('s-res-bal').textContent = eur(u.user.balance); } }
+    if (staffTarget) { const {data: r} = await db.rpc('staff_lookup', {p_card_id: staffTarget.card_id}); if (r?.ok) { const nu = r.user || r; staffTarget = nu; document.getElementById('s-res-bal').textContent = eur(nu.balance); } }
     loadStaffGadgetReservationsForUser(staffTarget?.id);
   });
 }
@@ -1395,18 +1396,19 @@ async function adminCassaLookup() {
   _hideCassaSearch('ac');
   const {data, error} = await db.rpc('staff_lookup', {p_card_id: cardId});
   if (error||!data.ok) return toast((error&&error.message)||data.error);
-  staffTarget = data.user;
-  document.getElementById('ac-res-name').textContent = data.user.display_name;
-  document.getElementById('ac-res-card').textContent = data.user.card_id;
-  document.getElementById('ac-res-bal').textContent  = eur(data.user.balance);
+  const u = data.user || data;
+  staffTarget = u;
+  document.getElementById('ac-res-name').textContent = u.display_name;
+  document.getElementById('ac-res-card').textContent = u.card_id;
+  document.getElementById('ac-res-bal').textContent  = eur(u.balance);
   document.getElementById('ac-result').style.display = 'block';
   await Promise.all([
-    loadAcPendingEvents(data.user.card_id),
-    loadAcCheckin(data.user.card_id),
-    loadAcUserTx(data.user.card_id)
+    loadAcPendingEvents(u.card_id),
+    loadAcCheckin(u.card_id),
+    loadAcUserTx(u.card_id)
   ]);
-  loadAcGadgetReservationsForUser(data.user.id);
-  loadAcRegisterEventDropdown(data.user.card_id);
+  loadAcGadgetReservationsForUser(u.id);
+  loadAcRegisterEventDropdown(u.card_id);
 }
 async function loadAcPendingEvents(cardId) {
   const wrap = document.getElementById('ac-pending-wrap');
@@ -1459,7 +1461,7 @@ async function acFulfillGadget(resId, method, name, total) {
       ? `✅ Consegnato! Promo ${data.promo_code}: -${eur(data.discount)} → ${eur(data.charged)}`
       : `✅ Consegnato! ${eur(data.amount)} (${label})`;
     toast(msg, 'ok');
-    if (staffTarget) { const {data: u} = await db.rpc('staff_lookup', {p_card_id: staffTarget.card_id}); if (u?.ok) { staffTarget = u.user; document.getElementById('ac-res-bal').textContent = eur(u.user.balance); } }
+    if (staffTarget) { const {data: r} = await db.rpc('staff_lookup', {p_card_id: staffTarget.card_id}); if (r?.ok) { const nu = r.user || r; staffTarget = nu; document.getElementById('ac-res-bal').textContent = eur(nu.balance); } }
     loadAcGadgetReservationsForUser(staffTarget?.id);
   });
 }
@@ -2246,7 +2248,7 @@ async function loadPublicEvent(slug) {
     ? `<div style="margin-top:8px"><span class="badge ${_publicEvent.spots_left>0?'bg':'br'}">${_publicEvent.spots_left>0?_publicEvent.spots_left+' posti disponibili':'Sold out'}</span></div>`
     : '';
   document.getElementById('ev-info').innerHTML = `
-    ${_publicEvent.image_url?`<img src="${_publicEvent.image_url}" style="width:100%;max-height:220px;object-fit:cover;border-radius:10px;margin-bottom:12px" alt="${_esc(_publicEvent.title)}">`:''}
+    ${_publicEvent.image_url?`<img src="${_publicEvent.image_url}" style="width:100%;border-radius:12px;margin-bottom:12px;max-height:200px;object-fit:cover" alt="${_esc(_publicEvent.title)}">`:''}
     <div style="font-size:15px;font-weight:700;margin-bottom:6px">${_publicEvent.title}</div>
     ${_publicEvent.description?`<div style="font-size:13px;color:var(--mut);margin-bottom:8px">${_publicEvent.description}</div>`:''}
     <div style="font-size:13px;margin-bottom:3px">📅 ${dateStr}</div>
