@@ -199,6 +199,14 @@ window.addEventListener('DOMContentLoaded', () => {
 const eur = c => '€ ' + Number(c||0).toFixed(2).replace('.',',');
 const fdt = iso => { if(!iso) return '—'; const d=new Date(iso); return d.toLocaleDateString('it-IT',{day:'2-digit',month:'2-digit',year:'2-digit'})+' '+d.toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'}); };
 const txic = t => ({recharge:'🔄',purchase:'🛍️',event_fee:'🎫',refund:'↩️'}[t]||'•');
+function _imgWrap16x9(url, alt, radius) {
+  if (!url) return '';
+  const r = radius || '12px 12px 0 0';
+  const a = String(alt||'').replace(/"/g,'&quot;');
+  return `<div style="width:100%;padding-top:56.25%;position:relative;overflow:hidden;background:#1a1a1a;border-radius:${r}">
+    <img src="${url}" alt="${a}" loading="lazy" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;-webkit-object-fit:cover;display:block">
+  </div>`;
+}
 
 let _tt;
 function toast(msg, type='err') {
@@ -462,7 +470,7 @@ function renderEvents(evs) {
     const t = _esc(e.title);
     const tj = e.title.replace(/'/g,"\\'");
     const hasImg = !!e.image_url;
-    const img = hasImg ? `<img src="${e.image_url}" class="event-img" alt="${t}">` : '';
+    const img = hasImg ? _imgWrap16x9(e.image_url, e.title, '12px 12px 0 0') : '';
     const cardCls = ['cat-card'];
     if (hasImg) cardCls.push('has-img');
     const bodyOpen  = hasImg ? '<div class="cat-body">' : '';
@@ -527,7 +535,7 @@ function renderGadgets(gads) {
   </div>` +
   gads.map(g=>`
     <div class="cat-card">
-      ${g.image_url?`<img src="${g.image_url}" style="width:100%;border-radius:12px;margin-bottom:12px;max-height:200px;object-fit:cover" alt="${_esc(g.name)}">` : ''}
+      ${g.image_url ? `<div style="margin-bottom:12px">${_imgWrap16x9(g.image_url, g.name, '12px')}</div>` : ''}
       <div class="cat-title">${_esc(g.name)}</div>
       <div class="cat-sub">${_esc(g.description||'')}</div>
       <div class="cat-foot">
@@ -807,7 +815,7 @@ function renderPromos(prs) {
   if (!prs.length) { el.innerHTML='<div class="empty">Nessuna promo attiva</div>'; return; }
   el.innerHTML = prs.map(p=>`
     <div class="promo-row">
-      ${p.image_url?`<img src="${p.image_url}" style="width:100%;border-radius:12px;margin-bottom:12px;max-height:200px;object-fit:cover" alt="${_esc(p.code)}">`:''}
+      ${p.image_url ? `<div style="margin-bottom:12px">${_imgWrap16x9(p.image_url, p.code, '12px')}</div>` : ''}
       <div class="promo-code">${p.code}</div>
       <div class="promo-desc">${p.description||''}</div>
       <div class="promo-detail">${p.discount_type==='percent'?p.discount_value+'%':eur(p.discount_value)} di sconto${p.valid_until?' · fino al '+fdt(p.valid_until).split(' ')[0]:''}</div>
@@ -2355,7 +2363,7 @@ async function loadPublicEvent(slug) {
     ? `<div style="margin-top:8px"><span class="badge ${_publicEvent.spots_left>0?'bg':'br'}">${_publicEvent.spots_left>0?_publicEvent.spots_left+' posti disponibili':'Sold out'}</span></div>`
     : '';
   document.getElementById('ev-info').innerHTML = `
-    ${_publicEvent.image_url?`<img src="${_publicEvent.image_url}" style="width:100%;border-radius:12px;margin-bottom:12px;max-height:200px;object-fit:cover" alt="${_esc(_publicEvent.title)}">`:''}
+    ${_publicEvent.image_url ? `<div style="margin-bottom:12px">${_imgWrap16x9(_publicEvent.image_url, _publicEvent.title, '12px')}</div>` : ''}
     <div style="font-size:15px;font-weight:700;margin-bottom:6px">${_publicEvent.title}</div>
     ${_publicEvent.description?`<div style="font-size:13px;color:var(--mut);margin-bottom:8px">${_publicEvent.description}</div>`:''}
     <div style="font-size:13px;margin-bottom:3px">📅 ${dateStr}</div>
