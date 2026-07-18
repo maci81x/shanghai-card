@@ -161,9 +161,10 @@ button{cursor:pointer;font-family:inherit;transition:opacity .2s}
 .form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 
 /* TABLE */
-.tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:var(--r);border:1px solid var(--brd)}
+.tbl-wrap{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:var(--r);border:1px solid var(--brd)}
+.tbl-wrap table{min-width:640px}
 table{width:100%;border-collapse:collapse;font-size:13px}
-table td,table th{overflow-wrap:anywhere;word-break:break-word}
+table td,table th{white-space:nowrap}
 th{background:#111;color:var(--mut);font-weight:500;padding:9px 12px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--brd)}
 td{padding:9px 12px;border-bottom:1px solid var(--brd)}
 tr:last-child td{border-bottom:none}

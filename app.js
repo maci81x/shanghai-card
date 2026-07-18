@@ -203,7 +203,7 @@ function _imgWrap16x9(url, alt, radius) {
   if (!url) return '';
   const r = radius || '12px 12px 0 0';
   const a = String(alt||'').replace(/"/g,'&quot;');
-  return `<div style="width:100%;padding-top:56.25%;position:relative;overflow:hidden;background:#1a1a1a;border-radius:${r}">
+  return `<div style="width:100%;padding-top:36.5%;position:relative;overflow:hidden;background:#1a1a1a;border-radius:${r}">
     <img src="${url}" alt="${a}" loading="lazy" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;-webkit-object-fit:cover;display:block">
   </div>`;
 }
@@ -304,6 +304,7 @@ function logout() {
 // ── MOVIMENTI FILTRI ─────────────────────────────────────────────────
 let _movTipo = 'all', _movDays = 0, _allTx = [];
 let _pendingEvents = [], _myEventIds = new Set(), _myEventRegs = {}, _eventsCache = [], _promoCache = [];
+let _userBalance = 0;
 let _staffTxAll = [], _staffTxTipo = 'all', _staffTxDays = 0;
 let _adminTxAll = [], _adminTxTipo = 'all', _adminTxDays = 0, _adminTxSearch = '';
 let _gqtyId, _gqtyName, _gqtyPrice, _gqtyN = 1;
@@ -405,6 +406,7 @@ function renderQR(cardId) {
 async function refreshUser() {
   const {data, error} = await db.rpc('get_user_state', {p_user_id: currentUser.id});
   if (error || !data.ok) return toast((error&&error.message)||data.error);
+  _userBalance   = Number(data.balance || 0);
   renderBal(data.balance);
   _allTx         = data.transactions   || [];
   _pendingEvents = data.pending_events || [];
@@ -477,6 +479,8 @@ function renderEvents(evs) {
     const bodyClose = hasImg ? '</div>' : '';
     if (pend) {
       cardCls.push('ev-card-pending');
+      const canPayCredit = _userBalance >= Number(pend.amount || 0);
+      const hasSumup = !!pend.sumup_link;
       return `<div class="${cardCls.join(' ')}">
         ${img}
         ${bodyOpen}
@@ -484,12 +488,16 @@ function renderEvents(evs) {
         <div class="cat-title">${t}</div>
         <div class="cat-sub">${e.event_date?fdt(e.event_date):'—'}${e.location?' · '+_esc(e.location):''}</div>
         <div class="ev-pay-grid">
-          <button class="btn btn-p" onclick="userPayEventCredit('${pend.registration_id}','${tj}',${pend.amount})">💳 Credito</button>
-          ${pend.sumup_link
-            ?`<a href="${pend.sumup_link}" target="_blank" rel="noopener" class="btn btn-g">📱 SumUp</a>`
-            :`<button class="btn btn-g" onclick="toast('Paga con SumUp in cassa: lo staff registrerà il pagamento.','ok')">📱 SumUp</button>`}
+          ${canPayCredit
+            ? `<button class="btn btn-p" onclick="userPayEventCredit('${pend.registration_id}','${tj}',${pend.amount})">💳 Paga con credito</button>`
+            : ''}
+          ${hasSumup
+            ? `<a href="${pend.sumup_link}" target="_blank" rel="noopener" class="btn btn-g">📱 Paga con SumUp</a>`
+            : ''}
           <button class="btn btn-q" onclick="toast('Recati in cassa con il tuo QR per saldare','ok')">🏠 In cassa</button>
         </div>
+        ${hasSumup ? `<div class="sumup-note" style="text-align:left;padding:6px 2px 0">Dopo il pagamento, la cassa confermerà l'iscrizione</div>` : ''}
+        ${!canPayCredit ? `<div class="sumup-note" style="text-align:left;padding:4px 2px 0;color:var(--mut)">Saldo insufficiente per pagare con credito (${eur(_userBalance)} disponibili)</div>` : ''}
         ${bodyClose}
       </div>`;
     }
@@ -844,19 +852,26 @@ function renderPendingEvents(evs) {
   const el = document.getElementById('u-pending-events');
   if (!evs || !evs.length) { el.innerHTML = ''; return; }
   el.innerHTML = `<div class="sec-title" style="margin-bottom:8px">Da saldare</div>` +
-    evs.map(e => `
+    evs.map(e => {
+      const canPayCredit = _userBalance >= Number(e.amount || 0);
+      const hasSumup = !!e.sumup_link;
+      return `
     <div class="card ev-card-pending" style="margin-bottom:8px">
       <div class="ev-status ev-pending">⏳ Da saldare · <strong>${eur(e.amount)}</strong></div>
       <div style="font-weight:700;margin:8px 0 2px">${_esc(e.evento)}</div>
       <div style="font-size:12px;color:var(--mut);margin-bottom:12px">${e.event_date?fdt(e.event_date):'—'}</div>
       <div class="ev-pay-grid">
-        <button class="btn btn-p" onclick="userPayEventCredit('${e.registration_id}','${e.evento.replace(/'/g,"\\'")}',${e.amount})">💳 Credito</button>
-        ${e.sumup_link
-          ?`<a href="${e.sumup_link}" target="_blank" rel="noopener" class="btn btn-g">📱 SumUp</a>`
-          :`<button class="btn btn-g" onclick="toast('Paga con SumUp in cassa: lo staff registrerà il pagamento.','ok')">📱 SumUp</button>`}
+        ${canPayCredit
+          ? `<button class="btn btn-p" onclick="userPayEventCredit('${e.registration_id}','${e.evento.replace(/'/g,"\\'")}',${e.amount})">💳 Paga con credito</button>`
+          : ''}
+        ${hasSumup
+          ? `<a href="${e.sumup_link}" target="_blank" rel="noopener" class="btn btn-g">📱 Paga con SumUp</a>`
+          : ''}
         <button class="btn btn-q" onclick="toast('Recati in cassa con il tuo QR per saldare','ok')">🏠 In cassa</button>
       </div>
-    </div>`).join('');
+      ${hasSumup ? `<div class="sumup-note" style="text-align:left;padding:6px 2px 0">Dopo il pagamento, la cassa confermerà l'iscrizione</div>` : ''}
+      ${!canPayCredit ? `<div class="sumup-note" style="text-align:left;padding:4px 2px 0;color:var(--mut)">Saldo insufficiente per pagare con credito (${eur(_userBalance)} disponibili)</div>` : ''}
+    </div>`;}).join('');
 }
 async function userPayEventCredit(regId, eventName, amount) {
   modalConfirm(`Pagare "${eventName}" (${eur(amount)}) con il tuo credito?`, async () => {
@@ -1931,7 +1946,7 @@ function _renderAdminTx() {
         <td class="dt-cell">${fdt(t.created_at)}</td>
         <td class="mono">${t.card_id}</td>
         <td>${txic(t.type)} ${t.type}</td>
-        <td style="font-size:12px;color:var(--mut);max-width:220px;word-break:break-word">${_esc(t.description||'')}</td>
+        <td style="font-size:12px;color:var(--mut);max-width:220px;white-space:normal;word-break:break-word">${_esc(t.description||'')}</td>
         <td class="${t.amount>=0?'pos':'neg-c'}">${t.amount>=0?'+':''}${eur(t.amount)}</td>
         <td>${t.operator_name||'—'}</td>
         <td style="white-space:nowrap">
