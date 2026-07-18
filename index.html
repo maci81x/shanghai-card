@@ -662,6 +662,71 @@
   </div>
 </div>
 
+<!-- MODAL TRASFERIMENTO CREDITO -->
+<div id="transfer-modal" class="modal-bg">
+  <div class="modal-box" style="max-width:calc(100vw - 32px);max-height:calc(100vh - 40px);overflow-y:auto">
+    <div class="modal-title">💸 Trasferisci credito</div>
+
+    <!-- Destinatario selezionato -->
+    <div id="tr-selected" style="display:none;margin-bottom:12px">
+      <div class="card" style="padding:12px;background:rgba(255,214,10,.1);border-color:var(--gold);display:flex;align-items:center;gap:10px">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em">✓ Destinatario</div>
+          <div style="font-weight:700" id="tr-rec-name"></div>
+          <div style="font-family:monospace;font-size:12px;color:var(--mut)" id="tr-rec-card"></div>
+        </div>
+        <button class="btn-sm" onclick="_transferResetRecipient()" title="Cambia destinatario">✕</button>
+      </div>
+    </div>
+
+    <!-- STEP 1: ricerca destinatario -->
+    <div id="tr-step1">
+      <button class="btn btn-g w100" onclick="_transferToggleScanner()" style="margin-bottom:10px" id="tr-scan-btn">📷 Scansiona QR</button>
+      <div id="tr-scanner-wrap" style="display:none;margin-bottom:12px">
+        <div id="tr-scanner-reader" style="width:100%"></div>
+        <button class="btn btn-q w100" style="margin-top:6px" onclick="_transferStopScanner()">Chiudi fotocamera</button>
+      </div>
+      <div class="fg" style="margin-bottom:8px">
+        <label>Cerca per nome o tessera</label>
+        <div style="display:flex;gap:6px">
+          <input id="tr-query" type="text" placeholder="Es. Marcello o SH-023" autocomplete="off" oninput="_transferSearchDebounced()" onkeydown="if(event.key==='Enter'){event.preventDefault();_transferSearch();}">
+          <button class="btn btn-q" onclick="_transferSearch()" style="flex-shrink:0">Cerca</button>
+        </div>
+      </div>
+      <div id="tr-results" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px"></div>
+    </div>
+
+    <!-- STEP 2: importo e nota -->
+    <div id="tr-step2" style="display:none">
+      <div class="fg">
+        <label>Importo €</label>
+        <input id="tr-amount" type="text" inputmode="decimal" placeholder="0,00" oninput="_transferValidateAmount()">
+        <div style="font-size:12px;color:var(--mut);margin-top:4px">Saldo disponibile: <strong id="tr-balance"></strong></div>
+        <div id="tr-amount-err" style="font-size:12px;color:var(--neg);margin-top:4px;display:none"></div>
+      </div>
+      <div class="fg">
+        <label>Nota (facoltativa)</label>
+        <input id="tr-note" type="text" maxlength="100" placeholder="Es. Cena di ieri">
+      </div>
+    </div>
+
+    <!-- STEP 3: conferma con PIN -->
+    <div id="tr-step3" style="display:none">
+      <div class="modal-msg" id="tr-confirm-msg" style="margin-bottom:12px;display:block"></div>
+      <div class="fg">
+        <label>Inserisci il tuo PIN</label>
+        <input id="tr-pin" type="password" inputmode="numeric" maxlength="6" placeholder="••••" onkeydown="if(event.key==='Enter'){event.preventDefault();_transferSubmit();}">
+        <div id="tr-pin-err" style="font-size:12px;color:var(--neg);margin-top:4px;display:none"></div>
+      </div>
+    </div>
+
+    <div class="modal-btns" style="margin-top:14px">
+      <button class="btn btn-q" onclick="closeTransferModal()">Annulla</button>
+      <button id="tr-next-btn" class="btn-confirm" onclick="_transferNext()" disabled style="opacity:.5">Avanti</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL RESET PIN -->
 <div id="pin-modal-bg">
   <div class="modal-box">

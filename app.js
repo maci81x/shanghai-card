@@ -198,14 +198,28 @@ window.addEventListener('DOMContentLoaded', () => {
 // ── UTILITIES ────────────────────────────────────────────────────────
 const eur = c => '€ ' + Number(c||0).toFixed(2).replace('.',',');
 const fdt = iso => { if(!iso) return '—'; const d=new Date(iso); return d.toLocaleDateString('it-IT',{day:'2-digit',month:'2-digit',year:'2-digit'})+' '+d.toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'}); };
-const txic = t => ({recharge:'🔄',purchase:'🛍️',event_fee:'🎫',refund:'↩️'}[t]||'•');
+const txic = t => ({recharge:'🔄',purchase:'🛍️',event_fee:'🎫',refund:'↩️',transfer_out:'💸',transfer_in:'💰'}[t]||'•');
 function _imgWrap16x9(url, alt, radius) {
   if (!url) return '';
   const r = radius || '12px 12px 0 0';
   const a = String(alt||'').replace(/"/g,'&quot;');
-  return `<div style="width:100%;padding-top:36.5%;position:relative;overflow:hidden;background:#1a1a1a;border-radius:${r}">
+  const uEnc = String(url).replace(/"/g,'&quot;').replace(/'/g,"\\'");
+  return `<div onclick="openEventImageFullscreen('${uEnc}')" style="width:100%;padding-top:40%;position:relative;overflow:hidden;background:#1a1a1a;border-radius:${r};cursor:pointer">
     <img src="${url}" alt="${a}" loading="lazy" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;-webkit-object-fit:cover;display:block">
   </div>`;
+}
+function openEventImageFullscreen(url) {
+  if (!url) return;
+  const prev = document.getElementById('imgFullscreen');
+  if (prev) prev.remove();
+  const uEsc = _esc(url);
+  const wrap = document.createElement('div');
+  wrap.id = 'imgFullscreen';
+  wrap.setAttribute('style', 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.95);display:flex;align-items:center;justify-content:center;padding:16px;padding-top:calc(16px + env(safe-area-inset-top,0px));padding-bottom:calc(16px + env(safe-area-inset-bottom,0px))');
+  wrap.onclick = function(e){ if (e.target === wrap) wrap.remove(); };
+  wrap.innerHTML = `<img src="${uEsc}" alt="" style="max-width:100%;max-height:100%;object-fit:contain;-webkit-object-fit:contain;border-radius:8px">
+    <button aria-label="Chiudi" onclick="event.stopPropagation();document.getElementById('imgFullscreen').remove()" style="position:absolute;top:calc(16px + env(safe-area-inset-top,0px));right:16px;width:44px;height:44px;border-radius:50%;border:none;background:rgba(255,255,255,0.2);color:#fff;font-size:24px;cursor:pointer">✕</button>`;
+  document.body.appendChild(wrap);
 }
 
 let _tt;
@@ -347,6 +361,10 @@ function renderProfile() {
       <div style="font-family:monospace;font-size:15px;color:var(--gold);margin-top:4px">${u.card_id}</div>
       <div style="font-size:12px;color:var(--mut);margin-top:4px"><span class="role-badge ru">${u.role}</span></div>
     </div>
+    <div class="card" style="margin-bottom:12px">
+      <button class="btn btn-p w100" onclick="openTransferModal()">💸 Trasferisci credito a un socio</button>
+      <div style="font-size:11px;color:var(--mut);text-align:center;margin-top:8px">Invia una parte del tuo saldo a un altro socio del Rione</div>
+    </div>
     <div class="card">
       <div class="sec-lbl">Dati profilo</div>
       ${u.email ? `<div class="fg" style="margin-bottom:6px"><label>Email</label><div style="font-size:14px;padding:8px 0">${u.email}</div></div>` : ''}
@@ -378,6 +396,213 @@ async function userChangePin() {
   if (error || !data.ok) return toast((error&&error.message)||data.error);
   toast('PIN aggiornato con successo!', 'ok');
   ['p-old-pin','p-new-pin','p-new-pin2'].forEach(id => document.getElementById(id).value='');
+}
+
+// ── TRASFERIMENTO CREDITO TRA SOCI ───────────────────────────────────
+let _trRecipient = null;
+let _trStep = 1;
+let _trSearchTimer = null;
+let _trScanner = null;
+
+function openTransferModal() {
+  _trRecipient = null;
+  _trStep = 1;
+  document.getElementById('tr-selected').style.display = 'none';
+  document.getElementById('tr-step1').style.display = '';
+  document.getElementById('tr-step2').style.display = 'none';
+  document.getElementById('tr-step3').style.display = 'none';
+  document.getElementById('tr-query').value = '';
+  document.getElementById('tr-results').innerHTML = '';
+  document.getElementById('tr-amount').value = '';
+  document.getElementById('tr-note').value = '';
+  document.getElementById('tr-pin').value = '';
+  document.getElementById('tr-amount-err').style.display = 'none';
+  document.getElementById('tr-pin-err').style.display = 'none';
+  document.getElementById('tr-balance').textContent = eur(_userBalance);
+  _transferSetNextBtn('Avanti', false);
+  _transferStopScanner();
+  document.getElementById('transfer-modal').classList.add('open');
+}
+function closeTransferModal() {
+  _transferStopScanner();
+  document.getElementById('transfer-modal').classList.remove('open');
+  _trRecipient = null;
+  _trStep = 1;
+}
+function _transferSetNextBtn(label, enabled) {
+  const b = document.getElementById('tr-next-btn');
+  b.textContent = label;
+  b.disabled = !enabled;
+  b.style.opacity = enabled ? '' : '.5';
+}
+function _transferSearchDebounced() {
+  clearTimeout(_trSearchTimer);
+  _trSearchTimer = setTimeout(_transferSearch, 300);
+}
+async function _transferSearch() {
+  const q = document.getElementById('tr-query').value.trim();
+  const box = document.getElementById('tr-results');
+  if (q.length < 2) { box.innerHTML = ''; return; }
+  const {data, error} = await db.rpc('user_search_recipient', {p_query: q});
+  if (error) { box.innerHTML = `<div class="empty">Errore: ${_esc(error.message)}</div>`; return; }
+  if (!data || !data.ok) { box.innerHTML = `<div class="empty">${_esc((data&&data.error)||'Errore ricerca')}</div>`; return; }
+  const results = (data.results || []).filter(r => r.card_id !== currentUser.card_id);
+  if (!results.length) { box.innerHTML = '<div class="empty">Nessun socio trovato</div>'; return; }
+  box.innerHTML = results.map(r => {
+    const nome = _esc((r.nome||'') + ' ' + (r.cognome||'')).trim();
+    const cid = _esc(r.card_id);
+    return `<div class="search-result-item" onclick="_transferSelectRecipient('${cid.replace(/'/g,"\\'")}','${nome.replace(/'/g,"\\'")}')">
+      <div style="flex:1;min-width:0">
+        <div style="font-family:monospace;font-size:12px;color:var(--mut)">${cid}</div>
+        <div style="font-weight:600">${nome||'—'}</div>
+      </div>
+      <div style="font-size:18px;color:var(--gold)">›</div>
+    </div>`;
+  }).join('');
+}
+function _transferSelectRecipient(cardId, fullName) {
+  _trRecipient = {card_id: cardId, name: fullName};
+  document.getElementById('tr-rec-name').textContent = fullName || '—';
+  document.getElementById('tr-rec-card').textContent = cardId;
+  document.getElementById('tr-selected').style.display = '';
+  document.getElementById('tr-step1').style.display = 'none';
+  document.getElementById('tr-step2').style.display = '';
+  document.getElementById('tr-results').innerHTML = '';
+  _transferStopScanner();
+  _trStep = 2;
+  _transferValidateAmount();
+  setTimeout(() => document.getElementById('tr-amount').focus(), 60);
+}
+function _transferResetRecipient() {
+  _trRecipient = null;
+  _trStep = 1;
+  document.getElementById('tr-selected').style.display = 'none';
+  document.getElementById('tr-step1').style.display = '';
+  document.getElementById('tr-step2').style.display = 'none';
+  document.getElementById('tr-step3').style.display = 'none';
+  _transferSetNextBtn('Avanti', false);
+}
+function _parseAmount(s) {
+  const n = Number(String(s||'').replace(',', '.'));
+  return isFinite(n) ? n : NaN;
+}
+function _transferValidateAmount() {
+  const amt = _parseAmount(document.getElementById('tr-amount').value);
+  const err = document.getElementById('tr-amount-err');
+  err.style.display = 'none';
+  err.textContent = '';
+  if (isNaN(amt) || amt <= 0) {
+    _transferSetNextBtn('Avanti', false);
+    return false;
+  }
+  if (amt > _userBalance) {
+    err.textContent = 'Credito insufficiente';
+    err.style.display = '';
+    _transferSetNextBtn('Avanti', false);
+    return false;
+  }
+  _transferSetNextBtn('Avanti', true);
+  return true;
+}
+function _transferNext() {
+  if (_trStep === 2) {
+    if (!_transferValidateAmount()) return;
+    const amt = _parseAmount(document.getElementById('tr-amount').value);
+    const note = document.getElementById('tr-note').value.trim().slice(0,100);
+    const rec = _trRecipient;
+    const notePart = note ? `<br>Nota: ${_esc(note)}` : '';
+    document.getElementById('tr-confirm-msg').innerHTML =
+      `Confermi il trasferimento?<br><br><strong>${eur(amt)}</strong> a <strong>${_esc(rec.name)}</strong> (<span style="font-family:monospace">${_esc(rec.card_id)}</span>)${notePart}`;
+    document.getElementById('tr-step2').style.display = 'none';
+    document.getElementById('tr-step3').style.display = '';
+    _transferSetNextBtn('Conferma trasferimento', true);
+    _trStep = 3;
+    setTimeout(() => document.getElementById('tr-pin').focus(), 60);
+  } else if (_trStep === 3) {
+    _transferSubmit();
+  }
+}
+async function _transferSubmit() {
+  const pin = document.getElementById('tr-pin').value.trim();
+  const pinErr = document.getElementById('tr-pin-err');
+  pinErr.style.display = 'none';
+  pinErr.textContent = '';
+  if (!pin) { pinErr.textContent = 'Inserisci il PIN'; pinErr.style.display = ''; return; }
+  const amt = _parseAmount(document.getElementById('tr-amount').value);
+  const note = document.getElementById('tr-note').value.trim().slice(0,100);
+  const rec = _trRecipient;
+  if (!rec) return toast('Seleziona un destinatario');
+  const btn = document.getElementById('tr-next-btn');
+  btn.disabled = true; btn.style.opacity = '.5'; btn.textContent = 'Trasferimento…';
+  const {data, error} = await db.rpc('user_transfer_credit', {
+    p_sender_card: currentUser.card_id,
+    p_sender_pin: pin,
+    p_recipient_card: rec.card_id,
+    p_amount: amt,
+    p_note: note || null
+  });
+  btn.disabled = false; btn.style.opacity = ''; btn.textContent = 'Conferma trasferimento';
+  if (error) { pinErr.textContent = error.message || 'Errore'; pinErr.style.display = ''; return; }
+  if (!data || !data.ok) {
+    const msg = (data && data.error) || 'Errore trasferimento';
+    if (/pin/i.test(msg) && /err/i.test(msg)) {
+      pinErr.textContent = 'PIN errato';
+      pinErr.style.display = '';
+      document.getElementById('tr-pin').value = '';
+      document.getElementById('tr-pin').focus();
+    } else if (/insuff/i.test(msg)) {
+      document.getElementById('tr-step3').style.display = 'none';
+      document.getElementById('tr-step2').style.display = '';
+      _trStep = 2;
+      _transferSetNextBtn('Avanti', false);
+      const amtErr = document.getElementById('tr-amount-err');
+      amtErr.textContent = 'Credito insufficiente';
+      amtErr.style.display = '';
+    } else if (/te stesso/i.test(msg) || /self/i.test(msg)) {
+      toast(msg);
+      _transferResetRecipient();
+    } else {
+      pinErr.textContent = msg;
+      pinErr.style.display = '';
+    }
+    return;
+  }
+  const recName = data.recipient_name || rec.name;
+  closeTransferModal();
+  toast(`✓ Trasferiti ${eur(amt)} a ${recName}`, 'ok');
+  await refreshUser();
+}
+function _transferToggleScanner() {
+  const wrap = document.getElementById('tr-scanner-wrap');
+  if (wrap.style.display === 'none' || !wrap.style.display) {
+    wrap.style.display = 'block';
+    if (typeof Html5Qrcode === 'undefined') { toast('Libreria QR non disponibile'); wrap.style.display = 'none'; return; }
+    _trScanner = new Html5Qrcode('tr-scanner-reader');
+    _trScanner.start(
+      {facingMode: 'environment'},
+      {fps: 10, qrbox: {width: 220, height: 220}},
+      async text => {
+        _transferStopScanner();
+        const cid = String(text||'').trim().toUpperCase();
+        if (!cid) return;
+        if (cid === currentUser.card_id) { toast('Non puoi trasferire credito a te stesso'); return; }
+        const {data} = await db.rpc('user_search_recipient', {p_query: cid});
+        const match = (data && data.ok && (data.results||[]).find(r => (r.card_id||'').toUpperCase() === cid));
+        if (!match) { toast('Tessera non trovata o non valida'); return; }
+        _transferSelectRecipient(match.card_id, ((match.nome||'') + ' ' + (match.cognome||'')).trim());
+      },
+      () => {}
+    ).catch(() => { toast('Fotocamera non disponibile'); _transferStopScanner(); });
+  } else {
+    _transferStopScanner();
+  }
+}
+function _transferStopScanner() {
+  const wrap = document.getElementById('tr-scanner-wrap');
+  if (wrap) wrap.style.display = 'none';
+  if (_trScanner) {
+    _trScanner.stop().catch(()=>{}).finally(() => { try { _trScanner.clear(); } catch(_){} _trScanner = null; });
+  }
 }
 
 // ── USER AREA ─────────────────────────────────────────────────────────
@@ -1118,7 +1343,8 @@ function _txIconHtml(t) {
   const type = t.type || '';
   if (type === 'recharge') return '<span style="color:var(--grn);font-weight:700">↑</span>';
   if (type === 'refund')   return '<span style="color:var(--gold);font-weight:700">↩</span>';
-  if (type === 'purchase' || type === 'event_fee') return '<span style="color:var(--neg);font-weight:700">↓</span>';
+  if (type === 'purchase' || type === 'event_fee' || type === 'transfer_out') return '<span style="color:var(--neg);font-weight:700">↓</span>';
+  if (type === 'transfer_in') return '<span style="color:var(--grn);font-weight:700">↑</span>';
   return '<span>•</span>';
 }
 function _txMetaHtml(t, operatorLabel) {
