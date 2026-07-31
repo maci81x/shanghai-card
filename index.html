@@ -11,7 +11,7 @@
 <meta http-equiv="Cache-Control" content="no-cache">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=25">
+<link rel="stylesheet" href="style.css?v=26">
 </head>
 <body>
 
@@ -195,8 +195,14 @@
           <button class="tab" data-p="ut-gadget" onclick="switchTab(this,'utabs')">🛍️ Gadget</button>
           <button class="tab" data-p="ut-promo" onclick="switchTab(this,'utabs')">🏷️ Promo</button>
         </div>
-        <div id="ut-eventi" class="tab-panel active"></div>
-        <div id="ut-gadget" class="tab-panel"><div id="ut-gad-reservations"></div></div>
+        <div id="ut-eventi" class="tab-panel active">
+          <div id="u-my-regs"></div>
+          <div id="u-ev-list"></div>
+        </div>
+        <div id="ut-gadget" class="tab-panel">
+          <div id="u-gad-list"></div>
+          <div id="ut-gad-reservations"></div>
+        </div>
         <div id="ut-promo" class="tab-panel"></div>
       </div>
       <div class="sec-title" style="margin-top:12px">Ricarica tessera</div>
@@ -225,10 +231,11 @@
   </div>
   <div class="content">
     <div class="tab-wrap">
-      <div class="tabs" id="stabs">
+      <div class="tabs tabs-scroll" id="stabs">
         <button class="tab active" data-p="st-tessere" onclick="switchTab(this,'stabs')">🏷️ Tessere</button>
         <button class="tab" data-p="st-eventi" onclick="switchTab(this,'stabs');loadStaffEvents()">📅 Catalogo</button>
         <button class="tab" data-p="st-gad" onclick="switchTab(this,'stabs');loadStaffGadgets()">🛍️ Gadget</button>
+        <button class="tab" data-p="st-sumup" id="s-sumup-tab" onclick="switchTab(this,'stabs');loadPendingSumup('staff')">📱 SumUp</button>
         <button class="tab" data-p="st-promo" onclick="switchTab(this,'stabs');loadStaffPromos()">🏷️ Promo</button>
       </div>
 
@@ -345,6 +352,12 @@
         <div id="st-gad-list"><div class="empty">Carico gadget…</div></div>
       </div>
 
+      <!-- ── TAB: PAGAMENTI SUMUP DA CONFERMARE (STAFF) ── -->
+      <div id="st-sumup" class="tab-panel">
+        <div class="sec-lbl">📱 Pagamenti SumUp da confermare</div>
+        <div id="s-sumup-list"><div class="empty">⏳ Carico…</div></div>
+      </div>
+
       <!-- ── TAB: PROMO ── -->
       <div id="st-promo" class="tab-panel">
         <div class="card">
@@ -385,12 +398,16 @@
     </div>
 
     <div class="tab-wrap">
-      <div class="tabs" id="atabs">
+      <div class="tabs tabs-scroll" id="atabs">
         <button class="tab active" data-p="at-dash" onclick="switchTab(this,'atabs');loadDash()">📊 Dash</button>
         <button class="tab" data-p="at-cassa" onclick="switchTab(this,'atabs')">🏪 Cassa</button>
         <button class="tab" data-p="at-users" onclick="switchTab(this,'atabs');loadAUsers()">👥 Soci</button>
         <button class="tab" data-p="at-tx" onclick="switchTab(this,'atabs');loadATx()">📋 Tx</button>
         <button class="tab" data-p="at-gest" onclick="switchTab(this,'atabs');loadAGest()">⚙️ Gest.</button>
+        <button class="tab" data-p="at-sumup" id="a-sumup-tab" onclick="switchTab(this,'atabs');loadPendingSumup('admin')">📱 SumUp da confermare</button>
+        <button class="tab" data-p="at-orders" id="a-orders-tab" onclick="switchTab(this,'atabs');loadGadgetOrders()">📦 Ordini gadget</button>
+        <button class="tab" data-p="at-ext" onclick="switchTab(this,'atabs');loadExternalGuests()">🎟️ Iscritti esterni</button>
+        <button class="tab" data-p="at-refund" id="a-refund-tab" onclick="switchTab(this,'atabs');loadRefundQueue()">↩️ Rimborsi</button>
       </div>
 
       <!-- CASSA (admin) -->
@@ -587,6 +604,57 @@
           </div>
         </div>
       </div>
+
+      <!-- PAGAMENTI SUMUP DA CONFERMARE -->
+      <div id="at-sumup" class="tab-panel">
+        <div class="sec-lbl">📱 Pagamenti SumUp da confermare</div>
+        <div id="a-sumup-list"><div class="empty">⏳ Carico…</div></div>
+      </div>
+
+      <!-- ORDINI GADGET -->
+      <div id="at-orders" class="tab-panel">
+        <div class="sec-hdr">
+          <div class="sec-title">📦 Ordini gadget</div>
+          <button class="btn-sm" onclick="loadGadgetOrders()">↻ Aggiorna</button>
+        </div>
+        <div class="filter-row" style="margin-bottom:10px">
+          <input id="go-f-name" type="text" placeholder="Filtra gadget…" style="flex:1;min-width:120px" oninput="renderGadgetOrders()">
+          <select id="go-f-size" style="width:auto;min-width:96px" onchange="renderGadgetOrders()"><option value="">Tutte le taglie</option></select>
+          <select id="go-f-status" style="width:auto;min-width:120px" onchange="renderGadgetOrders()">
+            <option value="">Tutti gli stati</option>
+            <option value="prenotato">Prenotato</option>
+            <option value="attesa_ordine">Attesa ordine</option>
+            <option value="consegnato">Consegnato</option>
+          </select>
+        </div>
+        <div id="go-list"><div class="empty">⏳ Carico…</div></div>
+        <div class="sec-lbl" style="margin-top:18px">⏳ Waitlist</div>
+        <div id="go-waitlist"></div>
+        <div class="sec-lbl" style="margin-top:18px">📊 Statistiche vendite</div>
+        <div id="go-stats"></div>
+      </div>
+
+      <!-- ISCRITTI ESTERNI -->
+      <div id="at-ext" class="tab-panel">
+        <div class="sec-hdr">
+          <div class="sec-title">🎟️ Iscritti esterni</div>
+          <button class="btn-sm p" onclick="openExtGuestModal()">➕ Aggiungi iscritto esterno</button>
+        </div>
+        <div class="fg">
+          <label>Evento</label>
+          <select id="eg-filter-event" onchange="loadExternalGuests()"><option value="">Tutti gli eventi</option></select>
+        </div>
+        <div id="eg-list"><div class="empty">⏳ Carico…</div></div>
+      </div>
+
+      <!-- RIMBORSI -->
+      <div id="at-refund" class="tab-panel">
+        <div class="sec-hdr">
+          <div class="sec-title">↩️ Rimborsi da gestire</div>
+          <button class="btn-sm" onclick="loadRefundQueue()">↻ Aggiorna</button>
+        </div>
+        <div id="rf-list"><div class="empty">⏳ Carico…</div></div>
+      </div>
     </div>
   </div>
 </div>
@@ -684,7 +752,16 @@
     <div class="fg"><label>Nome</label><input id="gae-name" type="text" placeholder="Nome gadget"></div>
     <div class="fg"><label>Prezzo €</label><input id="gae-price" type="number" min="0.01" step="0.50"></div>
     <div class="fg"><label>Descrizione</label><input id="gae-desc" type="text" placeholder="Descrizione (opz.)"></div>
-    <div class="fg"><label>Stock</label><input id="gae-stock" type="number" min="0"></div>
+    <div class="fg" id="gae-stock-fg"><label>Stock</label><input id="gae-stock" type="number" min="0"></div>
+    <div class="cb-row" style="margin-bottom:10px">
+      <input type="checkbox" id="gae-has-sizes" onchange="toggleGadgetSizes()">
+      <label for="gae-has-sizes" style="text-transform:none;letter-spacing:0;font-size:13px;color:var(--txt)">Ha taglie?</label>
+    </div>
+    <div id="gae-sizes-wrap" style="display:none;margin-bottom:12px">
+      <div class="sec-lbl" style="margin-bottom:6px">Stock per taglia</div>
+      <div class="tbl-wrap"><table><thead><tr><th>Taglia</th><th>Stock</th></tr></thead><tbody id="gae-sizes-body"></tbody></table></div>
+      <div style="font-size:11px;color:var(--mut);margin-top:6px">Stock 0 = taglia esaurita, le prenotazioni finiscono in lista d'attesa.</div>
+    </div>
     <div style="display:flex;gap:8px;margin-top:12px">
       <button class="btn btn-q" style="flex:1" onclick="closeEditGadget()">Annulla</button>
       <button class="btn btn-p" style="flex:2" onclick="saveEditGadget()">Salva</button>
@@ -696,7 +773,9 @@
 <div id="gqty-bg" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:1900;align-items:center;justify-content:center">
   <div style="background:var(--bgc);border:1px solid var(--brd);box-shadow:var(--shadow);border-radius:16px;padding:24px;max-width:320px;width:90%;margin:16px">
     <div id="gqty-name" style="font-weight:700;font-size:15px;margin-bottom:4px"></div>
-    <div id="gqty-unit" style="font-size:12px;color:var(--mut);margin-bottom:20px"></div>
+    <div id="gqty-unit" style="font-size:12px;color:var(--mut);margin-bottom:6px"></div>
+    <div id="gqty-size" style="font-size:12px;color:var(--gold);font-weight:600;margin-bottom:14px;display:none"></div>
+    <div id="gqty-wait" style="display:none;font-size:11px;color:var(--gold);background:rgba(255,214,10,.12);border-radius:8px;padding:8px;margin-bottom:14px;line-height:1.5"></div>
     <div style="display:flex;align-items:center;justify-content:center;gap:16px;margin-bottom:12px">
       <button class="btn" style="width:44px;height:44px;font-size:22px;padding:0;border-radius:50%" onclick="gqtyAdj(-1)">−</button>
       <span id="gqty-n" style="font-size:32px;font-weight:700;min-width:40px;text-align:center">1</span>
@@ -735,6 +814,79 @@
   </div>
 </div>
 
+<!-- MODALE ISCRIZIONE EVENTO (chi partecipa + metodi di pagamento) -->
+<div id="regev-bg" class="modal-ov">
+  <div class="modal-panel">
+    <div style="font-weight:700;font-size:17px;margin-bottom:4px">👥 Chi partecipa?</div>
+    <div id="regev-sub" style="font-size:12px;color:var(--mut);margin-bottom:14px"></div>
+    <div id="regev-self" style="margin-bottom:10px"></div>
+    <div id="regev-list"></div>
+    <button class="btn btn-q w100" style="margin:4px 0 12px" onclick="regevAddRow()">➕ Aggiungi persona</button>
+    <div id="regev-total" style="font-size:13px;text-align:center;margin-bottom:12px;color:var(--gold);font-weight:600"></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-q" style="flex:1" onclick="closeRegEvModal()">Annulla</button>
+      <button class="btn btn-p" style="flex:2" id="regev-confirm" onclick="confirmRegEvent()">Conferma iscrizione</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODALE MODIFICA PRENOTAZIONE GADGET -->
+<div id="gmod-bg" class="modal-ov">
+  <div class="modal-panel" style="width:min(340px,94vw)">
+    <div style="font-weight:700;font-size:16px;margin-bottom:4px">✏️ Modifica prenotazione</div>
+    <div id="gmod-name" style="font-size:12px;color:var(--mut);margin-bottom:14px"></div>
+    <div class="fg" id="gmod-size-fg" style="display:none">
+      <label>Taglia</label>
+      <select id="gmod-size"></select>
+    </div>
+    <div class="fg">
+      <label>Quantità</label>
+      <input id="gmod-qty" type="number" min="1" max="10" step="1" value="1" oninput="updateGmodDiff()">
+    </div>
+    <div id="gmod-diff" style="font-size:12px;color:var(--gold);margin-bottom:12px;min-height:18px"></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-q" style="flex:1" onclick="closeGmod()">Annulla</button>
+      <button class="btn btn-p" style="flex:2" onclick="saveGmod()">Salva</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODALE ISCRITTO ESTERNO -->
+<div id="extg-bg" class="modal-ov">
+  <div class="modal-panel">
+    <div id="extg-title" style="font-weight:700;font-size:16px;margin-bottom:14px">➕ Nuovo iscritto esterno</div>
+    <input type="hidden" id="extg-id">
+    <div class="fg" id="extg-event-fg">
+      <label>Evento</label>
+      <select id="extg-event" onchange="extgEventChanged()"></select>
+    </div>
+    <div class="form-row">
+      <div class="fg"><label>Nome *</label><input id="extg-nome" type="text" placeholder="Mario"></div>
+      <div class="fg"><label>Cognome *</label><input id="extg-cognome" type="text" placeholder="Rossi"></div>
+    </div>
+    <div class="form-row">
+      <div class="fg"><label>Email</label><input id="extg-email" type="email" placeholder="mario@email.it"></div>
+      <div class="fg"><label>Telefono</label><input id="extg-tel" type="tel" placeholder="+39 333..."></div>
+    </div>
+    <div class="form-row">
+      <div class="fg"><label>Importo €</label><input id="extg-amount" type="number" min="0" step="0.50" placeholder="0.00"></div>
+      <div class="fg" id="extg-status-fg">
+        <label>Stato pagamento</label>
+        <select id="extg-status">
+          <option value="da_saldare">Da saldare</option>
+          <option value="saldato_contanti">Saldato contanti</option>
+          <option value="saldato_sumup">Saldato SumUp</option>
+          <option value="saldato_credito">Saldato credito</option>
+        </select>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:6px">
+      <button class="btn btn-q" style="flex:1" onclick="closeExtGuestModal()">Annulla</button>
+      <button class="btn btn-p" style="flex:2" onclick="saveExtGuest()">Salva</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODALE GUIDA -->
 <div id="guide-bg" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:2000;overflow-y:auto;padding:20px 12px">
   <div style="max-width:520px;margin:0 auto;background:var(--bgc);border-radius:var(--r);padding:24px 20px;position:relative">
@@ -751,6 +903,6 @@
 </script>
 <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-<script src="app.js?v=25"></script>
+<script src="app.js?v=26"></script>
 </body>
 </html>

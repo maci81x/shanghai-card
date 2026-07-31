@@ -202,9 +202,12 @@ let _movTipo = 'all', _movDays = 0, _allTx = [];
 let _pendingEvents = [], _myEventIds = new Set(), _myEventRegs = {}, _eventsCache = [], _promoCache = [];
 let _staffTxAll = [], _staffTxTipo = 'all', _staffTxDays = 0;
 let _adminTxAll = [], _adminTxTipo = 'all', _adminTxDays = 0, _adminTxSearch = '';
+let _adminGadgets = [], _adminEvents = [];
 let _gqtyId, _gqtyName, _gqtyPrice, _gqtyN = 1;
 let _compRegId = null, _compMode = 'user', _compEventId = '', _compCtx = '', _compCache = [];
 let _compEventPrice = 0, _compSelfStatus = '', _compEventTitle = '';
+let _myRegs = [], _myGadgetRes = null, _gadgetsCache = [], _sizeSel = {};
+const PRESET_SIZES = ['XS','S','M','L','XL','XXL'];
 function setMovFiltro(btn, group) {
   btn.closest('div').querySelectorAll('.fbtn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
@@ -301,9 +304,13 @@ async function refreshUser() {
   _pendingEvents = data.pending_events || [];
   _myEventIds    = new Set(data.my_event_ids || []);
   _myEventRegs   = {};
-  (data.my_event_regs || []).forEach(r => { _myEventRegs[r.event_id] = r; });
+  _myRegs        = data.event_registrations || data.my_event_regs || [];
+  _myRegs.forEach(r => { _myEventRegs[r.event_id] = r; });
+  _myGadgetRes   = Array.isArray(data.gadget_reservations) ? data.gadget_reservations : null;
   renderTx(_allTx.slice(0, 5));
   renderPendingEvents(_pendingEvents);
+  renderMyRegistrations();
+  loadUserGadgetReservations();
   if (_eventsCache.length) renderEvents(_eventsCache);
 }
 function renderBal(c) {
@@ -349,7 +356,8 @@ function _calcPromo(amount) {
 }
 function renderEvents(evs) {
   _eventsCache = evs;
-  const el = document.getElementById('ut-eventi');
+  renderMyRegistrations();
+  const el = document.getElementById('u-ev-list');
   if (!evs.length) { el.innerHTML='<div class="empty">Nessun evento attivo</div>'; return; }
   el.innerHTML = evs.map(e => {
     const isFree = !e.price || e.price == 0;
@@ -392,35 +400,68 @@ function renderEvents(evs) {
       ${e.max_participants?`<div class="cat-sub">Max ${e.max_participants} posti</div>`:''}
       <div class="cat-foot">
         <div class="cat-price">${isFree?'Gratuito':eur(e.price)}</div>
-        <button class="btn-sm p" onclick="registerEvent('${e.id}','${tj}',${e.price||0})">${isFree?'🎁 Iscriviti gratis':'Iscriviti'}</button>
+        <button class="btn-sm p" onclick="openRegEvModal('${e.id}')">${isFree?'🎁 Iscriviti gratis':'Iscriviti'}</button>
       </div></div>`;
   }).join('');
 }
+function _gadgetSizes(g) { return (g && g.has_sizes && Array.isArray(g.sizes)) ? g.sizes : []; }
+function selectGadgetSize(gadgetId, size) {
+  _sizeSel = {..._sizeSel, [gadgetId]: size};
+  renderGadgets(_gadgetsCache);
+}
 function renderGadgets(gads) {
-  const el = document.getElementById('ut-gadget');
-  if (!gads.length) { el.innerHTML='<div class="empty">Nessun gadget disponibile</div>'; return; }
+  _gadgetsCache = gads || [];
+  const el = document.getElementById('u-gad-list');
+  if (!el) return;
+  if (!_gadgetsCache.length) { el.innerHTML='<div class="empty">Nessun gadget disponibile</div>'; return; }
   el.innerHTML = `<div style="font-size:13px;color:var(--mut);margin-bottom:10px;padding:10px;background:var(--bg);border-radius:8px">
     🏪 Prenota qui, ritira e paga in cassa da <strong>Antonella</strong>
   </div>` +
-  gads.map(g=>`
+  _gadgetsCache.map(g => {
+    const sizes = _gadgetSizes(g);
+    const sel   = _sizeSel[g.id] || '';
+    const cur   = sizes.find(s => s.size === sel);
+    const needSize = g.has_sizes && !cur;
+    const waitlist = !!(cur && Number(cur.stock || 0) <= 0);
+    const btnLabel = needSize ? 'Scegli una taglia' : (waitlist ? 'Prenota (attesa ordine)' : '📌 Prenota');
+    return `
     <div class="cat-card">
-      ${g.image_url?`<img src="${g.image_url}" class="cat-img" alt="${g.name}">` : ''}
+      ${g.image_url?`<img src="${g.image_url}" class="cat-img" alt="${_esc(g.name)}">` : ''}
       <div class="cat-title">${_esc(g.name)}</div>
       <div class="cat-sub">${_esc(g.description||'')}</div>
+      ${sizes.length ? `<div class="size-pills">${sizes.map(s => `
+        <button class="size-pill ${s.size===sel?'active':''} ${Number(s.stock||0)<=0?'out':''}"
+          onclick="selectGadgetSize('${g.id}','${_esc(s.size)}')">${_esc(s.size)}</button>`).join('')}</div>` : ''}
+      ${waitlist ? `<div class="size-hint">⏳ Taglia esaurita. Al raggiungimento di un numero adeguato verrà effettuato l'ordine e sarai avvisato.</div>` : ''}
       <div class="cat-foot">
         <div class="cat-price">${eur(g.price)}</div>
-        <div class="cat-stock">Stock: ${g.stock}</div>
-        <button class="btn-sm p" onclick="openReserveGadget('${g.id}','${_esc(g.name.replace(/'/g,"\\'"))}',${g.price})">📌 Prenota</button>
+        <div class="cat-stock">${g.has_sizes ? (cur ? 'Disp. ' + (cur.stock||0) : 'Taglie disponibili') : 'Stock: ' + g.stock}</div>
+        <button class="btn-sm p" ${needSize?'disabled style="opacity:.55"':''} onclick="openReserveGadget('${g.id}')">${btnLabel}</button>
       </div>
-    </div>`).join('');
-  loadUserGadgetReservations();
+    </div>`;
+  }).join('');
 }
-function openReserveGadget(id, name, price) {
-  _gqtyId = id; _gqtyName = name; _gqtyPrice = price; _gqtyN = 1;
-  document.getElementById('gqty-name').textContent = name;
-  document.getElementById('gqty-unit').textContent = eur(price) + ' cad.';
+let _gqtySize = '', _gqtyWait = false;
+function openReserveGadget(id) {
+  const g = _gadgetsCache.find(x => x.id === id);
+  if (!g) return toast('Gadget non disponibile');
+  const sizes = _gadgetSizes(g);
+  const sel   = _sizeSel[id] || '';
+  const cur   = sizes.find(s => s.size === sel);
+  if (g.has_sizes && !cur) return toast('Seleziona una taglia');
+  _gqtyId = id; _gqtyName = g.name; _gqtyPrice = g.price; _gqtyN = 1;
+  _gqtySize = cur ? cur.size : '';
+  _gqtyWait = !!(cur && Number(cur.stock || 0) <= 0);
+  document.getElementById('gqty-name').textContent = g.name;
+  document.getElementById('gqty-unit').textContent = eur(g.price) + ' cad.';
+  const szEl = document.getElementById('gqty-size');
+  szEl.textContent = _gqtySize ? 'Taglia ' + _gqtySize : '';
+  szEl.style.display = _gqtySize ? '' : 'none';
+  const wEl = document.getElementById('gqty-wait');
+  wEl.textContent = _gqtyWait ? '⏳ Taglia esaurita: la prenotazione andrà in lista d\'attesa. Al raggiungimento di un numero adeguato verrà effettuato l\'ordine e sarai avvisato.' : '';
+  wEl.style.display = _gqtyWait ? '' : 'none';
   document.getElementById('gqty-n').textContent = 1;
-  document.getElementById('gqty-total').textContent = 'Totale: ' + eur(price);
+  document.getElementById('gqty-total').textContent = 'Totale: ' + eur(g.price);
   document.getElementById('gqty-bg').style.display = 'flex';
 }
 function gqtyAdj(delta) {
@@ -431,10 +472,16 @@ function gqtyAdj(delta) {
 function closeGqty() { document.getElementById('gqty-bg').style.display = 'none'; }
 async function confirmGqty() {
   closeGqty();
-  const {data, error} = await db.rpc('user_reserve_gadget', {p_user_id: currentUser.id, p_gadget_id: _gqtyId, p_quantity: _gqtyN});
-  if (error||!data.ok) return toast((error&&error.message)||data.error);
-  toast(`📌 Prenotazione inviata! Ritira e paga in cassa da Antonella.`, 'ok');
-  loadUserGadgetReservations();
+  const {data, error} = await db.rpc('user_reserve_gadget', {
+    p_user_id: currentUser.id, p_gadget_id: _gqtyId, p_quantity: _gqtyN, p_size: _gqtySize || null
+  });
+  if (error || !data || !data.ok) return toast((error&&error.message)||(data&&data.error)||'Errore prenotazione');
+  const fallback = data.waitlist
+    ? '⏳ Sei in lista d\'attesa: ti avviseremo quando arriverà l\'ordine.'
+    : '📌 Prenotazione inviata! Ritira e paga in cassa da Antonella.';
+  toast(data.message || fallback, 'ok');
+  await refreshUser();
+  await loadCatalog();
 }
 // ── ACCOMPAGNATORI ───────────────────────────────────────────────────
 function _renderCompModal(mode) {
@@ -652,31 +699,143 @@ async function checkinCompanion(compId, eventId, context, btn) {
   if (context === 'admin') loadEvDash(eventId);
   else loadStaffEvDash(eventId);
 }
+// ── I MIEI GADGET ────────────────────────────────────────────────────
+const _RES_BADGE = {
+  prenotato:     ['🟡 Prenotato',    'pb-wait'],
+  attesa_ordine: ['🟠 Attesa ordine','pb-wait'],
+  consegnato:    ['🟢 Consegnato',   'pb-ok'],
+  annullato:     ['⚪ Annullato',     'pb-off']
+};
+function resBadge(status) {
+  const [label, cls] = _RES_BADGE[status] || [status || '—', 'pb-off'];
+  return `<span class="pb ${cls}">${label}</span>`;
+}
+function _resId(r) { return r.reservation_id || r.id || ''; }
+function _resUnit(r) {
+  const tot = Number(r.payment_amount != null ? r.payment_amount : (r.total_price || 0));
+  const qty = Number(r.quantity || 1) || 1;
+  return tot > 0 ? tot / qty : Number(r.price || 0);
+}
 async function loadUserGadgetReservations() {
-  const {data, error} = await db.rpc('user_list_gadget_reservations', {p_user_id: currentUser.id});
   const el = document.getElementById('ut-gad-reservations');
   if (!el) return;
-  const list = Array.isArray(data) ? data : [];
-  if (!list.length) { el.innerHTML = ''; return; }
-  el.innerHTML = `<div class="sec-lbl" style="margin-top:14px">Le mie prenotazioni</div>` +
-    list.map(r => `
-      <div class="card" style="margin-bottom:8px;padding:12px;display:flex;align-items:center;gap:12px">
-        <div style="flex:1">
-          <div style="font-weight:600">${_esc(r.gadget_name)}</div>
-          <div style="font-size:12px;color:var(--mut)">Qtà ${r.quantity} · ${eur(r.total_price)} · ${fdt(r.created_at).split(' ')[0]}</div>
+  let list = _myGadgetRes;
+  if (!Array.isArray(list)) {
+    const {data} = await db.rpc('user_list_gadget_reservations', {p_user_id: currentUser.id});
+    list = Array.isArray(data) ? data : [];
+  }
+  const active = list.filter(r => (r.status || '') !== 'annullato');
+  if (!active.length) { el.innerHTML = ''; return; }
+  el.innerHTML = `<div class="sec-lbl" style="margin-top:16px">I miei gadget</div>` +
+    active.map(r => {
+      const id  = _resId(r);
+      const mod = r.status === 'prenotato' || r.status === 'attesa_ordine';
+      return `<div class="card" style="margin-bottom:8px;padding:12px">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <div style="flex:1;min-width:120px">
+            <div style="font-weight:600">${_esc(r.gadget_name)}</div>
+            <div style="font-size:12px;color:var(--mut)">
+              Qtà ${r.quantity}${r.size ? ' · Taglia ' + _esc(r.size) : ''} · ${eur(r.payment_amount != null ? r.payment_amount : r.total_price)}
+              ${r.created_at ? ' · ' + fdt(r.created_at).split(' ')[0] : ''}
+            </div>
+          </div>
+          ${resBadge(r.status)}
         </div>
-        <span style="font-size:11px;padding:3px 8px;border-radius:12px;background:${r.status==='prenotato'?'rgba(255,214,10,.15)':'rgba(34,197,94,.15)'};color:${r.status==='prenotato'?'var(--gold)':'var(--grn)'}">
-          ${r.status==='prenotato'?'⏳ Prenotato':'✅ Consegnato'}
-        </span>
-        ${r.status==='prenotato'?`<button class="btn-sm" style="color:var(--neg)" onclick="cancelGadgetReservation('${r.reservation_id}')">Annulla</button>`:''}
-      </div>`).join('');
+        ${mod ? `<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
+          <button class="btn-sm" onclick="openGmod('${id}')">✏️ Modifica</button>
+          <button class="btn-sm" style="color:var(--neg)" onclick="cancelGadgetReservation('${id}')">🗑️ Annulla</button>
+        </div>` : ''}
+      </div>`;
+    }).join('');
+}
+function _findMyRes(resId) {
+  const list = Array.isArray(_myGadgetRes) ? _myGadgetRes : [];
+  return list.find(r => _resId(r) === resId) || null;
+}
+let _gmodRes = null;
+async function openGmod(resId) {
+  let r = _findMyRes(resId);
+  if (!r) {
+    const {data} = await db.rpc('user_list_gadget_reservations', {p_user_id: currentUser.id});
+    _myGadgetRes = Array.isArray(data) ? data : [];
+    r = _findMyRes(resId);
+  }
+  if (!r) return toast('Prenotazione non trovata');
+  _gmodRes = r;
+  document.getElementById('gmod-name').textContent = `${r.gadget_name} · ${eur(_resUnit(r))} cad.`;
+  const g = _gadgetsCache.find(x => x.id === r.gadget_id) || _gadgetsCache.find(x => x.name === r.gadget_name);
+  const hasSizes = !!(r.has_sizes || (g && g.has_sizes) || r.size);
+  const fg  = document.getElementById('gmod-size-fg');
+  const sel = document.getElementById('gmod-size');
+  if (hasSizes) {
+    const sizes = _gadgetSizes(g).map(s => s.size);
+    const opts  = sizes.length ? sizes : PRESET_SIZES;
+    if (r.size && !opts.includes(r.size)) opts.unshift(r.size);
+    sel.innerHTML = opts.map(s => `<option value="${_esc(s)}"${s === r.size ? ' selected' : ''}>${_esc(s)}</option>`).join('');
+    fg.style.display = '';
+  } else {
+    sel.innerHTML = ''; fg.style.display = 'none';
+  }
+  document.getElementById('gmod-qty').value = r.quantity || 1;
+  updateGmodDiff();
+  document.getElementById('gmod-bg').classList.add('open');
+}
+function closeGmod() { document.getElementById('gmod-bg').classList.remove('open'); _gmodRes = null; }
+function _gmodDiff() {
+  if (!_gmodRes) return 0;
+  const qty = parseInt(document.getElementById('gmod-qty').value) || 0;
+  return +(_resUnit(_gmodRes) * (qty - (Number(_gmodRes.quantity) || 0))).toFixed(2);
+}
+function updateGmodDiff() {
+  const el = document.getElementById('gmod-diff');
+  if (!el || !_gmodRes) return;
+  const diff = _gmodDiff();
+  const credito = _gmodRes.payment_method === 'credito';
+  if (!diff) { el.textContent = ''; return; }
+  if (diff > 0) el.textContent = credito ? `Verranno addebitati altri ${eur(diff)}` : `Differenza da saldare: ${eur(diff)}`;
+  else el.textContent = credito ? `Ti verranno rimborsati ${eur(-diff)}` : `Differenza a tuo favore: ${eur(-diff)}`;
+}
+async function saveGmod() {
+  if (!_gmodRes) return;
+  const r    = _gmodRes;
+  const qty  = parseInt(document.getElementById('gmod-qty').value) || 0;
+  const size = document.getElementById('gmod-size-fg').style.display === 'none'
+    ? null : (document.getElementById('gmod-size').value || null);
+  if (qty < 1) return toast('Quantità non valida');
+  if (qty === (Number(r.quantity) || 0) && (size || null) === (r.size || null)) { closeGmod(); return; }
+  const diff = _gmodDiff();
+  const credito = r.payment_method === 'credito';
+  const run = async () => {
+    const {data, error} = await db.rpc('user_modify_gadget_reservation', {
+      p_user_id: currentUser.id, p_reservation_id: _resId(r), p_new_size: size, p_new_quantity: qty
+    });
+    if (error || !data || !data.ok) return toast((error && error.message) || (data && data.error) || 'Errore modifica');
+    toast(data.message || '✅ Prenotazione aggiornata', 'ok');
+    await refreshUser();
+    await loadCatalog();
+  };
+  closeGmod();
+  if (diff !== 0 && credito) {
+    const msg = diff > 0
+      ? `Confermi la modifica?\n\nVerranno addebitati altri ${eur(diff)} sul tuo credito.`
+      : `Confermi la modifica?\n\nTi verranno rimborsati ${eur(-diff)} sul tuo credito.`;
+    modalConfirm(msg, run);
+  } else if (diff !== 0) {
+    modalConfirm(`Confermi la modifica?\n\nNuovo totale: ${eur(_resUnit(r) * qty)}${size ? '\nTaglia: ' + size : ''}`, run);
+  } else {
+    modalConfirm(`Confermi il cambio taglia in ${size}?`, run);
+  }
 }
 async function cancelGadgetReservation(reservationId) {
-  modalConfirm('Annullare questa prenotazione?', async () => {
+  modalConfirm('Sei sicuro di voler annullare?\n\nLa prenotazione verrà cancellata.', async () => {
     const {data, error} = await db.rpc('user_cancel_gadget_reservation', {p_user_id: currentUser.id, p_reservation_id: reservationId});
-    if (error||!data.ok) return toast((error&&error.message)||data.error);
-    toast('Prenotazione annullata', 'ok');
-    loadUserGadgetReservations();
+    if (error || !data || !data.ok) return toast((error && error.message) || (data && data.error) || 'Errore');
+    let msg = data.message || 'Prenotazione annullata';
+    if (data.method === 'credito') msg = `Rimborsato ${eur(data.refunded || 0)} sul credito`;
+    else if (data.method === 'sumup') msg = 'Il rimborso sarà gestito dallo staff';
+    toast(msg, 'ok');
+    await refreshUser();
+    await loadCatalog();
   });
 }
 function renderPromos(prs) {
@@ -741,15 +900,244 @@ async function userPayEventCredit(regId, eventName, amount) {
     await loadCatalog();
   });
 }
-async function registerEvent(id, title, price) {
-  const isFree = !price || price == 0;
-  const msg = isFree
-    ? `Iscriviti gratuitamente a "${title}"?`
-    : `Iscriviti a "${title}"?\n\nImporto da saldare: ${eur(price)}\nPotrai pagare con credito, SumUp o in cassa.`;
+// ── ISCRIZIONE EVENTO: CHI PARTECIPA + METODI DI PAGAMENTO ───────────
+const _PAY_OPTS = `<option value="">Da decidere</option><option value="credito">Credito socio</option><option value="sumup">SumUp</option><option value="cassa">Cassa</option>`;
+let _regEv = null;
+function openRegEvModal(eventId) {
+  const ev = _eventsCache.find(e => e.id === eventId);
+  if (!ev) return toast('Evento non disponibile');
+  _regEv = ev;
+  const paid = (ev.price || 0) > 0;
+  document.getElementById('regev-sub').textContent =
+    `${ev.title}${ev.event_date ? ' · ' + fdt(ev.event_date) : ''}${paid ? ' · ' + eur(ev.price) + ' a persona' : ' · Gratuito'}`;
+  document.getElementById('regev-self').innerHTML = `
+    <div class="card" style="padding:12px">
+      <div class="pr-name" style="font-weight:600">Tu — ${_esc(currentUser.display_name)}</div>
+      ${paid ? `<div class="fg" style="margin:8px 0 0"><label>Metodo pagamento</label>
+        <select id="regev-self-pay" onchange="updateRegEvTotal()">${_PAY_OPTS}</select></div>` : ''}
+    </div>`;
+  document.getElementById('regev-list').innerHTML = '';
+  updateRegEvTotal();
+  document.getElementById('regev-bg').classList.add('open');
+}
+function closeRegEvModal() { document.getElementById('regev-bg').classList.remove('open'); }
+function regevAddRow() {
+  const paid = (_regEv && _regEv.price > 0);
+  const div = document.createElement('div');
+  div.className = 'card regev-row';
+  div.style.cssText = 'padding:12px;margin-bottom:8px';
+  div.innerHTML = `
+    <div style="display:flex;gap:8px;align-items:center">
+      <input type="text" class="rg-nome" placeholder="Nome" style="flex:1;min-width:0">
+      <input type="text" class="rg-cognome" placeholder="Cognome" style="flex:1;min-width:0">
+      <button class="btn-sm" style="color:var(--neg);flex-shrink:0;padding:6px 9px" title="Rimuovi"
+        onclick="this.closest('.regev-row').remove();updateRegEvTotal()">✕</button>
+    </div>
+    ${paid ? `<div class="fg" style="margin:8px 0 0"><label>Metodo pagamento</label>
+      <select class="rg-pay" onchange="updateRegEvTotal()">${_PAY_OPTS}</select></div>` : ''}`;
+  document.getElementById('regev-list').appendChild(div);
+  updateRegEvTotal();
+}
+function _regevCollect() {
+  const rows = Array.from(document.querySelectorAll('#regev-list .regev-row'));
+  return rows.map(r => ({
+    nome:    r.querySelector('.rg-nome').value.trim(),
+    cognome: r.querySelector('.rg-cognome').value.trim(),
+    pay:     r.querySelector('.rg-pay') ? r.querySelector('.rg-pay').value : ''
+  }));
+}
+function updateRegEvTotal() {
+  if (!_regEv) return;
+  const comps = _regevCollect();
+  const n = 1 + comps.length;
+  const price = _regEv.price || 0;
+  const el = document.getElementById('regev-total');
+  if (price <= 0) { el.textContent = `${n} ${n === 1 ? 'partecipante' : 'partecipanti'} · Evento gratuito`; return; }
+  const selfPay = document.getElementById('regev-self-pay')?.value || '';
+  const cnt = m => (selfPay === m ? 1 : 0) + comps.filter(c => c.pay === m).length;
+  const parts = [];
+  if (cnt('credito')) parts.push(`💳 credito ${eur(price * cnt('credito'))}`);
+  if (cnt('sumup'))   parts.push(`📱 SumUp ${eur(price * cnt('sumup'))}`);
+  if (cnt('cassa'))   parts.push(`💵 cassa ${eur(price * cnt('cassa'))}`);
+  if (cnt(''))        parts.push(`⏳ da decidere ${eur(price * cnt(''))}`);
+  el.innerHTML = `${n} ${n === 1 ? 'persona' : 'persone'} × ${eur(price)} = <strong>${eur(price * n)}</strong>` +
+    (parts.length ? `<div style="font-size:11px;color:var(--mut);font-weight:400;margin-top:4px">${parts.join(' · ')}</div>` : '');
+}
+async function confirmRegEvent() {
+  if (!_regEv) return;
+  const comps = _regevCollect();
+  if (comps.some(c => !c.nome || !c.cognome)) return toast('Nome e cognome obbligatori per ogni persona');
+  const selfPay = document.getElementById('regev-self-pay')?.value || '';
+  const ev = _regEv;
+  const price = ev.price || 0;
+  const nCred = (selfPay === 'credito' ? 1 : 0) + comps.filter(c => c.pay === 'credito').length;
+  const nSum  = (selfPay === 'sumup'   ? 1 : 0) + comps.filter(c => c.pay === 'sumup').length;
+  closeRegEvModal();
+  const run = () => _execRegEvent(ev, comps, selfPay);
+  if (price > 0 && (nCred || nSum)) {
+    let msg = `Confermi l'iscrizione a "${ev.title}"?\n\nPersone: ${1 + comps.length} × ${eur(price)} = ${eur(price * (1 + comps.length))}`;
+    if (nCred) msg += `\n💳 Addebito immediato sul credito: ${eur(price * nCred)}`;
+    if (nSum)  msg += `\n📱 SumUp: ${eur(price * nSum)} (in attesa conferma staff)`;
+    modalConfirm(msg, run);
+  } else {
+    await run();
+  }
+}
+function _norm(s) { return String(s || '').trim().toLowerCase(); }
+async function _findRegistrationId(eventId) {
+  const {data} = await db.rpc('get_user_state', {p_user_id: currentUser.id});
+  if (!data) return null;
+  const regs = data.event_registrations || data.my_event_regs || [];
+  const r = regs.find(x => x.event_id === eventId);
+  if (r) return r.registration_id || r.id || null;
+  const p = (data.pending_events || []).find(x => x.event_id === eventId);
+  return p ? p.registration_id : null;
+}
+function _openSumup(link) {
+  if (!link) return;
+  const w = window.open(link, '_blank', 'noopener');
+  if (!w) modalInfo(`📱 Completa il pagamento SumUp\n\nApri questo link dal tuo browser:\n${link}`);
+}
+async function _execRegEvent(ev, comps, selfPay) {
+  const done = [];
+  const {data: reg, error} = await db.rpc('user_register_event', {p_user_id: currentUser.id, p_event_id: ev.id});
+  if (error || !reg || !reg.ok) return toast((error && error.message) || (reg && reg.error) || 'Errore iscrizione');
+  done.push('✅ Iscritto');
+  let regId = reg.registration_id || reg.reg_id || null;
+  let created = [];
+  if (comps.length) {
+    if (!regId) regId = await _findRegistrationId(ev.id);
+    if (!regId) {
+      toast('Iscrizione creata, ma non è stato possibile aggiungere gli accompagnatori');
+      await refreshUser(); await loadCatalog(); return;
+    }
+    const {data: cd, error: ce} = await db.rpc('user_add_companions', {
+      p_user_id: currentUser.id, p_registration_id: regId,
+      p_companions: comps.map(c => ({nome: c.nome, cognome: c.cognome}))
+    });
+    if (ce || !cd || !cd.ok) toast((ce && ce.message) || (cd && cd.error) || 'Errore accompagnatori');
+    else { created = cd.companions || []; done.push(`👥 +${comps.length}`); }
+  }
+  if (!regId) regId = await _findRegistrationId(ev.id);
+  const used = new Set();
+  const idFor = c => {
+    const m = created.find(x => !used.has(x.id) && _norm(x.nome) === _norm(c.nome) && _norm(x.cognome) === _norm(c.cognome));
+    if (m) { used.add(m.id); return m.id; }
+    return null;
+  };
+  const credIds = [], sumIds = [], unresolved = [];
+  comps.forEach(c => {
+    if (c.pay !== 'credito' && c.pay !== 'sumup') return;
+    const id = idFor(c);
+    if (id) (c.pay === 'credito' ? credIds : sumIds).push(id);
+    else unresolved.push(`${c.nome} ${c.cognome}`);
+  });
+  if (regId && (selfPay === 'credito' || credIds.length)) {
+    const {data, error: e2} = await db.rpc('user_pay_event_people', {
+      p_user_id: currentUser.id, p_registration_id: regId,
+      p_targets: {self: selfPay === 'credito', companion_ids: credIds}
+    });
+    if (e2 || !data || !data.ok) toast((e2 && e2.message) || (data && data.error) || 'Errore pagamento credito');
+    else done.push('💳 pagato col credito');
+  }
+  if (regId && (selfPay === 'sumup' || sumIds.length)) {
+    const {data, error: e3} = await db.rpc('user_pay_event_sumup', {
+      p_user_id: currentUser.id, p_registration_id: regId,
+      p_targets: {self: selfPay === 'sumup', companion_ids: sumIds}
+    });
+    if (e3 || !data || !data.ok) toast((e3 && e3.message) || (data && data.error) || 'Errore SumUp');
+    else { _openSumup(data.sumup_link); done.push('📱 SumUp: in attesa conferma staff'); }
+  }
+  toast(done.join(' · '), 'ok');
+  await refreshUser();
+  await loadCatalog();
+  if (unresolved.length) {
+    modalInfo(`⚠️ Pagamento da completare\n\nNon è stato possibile registrare il pagamento di: ${unresolved.join(', ')}.\nApri "Le mie iscrizioni" e scegli il metodo di pagamento per queste persone.`);
+  }
+}
+
+// ── LE MIE ISCRIZIONI ────────────────────────────────────────────────
+const _PAY_BADGE = {
+  da_saldare:       ['🟡 Da saldare',        'pb-wait'],
+  sumup_in_attesa:  ['🟠 In attesa conferma','pb-wait'],
+  saldato_credito:  ['🟢 Pagato credito',    'pb-ok'],
+  saldato_sumup:    ['🟢 Pagato SumUp',      'pb-ok'],
+  saldato_contanti: ['🟢 Pagato in cassa',   'pb-ok'],
+  gratuito:         ['🟢 Gratuito',          'pb-ok'],
+  annullato:        ['⚪ Annullato',          'pb-off']
+};
+function payBadge(status) {
+  const [label, cls] = _PAY_BADGE[status] || [status || '—', 'pb-off'];
+  return `<span class="pb ${cls}">${label}</span>`;
+}
+function _regId(r) { return r.registration_id || r.id || ''; }
+function _regUnpaid(r) {
+  const self = (r.payment_status || '') === 'da_saldare';
+  const comps = (r.companions || []).filter(c => (c.payment_status || 'da_saldare') === 'da_saldare');
+  return {self, comps, count: (self ? 1 : 0) + comps.length};
+}
+function renderMyRegistrations() {
+  const el = document.getElementById('u-my-regs');
+  if (!el) return;
+  const regs = _myRegs.filter(r => (r.status || '') !== 'annullato' && (r.payment_status || '') !== 'annullato');
+  if (!regs.length) { el.innerHTML = ''; return; }
+  el.innerHTML = `<div class="sec-title" style="margin-bottom:8px">Le mie iscrizioni</div>` + regs.map(_myRegCard).join('');
+}
+function _payPickHtml(r, method, label, btnLabel) {
+  const id = _regId(r);
+  const up = _regUnpaid(r);
+  const rows = [];
+  if (up.self) rows.push(`<label class="pr-row">
+      <input type="checkbox" class="pr-chk" id="mrp-${method}-${id}-self">
+      <span class="pr-name">${_esc(currentUser.display_name)}</span></label>`);
+  up.comps.forEach(c => rows.push(`<label class="pr-row">
+      <input type="checkbox" class="pr-chk" id="mrp-${method}-${id}-${c.id}">
+      <span class="pr-name">${_esc(c.nome)} ${_esc(c.cognome)}</span></label>`));
+  return `<div style="margin-top:10px;padding:10px;background:var(--bg);border-radius:8px">
+    <div class="sec-lbl" style="margin-bottom:4px">${label}</div>
+    ${rows.join('')}
+    <button class="btn btn-p w100" style="margin-top:8px" onclick="myRegPay('${id}','${method}')">${btnLabel}</button>
+  </div>`;
+}
+function _myRegCard(r) {
+  const id = _regId(r);
+  const title = r.event_title || r.evento || 'Evento';
+  const date  = r.event_date ? fdt(r.event_date) : '—';
+  const loc   = r.event_location || r.location || '';
+  const up    = _regUnpaid(r);
+  const sumupLink = r.event_sumup_link || r.sumup_link || '';
+  const pend  = r.sumup_pending_count || 0;
+  const rows  = [`<div class="pr-row"><span class="pr-name">${_esc(currentUser.display_name)} <span style="color:var(--mut);font-size:11px">(tu)</span></span>${payBadge(r.payment_status)}</div>`]
+    .concat((r.companions || []).map(c =>
+      `<div class="pr-row"><span class="pr-name">${_esc(c.nome)} ${_esc(c.cognome)}</span>${payBadge(c.payment_status || 'da_saldare')}</div>`));
+  return `<div class="card" style="margin-bottom:10px">
+    <div style="font-weight:700;font-size:15px">${_esc(title)}</div>
+    <div class="cat-sub">${date}${loc ? ' · ' + _esc(loc) : ''}</div>
+    ${pend > 0 ? `<div style="font-size:12px;color:var(--gold);margin-bottom:6px">🟠 ${pend} pagament${pend === 1 ? 'o' : 'i'} SumUp in attesa di conferma</div>` : ''}
+    <div style="margin:8px 0">${rows.join('')}</div>
+    <button class="btn-sm" onclick="openCompanionsModal('${id}')">➕ Aggiungi persone</button>
+    ${up.count > 0 ? _payPickHtml(r, 'credito', '💳 Paga con credito', 'Paga col credito') : ''}
+    ${up.count > 0 && sumupLink ? _payPickHtml(r, 'sumup', '📱 Paga con SumUp', 'Paga con SumUp') : ''}
+  </div>`;
+}
+async function myRegPay(regId, method) {
+  const r = _myRegs.find(x => _regId(x) === regId);
+  if (!r) return toast('Iscrizione non trovata');
+  const up = _regUnpaid(r);
+  const self = document.getElementById(`mrp-${method}-${regId}-self`)?.checked || false;
+  const companion_ids = up.comps.filter(c => document.getElementById(`mrp-${method}-${regId}-${c.id}`)?.checked).map(c => c.id);
+  if (!self && !companion_ids.length) return toast('Seleziona almeno una persona');
+  const n = (self ? 1 : 0) + companion_ids.length;
+  const price = r.event_price || r.amount || 0;
+  const msg = method === 'credito'
+    ? `Pagare ${n} ${n === 1 ? 'quota' : 'quote'} con il tuo credito?\n\nTotale addebitato: ${eur(price * n)}`
+    : `Segnare ${n} ${n === 1 ? 'quota' : 'quote'} come pagate con SumUp?\n\nTotale: ${eur(price * n)}\nLo staff dovrà confermare il pagamento.`;
   modalConfirm(msg, async () => {
-    const {data, error} = await db.rpc('user_register_event', {p_user_id:currentUser.id, p_event_id:id});
-    if (error||!data.ok) return toast((error&&error.message)||data.error);
-    toast(isFree ? `Iscritto a "${data.event}"!` : `Iscritto! Importo da saldare: ${eur(data.amount)}`, 'ok');
+    const rpc = method === 'credito' ? 'user_pay_event_people' : 'user_pay_event_sumup';
+    const {data, error} = await db.rpc(rpc, {p_user_id: currentUser.id, p_registration_id: regId, p_targets: {self, companion_ids}});
+    if (error || !data || !data.ok) return toast((error && error.message) || (data && data.error) || 'Errore pagamento');
+    if (method === 'sumup') { _openSumup(data.sumup_link); toast(data.message || 'In attesa conferma staff', 'ok'); }
+    else toast('✅ Pagamento effettuato!', 'ok');
     await refreshUser();
     await loadCatalog();
   });
@@ -1405,13 +1793,22 @@ function gotoAdmin() {
   showScreen('screen-admin');
   loadDash(); loadAUsers(); loadATx(); loadAGest();
 }
+function _tabBadge(tabId, count, label) {
+  const el = document.getElementById(tabId);
+  if (!el) return;
+  el.innerHTML = _esc(label) + (Number(count) > 0 ? `<span class="tab-badge">${Number(count)}</span>` : '');
+}
 async function loadDash() {
   const {data} = await db.rpc('admin_dashboard');
   if (!data) return;
   loadChart(null);
+  _tabBadge('a-sumup-tab',  data.pending_sumup_count,  '📱 SumUp da confermare');
+  _tabBadge('a-refund-tab', data.pending_refund_count, '↩️ Rimborsi');
+  _tabBadge('a-orders-tab', data.waitlist_count,       '📦 Ordini gadget');
+  const soci  = data.total_soci       != null ? data.total_soci       : data.total_users;
+  const staff = data.total_soci_staff != null ? data.total_soci_staff : data.total_staff;
   const kpis = [
-    {ic:'👥', v:data.total_users,          l:'Soci attivi'},
-    {ic:'🏪', v:data.total_staff,          l:'Staff attivi'},
+    {ic:'👥', v:soci, l:'Soci attivi', sub:`di cui staff: ${staff}`},
     {ic:'💰', v:eur(data.total_balance),   l:'Saldo in circolo'},
     {ic:'🔄', v:eur(data.total_recharges), l:'Tot. ricariche'},
     {ic:'🛍️', v:eur(data.total_purchases), l:'Tot. acquisti'},
@@ -1424,6 +1821,7 @@ async function loadDash() {
       <div class="kpi-ic">${k.ic}</div>
       <div class="kpi-val">${k.v}</div>
       <div class="kpi-lbl">${k.l}</div>
+      ${k.sub?`<div class="kpi-sub">${k.sub}</div>`:''}
     </div>`).join('');
 }
 async function loadAUsers() {
@@ -1578,6 +1976,8 @@ async function loadAGest() {
   }
   const cat = catData||{};
   const gads = cat.gadgets||[];
+  _adminGadgets = gads;
+  _adminEvents  = cat.events || evs || [];
   const gadSummary = (gadSum && gadSum.gadgets) ? gadSum.gadgets : [];
   const gadSumMap = {};
   gadSummary.forEach(g => { gadSumMap[g.id] = g; });
@@ -1586,19 +1986,23 @@ async function loadAGest() {
         const sum = gadSumMap[g.id] || {prenotati: 0, disponibili: g.stock, prenotazioni: []};
         const pren = sum.prenotati || 0;
         const disp = sum.disponibili ?? g.stock;
-        const gn = g.name.replace(/'/g,"\\'"); const gd = (g.description||'').replace(/'/g,"\\'");
+        const gn = g.name.replace(/'/g,"\\'");
+        const szLine = g.has_sizes
+          ? `<div style="font-size:11px;color:var(--mut);margin-top:4px">📏 ${(g.sizes||[]).map(s=>`${_esc(s.size)}: ${s.stock}`).join(' · ') || 'nessuna taglia'}</div>`
+          : '';
         return `<div class="card" style="margin-bottom:8px;padding:12px">
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
             <span style="font-weight:700;flex:1">${_esc(g.name)}</span>
-            <span style="font-size:12px;color:var(--mut)">Stock: ${g.stock}${pren>0?` · <span style="color:var(--grn);font-weight:600">Disp: ${disp}</span>`:''}</span>
+            <span style="font-size:12px;color:var(--mut)">${g.has_sizes?'Taglie attive':'Stock: '+g.stock}${pren>0?` · <span style="color:var(--grn);font-weight:600">Disp: ${disp}</span>`:''}</span>
             <span style="font-weight:700;color:var(--gold)">${eur(g.price)}</span>
           </div>
           ${g.description?`<div style="font-size:12px;color:var(--mut);margin-top:3px">${_esc(g.description)}</div>`:''}
+          ${szLine}
           <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;align-items:center">
             ${pren>0
               ? `<button class="btn-sm" style="background:rgba(255,214,10,.15);color:var(--gold)" onclick="toggleGadgetPren('${g.id}',this)">📌 ${pren} prenotat${pren===1?'o':'i'}</button>`
               : `<span style="font-size:11px;color:var(--mut)">📌 0 prenotati</span>`}
-            <button class="btn-sm" onclick="openEditGadget('${g.id}','${gn}',${g.price},'${gd}',${g.stock})">✏️ Modifica</button>
+            <button class="btn-sm" onclick="openEditGadget('${g.id}')">✏️ Modifica</button>
             <button class="btn-sm" style="color:var(--neg)" onclick="adminDeleteGadget('${g.id}','${gn}')">🗑️ Elimina</button>
           </div>
           <div id="gpren-${g.id}" style="display:none;margin-top:8px"></div>
@@ -1817,12 +2221,32 @@ function toggleGadgetPren(gadgetId, btn) {
   }
   el.style.display = 'block';
 }
-function openEditGadget(id, name, price, desc, stock) {
-  document.getElementById('gae-id').value    = id;
-  document.getElementById('gae-name').value  = name;
-  document.getElementById('gae-price').value = price;
-  document.getElementById('gae-desc').value  = desc;
-  document.getElementById('gae-stock').value = stock;
+function toggleGadgetSizes() {
+  const on = document.getElementById('gae-has-sizes').checked;
+  document.getElementById('gae-sizes-wrap').style.display = on ? '' : 'none';
+  document.getElementById('gae-stock-fg').style.opacity   = on ? '.5' : '';
+}
+function _renderSizeRows(sizes) {
+  const map = {};
+  (sizes || []).forEach(s => { map[s.size] = s.stock; });
+  document.getElementById('gae-sizes-body').innerHTML = PRESET_SIZES.map(sz => `
+    <tr>
+      <td style="font-weight:600">${sz}</td>
+      <td><input type="number" min="0" step="1" class="gae-size-in" data-size="${sz}"
+           value="${map[sz] != null ? map[sz] : ''}" placeholder="—" style="padding:6px 8px;font-size:14px"></td>
+    </tr>`).join('');
+}
+function openEditGadget(id) {
+  const g = _adminGadgets.find(x => x.id === id);
+  if (!g) return toast('Gadget non trovato');
+  document.getElementById('gae-id').value    = g.id;
+  document.getElementById('gae-name').value  = g.name || '';
+  document.getElementById('gae-price').value = g.price != null ? g.price : '';
+  document.getElementById('gae-desc').value  = g.description || '';
+  document.getElementById('gae-stock').value = g.stock != null ? g.stock : 0;
+  document.getElementById('gae-has-sizes').checked = !!g.has_sizes;
+  _renderSizeRows(g.sizes);
+  toggleGadgetSizes();
   document.getElementById('gad-edit-bg').style.display = 'flex';
 }
 function closeEditGadget() { document.getElementById('gad-edit-bg').style.display = 'none'; }
@@ -1832,9 +2256,15 @@ async function saveEditGadget() {
   const price = parseFloat(document.getElementById('gae-price').value);
   const desc  = document.getElementById('gae-desc').value.trim();
   const stock = parseInt(document.getElementById('gae-stock').value)||0;
+  const hasSizes = document.getElementById('gae-has-sizes').checked;
   if (!name || !price) return toast('Nome e prezzo obbligatori');
+  const sizes = hasSizes
+    ? Array.from(document.querySelectorAll('.gae-size-in')).map(i => ({size: i.dataset.size, stock: parseInt(i.value) || 0}))
+    : [];
   const {data, error} = await db.rpc('admin_update_gadget', {p_admin_id: currentUser.id, p_gadget_id: id, p_name: name, p_price: price, p_description: desc||null, p_stock: stock});
   if (error||!data||!data.ok) return toast((error&&error.message)||(data&&data.error)||'Errore');
+  const {data: sd, error: se} = await db.rpc('admin_set_gadget_sizes', {p_admin_id: currentUser.id, p_gadget_id: id, p_sizes: sizes});
+  if (se || (sd && sd.ok === false)) return toast((se&&se.message)||(sd&&sd.error)||'Errore salvataggio taglie');
   toast('Gadget aggiornato!', 'ok');
   closeEditGadget();
   loadAGest();
@@ -2272,10 +2702,20 @@ const _GUIDE = {
 &nbsp;&nbsp;- 📱 SumUp: paga online (lo staff confermerà)<br>
 &nbsp;&nbsp;- 🏠 In cassa: paghi di persona alla cassa<br>
 • Gli eventi gratuiti si prenotano con un click<br>
+• Quando ti iscrivi si apre "👥 Chi partecipa?": aggiungi le persone che vengono con te e scegli per ognuna il metodo di pagamento (Da decidere / Credito socio / SumUp / Cassa)<br>
+• Con SumUp si apre il link di pagamento: la quota resta "🟠 In attesa conferma" finché lo staff non conferma<br>
 • Dopo l'iscrizione usa "👥 Gestisci gruppo" per aggiungere accompagnatori con nome e cognome<br>
 • Puoi rimuovere un accompagnatore solo prima del pagamento</p>
+<p><strong>🎟️ LE MIE ISCRIZIONI</strong><br>
+• Nella sezione Catalogo → Eventi trovi tutte le tue iscrizioni con lo stato di ogni persona<br>
+• 🟡 Da saldare · 🟠 In attesa conferma · 🟢 Pagato (credito / SumUp / cassa)<br>
+• "➕ Aggiungi persone" per allargare il gruppo in qualsiasi momento<br>
+• Seleziona chi vuoi pagare e usa "Paga col credito" oppure "Paga con SumUp"</p>
 <p><strong>🛍️ GADGET</strong><br>
-• Scegli il gadget e la quantità [−][N][+] direttamente nel modale di prenotazione<br>
+• Se il gadget ha le taglie, scegli prima la taglia poi la quantità [−][N][+]<br>
+• Taglia esaurita? Puoi comunque prenotare: finisci in lista d'attesa e verrai avvisato quando arriva l'ordine<br>
+• In "I miei gadget" puoi ✏️ modificare taglia e quantità o 🗑️ annullare la prenotazione<br>
+• Se avevi pagato col credito, il rimborso è automatico; se avevi pagato con SumUp lo gestisce lo staff<br>
 • Ritira e paga in cassa da Antonella</p>
 <p><strong>💳 SUMUP</strong><br>
 • Trovi i link SumUp per ricariche e servizi nella sezione Catalogo → SumUp<br>
@@ -2314,13 +2754,17 @@ const _GUIDE = {
 • ✅ Check-in per socio e per ogni accompagnatore singolarmente<br>
 • 📥 CSV: una riga per persona (soci, accompagnatori, ospiti separati)<br>
 • 🔒/🔓: nascondi o mostra un evento</p>
+<p><strong>📱 SUMUP DA CONFERMARE</strong><br>
+• Elenco delle quote che i soci hanno segnato come pagate con SumUp<br>
+• Per ogni riga: evento, persona, tessera, importo e quando è stata segnata<br>
+• ✅ Conferma se il pagamento è arrivato · ❌ Rifiuta per riportarla a "da saldare"</p>
 <p><strong>🏷️ PROMO</strong><br>
 • Vedi le promo attive — le promo si applicano automaticamente sugli addebiti<br>
 • Solo l'admin può creare/modificare/eliminare promo</p>`,
 
   admin: `<h3 style="color:var(--gold);margin:0 0 16px">⚙️ GUIDA AMMINISTRAZIONE</h3>
 <p><strong>📊 DASHBOARD</strong><br>
-• Panoramica: soci totali, saldo totale, transazioni del periodo<br>
+• Panoramica: soci attivi (con il numero di staff incluso), saldo totale, transazioni del periodo<br>
 • Grafico ricariche vs spese con filtro periodo (7/14/30/60 giorni)</p>
 <p><strong>🏪 CASSA</strong><br>
 • Tutte le funzioni dello staff: cerca socio, ricarica, addebita, salda eventi<br>
@@ -2344,7 +2788,23 @@ const _GUIDE = {
 • 📥 CSV: una riga per persona (tipo: socio/accompagnatore/ospite)<br>
 • 🔒 Nascondi eventi passati dalla vista socio/staff</p>
 <p><strong>🛍️ GADGET</strong><br>
-• Crea e gestisci i gadget del Rione (nome, prezzo, stock, descrizione)</p>
+• Crea e gestisci i gadget del Rione (nome, prezzo, stock, descrizione)<br>
+• ✏️ Modifica → "Ha taglie?": imposta lo stock per XS/S/M/L/XL/XXL<br>
+• Stock 0 su una taglia = esaurita: i soci possono comunque prenotare finendo in lista d'attesa</p>
+<p><strong>📱 SUMUP DA CONFERMARE</strong><br>
+• Quote segnate dai soci come pagate con SumUp, in attesa di verifica<br>
+• ✅ Conferma o ❌ Rifiuta; il contatore sulla tab mostra quante sono in sospeso</p>
+<p><strong>📦 ORDINI GADGET</strong><br>
+• Tutte le prenotazioni con filtri per gadget, taglia e stato<br>
+• 🚚 Segna consegnato scegliendo il metodo di pagamento (💳 credito · 📱 SumUp · 💵 contanti)<br>
+• Sezione Waitlist: pezzi in attesa raggruppati per gadget e taglia<br>
+• Sezione Statistiche: consegnati per taglia, incassi per gadget e stock residuo</p>
+<p><strong>🎟️ ISCRITTI ESTERNI</strong><br>
+• Aggiungi partecipanti non soci a un evento (nome, cognome, contatti, importo)<br>
+• ✏️ Modifica i dati · ✅ Conferma il pagamento (credito/SumUp/contanti) · 🗑️ Elimina (solo admin)</p>
+<p><strong>↩️ RIMBORSI</strong><br>
+• Coda dei rimborsi da erogare a mano (annullamenti pagati con SumUp)<br>
+• Aggiungi una nota e segna il rimborso come completato</p>
 <p><strong>🏷️ PROMO</strong><br>
 • Crea nuove promo (percentuale o importo fisso)<br>
 • ✏️ Modifica o 🗑️ Elimina promo (solo admin)<br>
@@ -2417,5 +2877,389 @@ async function deletePromo(id, code) {
     if (error||!data.ok) return toast((error&&error.message)||data.error);
     toast('Promo eliminata', 'ok');
     loadAGest();
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// PAGAMENTI SUMUP DA CONFERMARE (admin + staff)
+// ═══════════════════════════════════════════════════════════════════════
+let _sumupPending = [];
+async function loadPendingSumup(ctx) {
+  const listId = ctx === 'admin' ? 'a-sumup-list' : 's-sumup-list';
+  const tabId  = ctx === 'admin' ? 'a-sumup-tab'  : 's-sumup-tab';
+  const label  = ctx === 'admin' ? '📱 SumUp da confermare' : '📱 SumUp';
+  const el = document.getElementById(listId);
+  if (!el) return;
+  el.innerHTML = '<div class="empty">⏳ Carico…</div>';
+  const {data, error} = await db.rpc('admin_list_pending_sumup', {p_operator_id: currentUser.id});
+  if (error || !data || !data.ok) {
+    el.innerHTML = `<div class="empty">${_esc((error && error.message) || (data && data.error) || 'Errore caricamento')}</div>`;
+    return;
+  }
+  _sumupPending = data.pending || [];
+  _tabBadge(tabId, _sumupPending.length, label);
+  if (!_sumupPending.length) { el.innerHTML = '<div class="empty">Nessun pagamento SumUp in attesa</div>'; return; }
+  el.innerHTML = _sumupPending.map(p => `
+    <div class="card" style="margin-bottom:8px;padding:12px">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span style="font-weight:700;flex:1;min-width:120px">${_esc(p.event_title || '—')}</span>
+        <span style="font-weight:700;color:var(--gold)">${eur(p.amount)}</span>
+      </div>
+      <div style="font-size:12px;color:var(--mut);margin-top:3px">
+        👤 ${_esc(p.person_name || '—')}${p.card_id ? ' · <span class="mono">' + _esc(p.card_id) + '</span>' : ''}
+        ${p.target_type === 'companion' ? ' · accompagnatore' : ''}
+      </div>
+      <div style="font-size:11px;color:var(--mut);margin-top:2px">
+        ${p.event_date ? '📅 ' + fdt(p.event_date) : ''}${p.marked_at ? ' · segnato ' + fdt(p.marked_at) : ''}
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+        <button class="btn btn-p" style="flex:1;min-width:110px"
+          onclick="sumupDecide('${ctx}','confirm','${p.target_type}','${p.target_id}')">✅ Conferma</button>
+        <button class="btn btn-q" style="flex:1;min-width:110px"
+          onclick="sumupDecide('${ctx}','reject','${p.target_type}','${p.target_id}')">❌ Rifiuta</button>
+      </div>
+    </div>`).join('');
+}
+async function sumupDecide(ctx, action, targetType, targetId) {
+  const p = _sumupPending.find(x => String(x.target_id) === String(targetId) && x.target_type === targetType);
+  const personName = (p && p.person_name) || 'questa persona';
+  const amount = p ? _num(p.amount) : 0;
+  const isOk = action === 'confirm';
+  const msg = isOk
+    ? `Confermare il pagamento SumUp di ${personName} (${eur(amount)})?\n\nLa quota risulterà saldata.`
+    : `Rifiutare il pagamento SumUp di ${personName} (${eur(amount)})?\n\nLa quota tornerà "da saldare".`;
+  modalConfirm(msg, async () => {
+    const rpc = isOk ? 'admin_confirm_sumup_payment' : 'admin_reject_sumup_payment';
+    const {data, error} = await db.rpc(rpc, {p_operator_id: currentUser.id, p_target_type: targetType, p_target_id: targetId});
+    if (error || !data || !data.ok) return toast((error && error.message) || (data && data.error) || 'Errore');
+    toast(data.message || (isOk ? '✅ Pagamento confermato' : '❌ Pagamento rifiutato'), 'ok');
+    await loadPendingSumup(ctx);
+    if (ctx === 'admin') loadDash();
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// ORDINI GADGET (admin) — lista + waitlist + statistiche
+// ═══════════════════════════════════════════════════════════════════════
+let _goAll = [], _goSummary = null, _goStats = null;
+function _num(...vals) { for (const v of vals) if (v != null && v !== '') return Number(v) || 0; return 0; }
+function _pick(o, ...keys) { for (const k of keys) if (o && o[k] != null && o[k] !== '') return o[k]; return null; }
+async function loadGadgetOrders() {
+  const el = document.getElementById('go-list');
+  if (!el) return;
+  el.innerHTML = '<div class="empty">⏳ Carico…</div>';
+  const [res, sum, stats] = await Promise.all([
+    db.rpc('staff_list_gadget_reservations', {p_operator_id: currentUser.id}),
+    db.rpc('staff_gadget_reservation_summary'),
+    db.rpc('admin_gadget_sales_stats', {p_operator_id: currentUser.id})
+  ]);
+  _goAll = Array.isArray(res.data) ? res.data : ((res.data && res.data.reservations) || []);
+  _goSummary = sum.data || null;
+  _goStats   = stats.data || null;
+  const sizes = Array.from(new Set(_goAll.map(r => r.size).filter(Boolean))).sort();
+  const sel = document.getElementById('go-f-size');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">Tutte le taglie</option>' + sizes.map(s => `<option value="${_esc(s)}">${_esc(s)}</option>`).join('');
+  sel.value = sizes.includes(cur) ? cur : '';
+  renderGadgetOrders();
+  renderWaitlist();
+  renderGadgetStats();
+}
+function renderGadgetOrders() {
+  const el = document.getElementById('go-list');
+  if (!el) return;
+  const fName   = (document.getElementById('go-f-name').value || '').toLowerCase().trim();
+  const fSize   = document.getElementById('go-f-size').value;
+  const fStatus = document.getElementById('go-f-status').value;
+  const list = _goAll.filter(r =>
+    (!fName   || String(r.gadget_name || '').toLowerCase().includes(fName)) &&
+    (!fSize   || r.size === fSize) &&
+    (!fStatus || (r.status || 'prenotato') === fStatus));
+  if (!list.length) { el.innerHTML = '<div class="empty">Nessun ordine</div>'; return; }
+  el.innerHTML = `<div class="tbl-wrap"><table><thead><tr>
+      <th>Socio</th><th>Gadget</th><th>Taglia</th><th>Qtà</th><th>Stato</th><th>Data</th><th>Consegna</th>
+    </tr></thead><tbody>` + list.map(r => {
+      const id = _resId(r);
+      const st = r.status || 'prenotato';
+      return `<tr>
+        <td><div>${_esc(r.display_name || '—')}</div><div class="mono" style="font-size:11px;color:var(--mut)">${_esc(r.card_id || '')}</div></td>
+        <td>${_esc(r.gadget_name || '—')}</td>
+        <td>${r.size ? _esc(r.size) : '—'}</td>
+        <td style="text-align:center">${r.quantity || 1}</td>
+        <td>${resBadge(st)}</td>
+        <td class="dt-cell">${r.created_at ? fdt(r.created_at).split(' ')[0] : '—'}</td>
+        <td>${st === 'prenotato' ? `<div style="display:flex;gap:3px">
+            <button class="btn-sm" style="font-size:10px;padding:2px 6px" title="Consegna e incassa con credito" onclick="goFulfill('${id}','credito')">💳</button>
+            <button class="btn-sm" style="font-size:10px;padding:2px 6px" title="Consegna e incassa con SumUp" onclick="goFulfill('${id}','sumup')">📱</button>
+            <button class="btn-sm" style="font-size:10px;padding:2px 6px" title="Consegna e incassa in contanti" onclick="goFulfill('${id}','contanti')">💵</button>
+          </div>` : '—'}</td>
+      </tr>`;
+    }).join('') + '</tbody></table></div>' +
+    `<div style="font-size:11px;color:var(--mut);margin-top:6px">🚚 Segna consegnato: scegli il metodo di pagamento (💳 credito · 📱 SumUp · 💵 contanti)</div>`;
+}
+async function goFulfill(resId, method) {
+  const r = _goAll.find(x => _resId(x) === resId);
+  if (!r) return toast('Prenotazione non trovata');
+  const label = {credito:'💳 Credito', contanti:'💵 Contanti', sumup:'📱 SumUp'}[method] || method;
+  const tot   = _num(r.total_price, r.payment_amount);
+  modalConfirm(`Consegnare "${r.gadget_name}"${r.size ? ' (taglia ' + r.size + ')' : ''} a ${r.display_name || '—'} e incassare ${eur(tot)} (${label})?`, async () => {
+    const {data, error} = await db.rpc('staff_fulfill_gadget_reservation', {p_operator_id: currentUser.id, p_reservation_id: resId, p_payment_method: method});
+    if (error || !data || !data.ok) return toast((error && error.message) || (data && data.error) || 'Errore');
+    toast(data.promo_code
+      ? `✅ Consegnato! Promo ${data.promo_code}: -${eur(data.discount)} → ${eur(data.charged)}`
+      : `✅ Consegnato! ${eur(data.amount != null ? data.amount : tot)} (${label})`, 'ok');
+    loadGadgetOrders();
+  });
+}
+function renderWaitlist() {
+  const el = document.getElementById('go-waitlist');
+  if (!el) return;
+  const raw = (_goSummary && (_goSummary.waitlist || _goSummary.attesa_ordine)) || [];
+  const items = Array.isArray(raw) ? raw : [];
+  if (!items.length) { el.innerHTML = '<div class="empty">Nessuna richiesta in lista d\'attesa</div>'; return; }
+  const groups = {};
+  items.forEach(i => {
+    const g = _pick(i, 'gadget_name', 'gadget', 'name') || '—';
+    const s = _pick(i, 'size', 'taglia') || '—';
+    const q = _num(i.quantity, i.qty, i.total_quantity, i.pending, 1);
+    const k = g + ' | ' + s;
+    groups[k] = groups[k] ? {...groups[k], qty: groups[k].qty + q, n: groups[k].n + 1} : {gadget: g, size: s, qty: q, n: 1};
+  });
+  const rows = Object.values(groups).sort((a, b) => b.qty - a.qty);
+  const tot = rows.reduce((s, r) => s + r.qty, 0);
+  el.innerHTML = `<div style="font-size:12px;color:var(--mut);margin-bottom:6px">${tot} pezzi in attesa su ${rows.length} combinazioni gadget/taglia</div>
+    <div class="tbl-wrap"><table><thead><tr><th>Gadget</th><th>Taglia</th><th>Pezzi</th><th>Richieste</th></tr></thead><tbody>` +
+    rows.map(r => `<tr><td>${_esc(r.gadget)}</td><td>${_esc(r.size)}</td><td style="text-align:center;font-weight:700;color:var(--gold)">${r.qty}</td><td style="text-align:center">${r.n}</td></tr>`).join('') +
+    '</tbody></table></div>';
+}
+function _barChart(rows, title) {
+  if (!rows.length) return '<div class="empty">Nessun dato</div>';
+  const max = Math.max(...rows.map(r => r.v), 1);
+  const bw = 46, gap = 14, h = 130;
+  const w = rows.length * (bw + gap) + gap;
+  return `<svg class="bar-chart" viewBox="0 -18 ${w} ${h + 54}" preserveAspectRatio="xMinYMin meet" role="img" aria-label="${_esc(title)}">
+    ${rows.map((r, i) => {
+      const bh = Math.max(2, Math.round(r.v / max * h));
+      const x  = gap + i * (bw + gap);
+      return `<rect x="${x}" y="${h - bh}" width="${bw}" height="${bh}" rx="4" fill="#FFD60A" opacity=".85"></rect>
+        <text x="${x + bw / 2}" y="${h - bh - 6}" text-anchor="middle" font-size="12" font-weight="700" fill="currentColor">${r.v}</text>
+        <text x="${x + bw / 2}" y="${h + 18}" text-anchor="middle" font-size="12" fill="currentColor" opacity=".7">${_esc(r.k)}</text>`;
+    }).join('')}
+  </svg>`;
+}
+function renderGadgetStats() {
+  const el = document.getElementById('go-stats');
+  if (!el) return;
+  if (!_goStats || _goStats.ok === false) { el.innerHTML = '<div class="empty">Statistiche non disponibili</div>'; return; }
+  const bySize = (_goStats.by_size || []).map(s => ({
+    k: _pick(s, 'size', 'taglia') || '—',
+    v: _num(s.quantity, s.qty, s.total, s.venduti, s.count)
+  })).filter(s => s.v >= 0);
+  const byGadget = (_goStats.by_gadget || []).map(g => ({
+    name: _pick(g, 'gadget_name', 'name', 'gadget') || '—',
+    qty:  _num(g.quantity, g.qty, g.total, g.venduti, g.count),
+    amount: _num(g.amount, g.incasso, g.revenue, g.total_amount)
+  }));
+  const stock = (_goStats.stock_levels || []).map(s => ({
+    name: _pick(s, 'gadget_name', 'name', 'gadget') || '—',
+    size: _pick(s, 'size', 'taglia') || '—',
+    v:    _num(s.stock, s.disponibili, s.available)
+  }));
+  el.innerHTML =
+    `<div class="card" style="padding:14px;margin-bottom:10px">
+      <div class="sec-lbl">Consegnati per taglia</div>
+      ${_barChart(bySize, 'Consegnati per taglia')}
+    </div>` +
+    (byGadget.length ? `<div class="tbl-wrap" style="margin-bottom:10px"><table><thead><tr><th>Gadget</th><th>Pezzi</th><th>Incasso</th></tr></thead><tbody>` +
+      byGadget.map(g => `<tr><td>${_esc(g.name)}</td><td style="text-align:center">${g.qty}</td><td>${eur(g.amount)}</td></tr>`).join('') +
+      '</tbody></table></div>' : '') +
+    (stock.length ? `<div class="sec-lbl">Stock residuo</div><div class="tbl-wrap"><table><thead><tr><th>Gadget</th><th>Taglia</th><th>Stock</th></tr></thead><tbody>` +
+      stock.map(s => `<tr><td>${_esc(s.name)}</td><td>${_esc(s.size)}</td><td style="text-align:center;color:${s.v > 0 ? 'var(--grn)' : 'var(--neg)'}">${s.v}</td></tr>`).join('') +
+      '</tbody></table></div>' : '');
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// ISCRITTI ESTERNI (admin/staff)
+// ═══════════════════════════════════════════════════════════════════════
+let _extGuests = [];
+async function _ensureAdminEvents() {
+  if (_adminEvents.length) return _adminEvents;
+  const {data} = await db.rpc('get_catalog');
+  _adminEvents = (data && data.events) || [];
+  return _adminEvents;
+}
+function _eventOptions(selected) {
+  return _adminEvents.map(e =>
+    `<option value="${e.id}"${e.id === selected ? ' selected' : ''}>${_esc(e.title)}${e.event_date ? ' — ' + fdt(e.event_date).split(' ')[0] : ''}</option>`).join('');
+}
+async function loadExternalGuests() {
+  const el = document.getElementById('eg-list');
+  if (!el) return;
+  await _ensureAdminEvents();
+  const sel = document.getElementById('eg-filter-event');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">Tutti gli eventi</option>' + _eventOptions(cur);
+  sel.value = cur;
+  el.innerHTML = '<div class="empty">⏳ Carico…</div>';
+  const {data, error} = await db.rpc('admin_list_external_guests', {p_operator_id: currentUser.id, p_event_id: cur || null});
+  if (error || !data || data.ok === false) {
+    el.innerHTML = `<div class="empty">${_esc((error && error.message) || (data && data.error) || 'Errore caricamento')}</div>`;
+    return;
+  }
+  _extGuests = Array.isArray(data) ? data : (data.guests || data.items || []);
+  if (!_extGuests.length) { el.innerHTML = '<div class="empty">Nessun iscritto esterno</div>'; return; }
+  const isAdmin = currentUser.role === 'admin';
+  el.innerHTML = `<div class="tbl-wrap"><table><thead><tr>
+      <th>Nome</th><th>Evento</th><th>Contatti</th><th>Importo</th><th>Stato</th><th>Data</th><th></th>
+    </tr></thead><tbody>` + _extGuests.map(g => {
+      const id = _pick(g, 'guest_id', 'id');
+      const st = g.payment_status || 'da_saldare';
+      return `<tr>
+        <td>${_esc(g.nome || '')} ${_esc(g.cognome || '')}</td>
+        <td style="font-size:12px">${_esc(g.event_title || '—')}</td>
+        <td style="font-size:11px;color:var(--mut)">${_esc(g.telefono || '—')}<br>${_esc(g.email || '')}</td>
+        <td>${eur(g.amount)}</td>
+        <td>${payBadge(st)}
+          ${st === 'da_saldare' ? `<div style="display:flex;gap:3px;margin-top:4px">
+            <button class="btn-sm" style="font-size:10px;padding:2px 6px" title="Conferma pagamento con credito" onclick="extGuestConfirm('${id}','credito')">💳</button>
+            <button class="btn-sm" style="font-size:10px;padding:2px 6px" title="Conferma pagamento SumUp" onclick="extGuestConfirm('${id}','sumup')">📱</button>
+            <button class="btn-sm" style="font-size:10px;padding:2px 6px" title="Conferma pagamento contanti" onclick="extGuestConfirm('${id}','contanti')">💵</button>
+          </div>` : ''}
+        </td>
+        <td class="dt-cell">${g.created_at ? fdt(g.created_at).split(' ')[0] : '—'}</td>
+        <td style="white-space:nowrap">
+          <button class="btn-sm" style="font-size:10px;padding:2px 6px" onclick="openExtGuestModal('${id}')">✏️</button>
+          ${isAdmin ? `<button class="btn-sm" style="font-size:10px;padding:2px 6px;color:var(--neg)" onclick="extGuestDelete('${id}')">🗑️</button>` : ''}
+        </td>
+      </tr>`;
+    }).join('') + '</tbody></table></div>';
+}
+function extgEventChanged() {
+  const ev = _adminEvents.find(e => e.id === document.getElementById('extg-event').value);
+  if (ev) document.getElementById('extg-amount').value = ev.price != null ? ev.price : '';
+}
+async function openExtGuestModal(guestId) {
+  await _ensureAdminEvents();
+  const g = guestId ? _extGuests.find(x => String(_pick(x, 'guest_id', 'id')) === String(guestId)) : null;
+  document.getElementById('extg-title').textContent = g ? '✏️ Modifica iscritto esterno' : '➕ Nuovo iscritto esterno';
+  document.getElementById('extg-id').value      = g ? _pick(g, 'guest_id', 'id') : '';
+  document.getElementById('extg-nome').value    = g ? (g.nome || '') : '';
+  document.getElementById('extg-cognome').value = g ? (g.cognome || '') : '';
+  document.getElementById('extg-email').value   = g ? (g.email || '') : '';
+  document.getElementById('extg-tel').value     = g ? (g.telefono || '') : '';
+  const evSel = document.getElementById('extg-event');
+  const preset = (g && g.event_id) || document.getElementById('eg-filter-event').value || (_adminEvents[0] && _adminEvents[0].id) || '';
+  evSel.innerHTML = _eventOptions(preset);
+  evSel.value = preset;
+  document.getElementById('extg-event-fg').style.display  = g ? 'none' : '';
+  document.getElementById('extg-status-fg').style.display = g ? 'none' : '';
+  document.getElementById('extg-status').value = 'da_saldare';
+  if (g) document.getElementById('extg-amount').value = g.amount != null ? g.amount : '';
+  else extgEventChanged();
+  document.getElementById('extg-bg').classList.add('open');
+}
+function closeExtGuestModal() { document.getElementById('extg-bg').classList.remove('open'); }
+async function saveExtGuest() {
+  const id      = document.getElementById('extg-id').value;
+  const nome    = document.getElementById('extg-nome').value.trim();
+  const cognome = document.getElementById('extg-cognome').value.trim();
+  const email   = document.getElementById('extg-email').value.trim();
+  const tel     = document.getElementById('extg-tel').value.trim();
+  const amount  = parseFloat(document.getElementById('extg-amount').value) || 0;
+  const eventId = document.getElementById('extg-event').value;
+  const status  = document.getElementById('extg-status').value;
+  if (!nome || !cognome) return toast('Nome e cognome obbligatori');
+  if (!id && !eventId)   return toast('Seleziona un evento');
+  const run = async () => {
+    const call = id
+      ? db.rpc('admin_update_external_guest', {p_operator_id: currentUser.id, p_guest_id: id, p_nome: nome, p_cognome: cognome, p_email: email || null, p_telefono: tel || null, p_amount: amount})
+      : db.rpc('admin_create_external_guest', {p_operator_id: currentUser.id, p_event_id: eventId, p_nome: nome, p_cognome: cognome, p_email: email || null, p_telefono: tel || null, p_amount: amount, p_payment_status: status});
+    const {data, error} = await call;
+    if (error || !data || data.ok === false) return toast((error && error.message) || (data && data.error) || 'Errore salvataggio');
+    toast(id ? '✅ Iscritto aggiornato' : '✅ Iscritto esterno aggiunto', 'ok');
+    loadExternalGuests();
+  };
+  closeExtGuestModal();
+  const financial = !id && status !== 'da_saldare';
+  if (financial) {
+    const lbl = {saldato_credito:'credito', saldato_sumup:'SumUp', saldato_contanti:'contanti'}[status] || status;
+    modalConfirm(`Registrare ${nome} ${cognome} come già saldato (${lbl}) per ${eur(amount)}?`, run);
+  } else if (id && amount) {
+    modalConfirm(`Salvare le modifiche di ${nome} ${cognome}?\n\nImporto: ${eur(amount)}`, run);
+  } else {
+    await run();
+  }
+}
+async function extGuestConfirm(guestId, method) {
+  const g = _extGuests.find(x => String(_pick(x, 'guest_id', 'id')) === String(guestId));
+  const label = {credito:'credito', sumup:'SumUp', contanti:'contanti'}[method] || method;
+  const who = g ? `${g.nome} ${g.cognome}` : 'questo iscritto';
+  const amt = g ? _num(g.amount) : 0;
+  modalConfirm(`Confermare il pagamento di ${who} (${eur(amt)}) — ${label}?`, async () => {
+    const {data, error} = await db.rpc('admin_confirm_external_guest', {p_operator_id: currentUser.id, p_guest_id: guestId, p_payment_method: method});
+    if (error || !data || data.ok === false) return toast((error && error.message) || (data && data.error) || 'Errore');
+    toast(data.message || '✅ Pagamento confermato', 'ok');
+    loadExternalGuests();
+  });
+}
+async function extGuestDelete(guestId) {
+  const g = _extGuests.find(x => String(_pick(x, 'guest_id', 'id')) === String(guestId));
+  const who = g ? `${g.nome} ${g.cognome}` : 'questo iscritto';
+  modalConfirm(`Eliminare ${who}?\n\nL'operazione non è reversibile.`, async () => {
+    const {data, error} = await db.rpc('admin_delete_external_guest', {p_operator_id: currentUser.id, p_guest_id: guestId});
+    if (error || !data || data.ok === false) return toast((error && error.message) || (data && data.error) || 'Errore');
+    toast('Iscritto eliminato', 'ok');
+    loadExternalGuests();
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// CODA RIMBORSI (admin/staff)
+// ═══════════════════════════════════════════════════════════════════════
+let _refunds = [];
+async function loadRefundQueue() {
+  const el = document.getElementById('rf-list');
+  if (!el) return;
+  el.innerHTML = '<div class="empty">⏳ Carico…</div>';
+  const {data, error} = await db.rpc('admin_list_refund_queue', {p_operator_id: currentUser.id});
+  if (error || !data || data.ok === false) {
+    el.innerHTML = `<div class="empty">${_esc((error && error.message) || (data && data.error) || 'Errore caricamento')}</div>`;
+    return;
+  }
+  _refunds = Array.isArray(data) ? data : (data.items || []);
+  _tabBadge('a-refund-tab', _refunds.length, '↩️ Rimborsi');
+  if (!_refunds.length) { el.innerHTML = '<div class="empty">Nessun rimborso in attesa</div>'; return; }
+  el.innerHTML = _refunds.map(r => {
+    const id = _pick(r, 'refund_id', 'id');
+    return `<div class="card" style="margin-bottom:8px;padding:12px">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <div style="flex:1;min-width:130px">
+          <div style="font-weight:600">${_esc(_pick(r, 'display_name', 'user_name', 'socio') || '—')}</div>
+          <div class="mono" style="font-size:11px;color:var(--mut)">${_esc(r.card_id || '')}</div>
+        </div>
+        <span style="font-weight:700;color:var(--gold)">${eur(r.amount)}</span>
+      </div>
+      <div style="font-size:12px;color:var(--mut);margin-top:4px">
+        ${_esc(_pick(r, 'reason', 'motivo', 'description') || 'Rimborso')} ·
+        metodo originale: ${_esc(_pick(r, 'original_method', 'payment_method', 'method') || '—')} ·
+        ${r.created_at ? fdt(r.created_at) : '—'}
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+        <input type="text" id="rf-note-${id}" placeholder="Nota (es. rimborsato in contanti)" style="flex:1;min-width:140px;font-size:13px;padding:8px 10px">
+        <button class="btn btn-p" style="flex-shrink:0" onclick="completeRefund('${id}')">✅ Segna completato</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+async function completeRefund(refundId) {
+  const r = _refunds.find(x => String(_pick(x, 'refund_id', 'id')) === String(refundId));
+  const note = (document.getElementById('rf-note-' + refundId)?.value || '').trim();
+  const amt = r ? _num(r.amount) : 0;
+  modalConfirm(`Segnare come completato il rimborso di ${eur(amt)}?${note ? '\n\nNota: ' + note : '\n\nNessuna nota inserita.'}`, async () => {
+    const {data, error} = await db.rpc('admin_complete_refund', {p_operator_id: currentUser.id, p_refund_id: refundId, p_notes: note || null});
+    if (error || !data || data.ok === false) return toast((error && error.message) || (data && data.error) || 'Errore');
+    toast(data.message || '✅ Rimborso completato', 'ok');
+    await loadRefundQueue();
+    loadDash();
   });
 }
