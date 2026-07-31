@@ -1559,15 +1559,39 @@ function payBadge(status) {
   return `<span class="pb ${cls}">${label}</span>`;
 }
 function _regId(r) { return r.registration_id || r.id || ''; }
+// Il socio partecipa ancora di persona?
+function _selfIncluded(r) {
+  if (r.self_included != null) return !!r.self_included;
+  return (r.payment_status || '') !== 'annullato';
+}
+// Solo accompagnatori attivi (il backend li filtra già, difensivo)
+function _activeComps(r) {
+  return (r.companions || []).filter(c => (c.status || 'attivo') === 'attivo');
+}
+// Modifiche consentite solo prima della data evento
+function _canEditReg(r) {
+  if (r.can_edit != null) return !!r.can_edit;
+  return r.event_date ? new Date(r.event_date) > new Date() : true;
+}
 function _regUnpaid(r) {
-  const self = (r.payment_status || '') === 'da_saldare';
-  const comps = (r.companions || []).filter(c => (c.payment_status || 'da_saldare') === 'da_saldare');
+  const self = _selfIncluded(r) && (r.payment_status || '') === 'da_saldare';
+  const comps = _activeComps(r).filter(c => (c.payment_status || 'da_saldare') === 'da_saldare');
   return {self, comps, count: (self ? 1 : 0) + comps.length};
+}
+// Metodo dichiarato per una quota evento (credito / sumup / cassa)
+const _EV_PM = {
+  credito: ['💳 Credito', 'pm-credito'],
+  sumup:   ['🔗 SumUp',   'pm-sumup'],
+  cassa:   ['💵 Cassa',   'pm-contanti']
+};
+function evMethodPill(method) {
+  const cfg = _EV_PM[method];
+  return cfg ? `<span class="pm-pill ${cfg[1]}">${cfg[0]}</span>` : '';
 }
 function renderMyRegistrations() {
   const el = document.getElementById('u-my-regs');
   if (!el) return;
-  const regs = _myRegs.filter(r => (r.status || '') !== 'annullato' && (r.payment_status || '') !== 'annullato');
+  const regs = _myRegs.filter(r => (r.status || '') !== 'annullato' && (_selfIncluded(r) || _activeComps(r).length));
   if (!regs.length) { el.innerHTML = ''; return; }
   el.innerHTML = `<div class="sec-title" style="margin-bottom:8px">Le mie iscrizioni</div>` + regs.map(_myRegCard).join('');
 }
@@ -1593,31 +1617,80 @@ function _payPickHtml(r, method) {
     <button class="btn btn-p w100" style="margin-top:8px" onclick="myRegPay('${id}','${method}')">${cfg.btn}</button>
   </div>`;
 }
+// Popover inline per scegliere il metodo (usato da ✏️ e da "Ripartecipa")
+function _pmPopHtml(popId, sumupLink, onpick) {
+  const methods = ['credito'].concat(sumupLink ? ['sumup'] : []).concat(['cassa']);
+  return `<div class="pm-pop" id="${popId}" style="display:none">
+    ${methods.map(m => `<button class="pm-btn" onclick="(${onpick})('${m}')">${_EV_PM[m][0]}</button>`).join('')}
+  </div>`;
+}
+function togglePmPop(popId) {
+  const el = document.getElementById(popId);
+  if (!el) return;
+  document.querySelectorAll('.pm-pop').forEach(p => { if (p.id !== popId) p.style.display = 'none'; });
+  el.style.display = el.style.display === 'none' ? 'flex' : 'none';
+}
+function _regRowHtml(r, unit) {
+  const id = _regId(r);
+  const canEdit = _canEditReg(r);
+  const status  = unit.status || 'da_saldare';
+  const key     = unit.type === 'self' ? 'self' : unit.id;
+  const popId   = `pmpop-${id}-${key}`;
+  const sumupLink = r.event_sumup_link || r.sumup_link || '';
+  const canChange = canEdit && status === 'da_saldare';
+  return `<div class="pr-row">
+      <span class="pr-name">${_esc(unit.name)}${unit.type === 'self' ? ' <span style="color:var(--mut);font-size:11px">(tu)</span>' : ''}</span>
+      ${status === 'da_saldare' && unit.method ? evMethodPill(unit.method) : ''}
+      ${payBadge(status)}
+      ${canChange ? `<button class="row-act" title="Cambia metodo di pagamento" onclick="togglePmPop('${popId}')">✏️</button>` : ''}
+      ${canEdit ? `<button class="row-act danger" title="Rimuovi dall'iscrizione" onclick="myRegRemove('${id}','${unit.type}','${key}')">🗑</button>` : ''}
+    </div>
+    ${canChange ? _pmPopHtml(popId, sumupLink, `(m)=>myRegChangeMethod('${id}','${unit.type}','${key}',m)`) : ''}`;
+}
 function _myRegCard(r) {
   const id = _regId(r);
   const title = r.event_title || r.evento || 'Evento';
   const date  = r.event_date ? fdt(r.event_date) : '—';
   const loc   = r.event_location || r.location || '';
   const up    = _regUnpaid(r);
+  const selfIn  = _selfIncluded(r);
+  const canEdit = _canEditReg(r);
+  const comps = _activeComps(r);
   const sumupLink = r.event_sumup_link || r.sumup_link || '';
   const price = Number(r.event_price || r.amount || 0);
   const canCredit = price <= 0 || _userBalance >= price;
-  const people = [{status: r.payment_status}].concat((r.companions || []).map(c => ({status: c.payment_status || 'da_saldare'})));
-  const pend  = people.filter(p => String(p.status || '').endsWith('_in_attesa')).length || (r.sumup_pending_count || 0);
-  const rows  = [`<div class="pr-row"><span class="pr-name">${_esc(currentUser.display_name)} <span style="color:var(--mut);font-size:11px">(tu)</span></span>${payBadge(r.payment_status)}</div>`]
-    .concat((r.companions || []).map(c =>
-      `<div class="pr-row"><span class="pr-name">${_esc(c.nome)} ${_esc(c.cognome)}</span>${payBadge(c.payment_status || 'da_saldare')}</div>`));
+  const declared = (r.sumup_pending_count != null || r.cassa_pending_count != null)
+    ? _num(r.sumup_pending_count) + _num(r.cassa_pending_count)
+    : null;
+  const statuses = (selfIn ? [r.payment_status] : []).concat(comps.map(c => c.payment_status || 'da_saldare'));
+  const pend = declared != null ? declared : statuses.filter(s => String(s || '').endsWith('_in_attesa')).length;
+  const rows = (selfIn
+      ? [_regRowHtml(r, {type: 'self', name: currentUser.display_name, status: r.payment_status, method: r.payment_method})]
+      : [])
+    .concat(comps.map(c => _regRowHtml(r, {
+      type: 'companion', id: c.id, name: `${c.nome} ${c.cognome}`,
+      status: c.payment_status || 'da_saldare', method: c.payment_method
+    })));
   return `<div class="card" style="margin-bottom:10px">
     <div style="font-weight:700;font-size:15px">${_esc(title)}</div>
     <div class="cat-sub">${date}${loc ? ' · ' + _esc(loc) : ''}</div>
     ${pend > 0 ? `<div style="font-size:12px;color:var(--gold);margin-bottom:6px">🟠 ${pend} pagament${pend === 1 ? 'o' : 'i'} in attesa di conferma dello staff</div>` : ''}
+    ${!selfIn && canEdit ? `<div class="leave-banner">
+        <span>🚪 Hai lasciato l'evento</span>
+        <button class="btn-sm" onclick="togglePmPop('pmpop-${id}-rejoin')">Ripartecipa</button>
+      </div>
+      ${_pmPopHtml(`pmpop-${id}-rejoin`, sumupLink, `(m)=>myRegRejoin('${id}',m)`)}` : ''}
+    ${!selfIn && !canEdit ? `<div class="pay-blk-hint">🚪 Non partecipi più a questo evento.</div>` : ''}
     <div style="margin:8px 0">${rows.join('')}</div>
-    <button class="btn-sm" onclick="openCompanionsModal('${id}')">➕ Aggiungi persone</button>
+    ${canEdit ? `<button class="btn-sm" onclick="openCompanionsModal('${id}')">➕ Aggiungi persone</button>` : ''}
     ${up.count > 0 ? `<div class="pay-blk-hint">Scegli come pagare: puoi usare metodi diversi per persone diverse.</div>` : ''}
     ${up.count > 0 && canCredit ? _payPickHtml(r, 'credito') : ''}
     ${up.count > 0 && !canCredit ? `<div class="pay-blk-hint">💳 Credito non sufficiente per pagare una quota (${eur(_userBalance)} disponibili).</div>` : ''}
     ${up.count > 0 && sumupLink ? _payPickHtml(r, 'sumup') : ''}
     ${up.count > 0 ? _payPickHtml(r, 'cassa') : ''}
+    ${canEdit
+      ? `<div style="margin-top:12px;text-align:right"><a href="#" class="link-danger" onclick="myRegCancelAll('${id}');return false">🗑 Annulla tutta l'iscrizione</a></div>`
+      : `<div class="past-note">Evento passato — modifiche non disponibili</div>`}
   </div>`;
 }
 async function myRegPay(regId, method) {
@@ -1644,6 +1717,129 @@ async function myRegPay(regId, method) {
     if (method === 'sumup') { _openSumup(data.sumup_link); toast('Attende conferma dello staff', 'ok'); }
     else if (method === 'cassa') toast('Segnalato al cassiere. Attende conferma.', 'ok');
     else toast('✅ Pagamento effettuato!', 'ok');
+    await refreshUser();
+    await loadCatalog();
+  });
+}
+
+// ── MODIFICA / RIMOZIONE QUOTE ISCRIZIONE (socio) ────────────────────
+function _findMyReg(regId) { return _myRegs.find(x => _regId(x) === regId) || null; }
+function _unitName(r, targetType, targetId) {
+  if (targetType === 'self') return currentUser.display_name;
+  const c = _activeComps(r).find(x => String(x.id) === String(targetId));
+  return c ? `${c.nome} ${c.cognome}` : 'questa persona';
+}
+function _unitStatus(r, targetType, targetId) {
+  if (targetType === 'self') return r.payment_status || 'da_saldare';
+  const c = _activeComps(r).find(x => String(x.id) === String(targetId));
+  return (c && c.payment_status) || 'da_saldare';
+}
+// Come verrà gestito il rimborso in base allo stato di pagamento
+function _refundRoute(status) {
+  if (status === 'saldato_credito') return {refund: true, queued: false, txt: 'rimborso immediato sul credito'};
+  if (status === 'saldato_sumup')   return {refund: true, queued: true,  txt: 'rimborso SumUp gestito dallo staff'};
+  if (status === 'saldato_cassa' || status === 'saldato_contanti') return {refund: true, queued: true, txt: 'rimborso in contanti gestito dallo staff'};
+  return {refund: false, queued: false, txt: 'nessun importo da rimborsare'};
+}
+function _refundToast(refund) {
+  if (!refund) return '';
+  const amt = _num(refund.amount, refund.refunded);
+  if (!amt) return '';
+  const queued = refund.queued || refund.method === 'sumup' || refund.method === 'cassa' || refund.method === 'contanti';
+  return queued ? `Rimborso di ${eur(amt)} in carico allo staff` : `Rimborsato ${eur(amt)} sul credito`;
+}
+async function _afterRegChange(action) {
+  await refreshUser();
+  if (action === 'cancelled_full' || action === 'cancelled_after_removal') await loadCatalog();
+  else renderMyRegistrations();
+}
+async function myRegChangeMethod(regId, targetType, targetId, method) {
+  const r = _findMyReg(regId);
+  if (!r) return toast('Iscrizione non trovata');
+  const {data, error} = await db.rpc('user_change_event_payment_method', {
+    p_user_id: currentUser.id,
+    p_registration_id: regId,
+    p_target_type: targetType,
+    p_target_id: targetType === 'self' ? regId : targetId,
+    p_new_method: method
+  });
+  if (error || !data || !data.ok) return toast((error && error.message) || (data && data.error) || 'Metodo non modificabile');
+  toast(data.message || `Metodo aggiornato: ${(_EV_PM[method] || ['—'])[0]}`, 'ok');
+  await refreshUser();
+  renderMyRegistrations();
+}
+async function myRegRemove(regId, targetType, targetId) {
+  const r = _findMyReg(regId);
+  if (!r) return toast('Iscrizione non trovata');
+  const name   = _unitName(r, targetType, targetId);
+  const status = _unitStatus(r, targetType, targetId);
+  const route  = _refundRoute(status);
+  const price  = Number(r.event_price || r.amount || 0);
+  const selfIn = _selfIncluded(r);
+  const comps  = _activeComps(r);
+  const restanti = (targetType === 'self' ? comps.length : (selfIn ? 1 : 0) + comps.length - 1);
+  const msg = `Rimuovere ${targetType === 'self' ? 'te stesso' : name} da "${r.event_title || 'questo evento'}"?\n\n` +
+    (route.refund ? `Quota pagata: ${eur(price)} — ${route.txt}\n` : `${route.txt}\n`) +
+    (restanti <= 0 ? '\n⚠️ Non resta nessuno: l\'iscrizione verrà annullata.' : `\nRestano ${restanti} ${restanti === 1 ? 'persona iscritta' : 'persone iscritte'}.`);
+  modalConfirm(msg, async () => {
+    const rpc = targetType === 'self' ? 'user_remove_self_from_event' : 'user_remove_companion_from_event';
+    const args = targetType === 'self'
+      ? {p_user_id: currentUser.id, p_registration_id: regId}
+      : {p_user_id: currentUser.id, p_registration_id: regId, p_companion_id: targetId};
+    const {data, error} = await db.rpc(rpc, args);
+    if (error || !data || !data.ok) return toast((error && error.message) || (data && data.error) || 'Rimozione non riuscita');
+    const action = data.action || '';
+    const rMsg = _refundToast(data.refund);
+    const base = (action === 'cancelled_full' || action === 'cancelled_after_removal')
+      ? 'Iscrizione annullata'
+      : (targetType === 'self' ? 'Hai lasciato l\'evento' : `${name} non partecipa più`);
+    toast(`${base}${rMsg ? ' · ' + rMsg : ''}`, 'ok');
+    await _afterRegChange(action);
+    if (data.refund && (data.refund.queued || ['sumup', 'cassa', 'contanti'].includes(data.refund.method))) {
+      modalInfo('↩️ Rimborso in lavorazione\n\nIl rimborso in contanti/SumUp sarà gestito dallo staff: ti verrà consegnato in cassa.');
+    }
+  });
+}
+async function myRegCancelAll(regId) {
+  const r = _findMyReg(regId);
+  if (!r) return toast('Iscrizione non trovata');
+  const price  = Number(r.event_price || r.amount || 0);
+  const selfIn = _selfIncluded(r);
+  const units  = (selfIn ? [{name: currentUser.display_name + ' (tu)', status: r.payment_status}] : [])
+    .concat(_activeComps(r).map(c => ({name: `${c.nome} ${c.cognome}`, status: c.payment_status || 'da_saldare'})));
+  const righe = units.map(u => `• ${u.name}: ${_refundRoute(u.status).txt}`).join('\n');
+  const daRimborsare = units.filter(u => _refundRoute(u.status).refund).length;
+  const msg = `Annullare tutta l'iscrizione a "${r.event_title || 'questo evento'}"?\n\n` +
+    `${units.length === 1 ? '1 persona verrà rimossa' : units.length + ' persone verranno rimosse'}:\n${righe}\n\n` +
+    (daRimborsare ? `Totale da rimborsare: ${eur(price * daRimborsare)}` : 'Nessun importo da rimborsare.');
+  modalConfirm(msg, async () => {
+    const {data, error} = await db.rpc('user_cancel_event_registration', {p_user_id: currentUser.id, p_registration_id: regId});
+    if (error || !data || !data.ok) return toast((error && error.message) || (data && data.error) || 'Annullamento non riuscito');
+    const refunds = Array.isArray(data.refunds) ? data.refunds : [];
+    const imm = refunds.filter(x => _num(x.amount, x.refunded) > 0 && !(x.queued || ['sumup', 'cassa', 'contanti'].includes(x.method)));
+    const qd  = refunds.filter(x => _num(x.amount, x.refunded) > 0 && (x.queued || ['sumup', 'cassa', 'contanti'].includes(x.method)));
+    const sum = arr => arr.reduce((s, x) => s + _num(x.amount, x.refunded), 0);
+    const parti = [];
+    if (imm.length) parti.push(`rimborsati ${eur(sum(imm))} sul credito`);
+    if (qd.length)  parti.push(`${eur(sum(qd))} in carico allo staff`);
+    toast(`Iscrizione annullata${parti.length ? ' · ' + parti.join(' · ') : ''}`, 'ok');
+    await _afterRegChange('cancelled_full');
+    if (qd.length) {
+      modalInfo(`↩️ Rimborso in lavorazione\n\nIl rimborso in contanti/SumUp (${eur(sum(qd))}) sarà gestito dallo staff: ti verrà consegnato in cassa.`);
+    }
+  });
+}
+async function myRegRejoin(regId, method) {
+  const r = _findMyReg(regId);
+  if (!r) return toast('Iscrizione non trovata');
+  const price = Number(r.event_price || r.amount || 0);
+  const label = (_EV_PM[method] || ['—'])[0];
+  modalConfirm(`Ripartecipare a "${r.event_title || 'questo evento'}"?\n\nQuota: ${eur(price)}\nMetodo dichiarato: ${label}\nLa quota risulterà da saldare.`, async () => {
+    const {data, error} = await db.rpc('user_rejoin_event', {
+      p_user_id: currentUser.id, p_registration_id: regId, p_payment_method: method || 'credito'
+    });
+    if (error || !data || !data.ok) return toast((error && error.message) || (data && data.error) || 'Non è possibile ripartecipare');
+    toast(data.message || 'Sei di nuovo iscritto: quota da saldare', 'ok');
     await refreshUser();
     await loadCatalog();
   });
@@ -3572,7 +3768,12 @@ const _GUIDE = {
 • Nella sezione Catalogo → Eventi trovi tutte le tue iscrizioni con lo stato di ogni persona<br>
 • 🟡 Da saldare · 🟠 In attesa conferma · 🟢 Pagato (credito / SumUp / cassa)<br>
 • "➕ Aggiungi persone" per allargare il gruppo in qualsiasi momento<br>
-• Seleziona chi vuoi pagare e usa "Paga col credito" oppure "Paga con SumUp"</p>
+• Seleziona chi vuoi pagare e usa il blocco del metodo che preferisci<br>
+• ✏️ accanto a una quota da saldare: cambia il metodo dichiarato (Credito / SumUp / Cassa)<br>
+• 🗑 accanto a una persona: la togli dall'iscrizione. Se aveva già pagato col credito il rimborso è immediato; se aveva pagato in contanti o con SumUp lo gestisce lo staff<br>
+• Se togli te stesso resti con il gruppo iscritto e puoi <strong>Ripartecipare</strong> finché ci sono posti<br>
+• "🗑 Annulla tutta l'iscrizione" rimuove tutti e avvia i rimborsi<br>
+• Dopo la data dell'evento le modifiche non sono più possibili</p>
 <p><strong>🛍️ GADGET</strong><br>
 • Se il gadget ha le taglie, scegli prima la taglia poi la quantità [−][N][+]<br>
 • Dichiara come intendi pagare: 💳 Credito · 💵 Contanti · 🔗 SumUp<br>

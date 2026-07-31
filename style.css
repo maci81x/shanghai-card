@@ -318,6 +318,18 @@ label.pr-row{text-transform:none;letter-spacing:normal;color:var(--txt);font-wei
 :root.light .pm-contanti{background:rgba(180,83,9,.12);color:#B45309}
 :root.light .pm-sumup{background:rgba(29,78,216,.10);color:#1D4ED8}
 
+/* AZIONI SULLA SINGOLA QUOTA (le mie iscrizioni) */
+.row-act{background:transparent;border:1px solid var(--brd);border-radius:8px;padding:0 8px;min-width:34px;min-height:34px;font-size:13px;color:var(--mut);flex-shrink:0}
+.row-act:hover{border-color:var(--gold);color:var(--gold)}
+.row-act.danger:hover{border-color:var(--neg);color:var(--neg)}
+.pm-pop{display:flex;gap:6px;flex-wrap:wrap;padding:8px;margin:2px 0 8px;background:var(--bg);border:1px solid var(--brd);border-radius:10px}
+.pm-pop .pm-btn{min-width:78px;font-size:12px;padding:8px 4px;min-height:40px}
+.leave-banner{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.35);border-radius:10px;padding:10px 12px;margin:8px 0;font-size:13px}
+.leave-banner button{flex-shrink:0}
+.link-danger{color:var(--neg);font-size:12px;text-decoration:none;opacity:.85}
+.link-danger:hover{text-decoration:underline;opacity:1}
+.past-note{font-size:11px;color:var(--mut);margin-top:10px;font-style:italic}
+
 /* RIGA CONSEGNA GADGET (staff/admin) */
 .dlv-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .dlv-main{flex:1;min-width:150px}
