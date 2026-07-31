@@ -1,6 +1,89 @@
+// PWA Service Worker
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+
+// PWA Install prompt
+let deferredPrompt;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  showInstallBanner();
+});
+
+function showInstallBanner() {
+  if (window.matchMedia('(display-mode: standalone)').matches) return;
+  if (sessionStorage.getItem('install-dismissed')) return;
+  const banner = document.createElement('div');
+  banner.id = 'install-banner';
+  banner.innerHTML = `
+    <div style="position:fixed;bottom:20px;left:50%;transform:translateX(-50%);
+      background:#FFD60A;color:#1E1E1E;padding:12px 20px;border-radius:12px;
+      display:flex;align-items:center;gap:12px;box-shadow:0 4px 20px rgba(0,0,0,0.4);
+      z-index:9999;max-width:90%;font-family:sans-serif;">
+      <span style="font-size:24px;">📲</span>
+      <div>
+        <div style="font-weight:bold;font-size:14px;">Installa Shanghai Card</div>
+        <div style="font-size:12px;">Aggiungila alla schermata Home!</div>
+      </div>
+      <button onclick="installPWA()" style="background:#1E1E1E;color:#FFD60A;border:none;
+        padding:8px 16px;border-radius:8px;font-weight:bold;cursor:pointer;">Installa</button>
+      <button onclick="dismissInstall()" style="background:none;border:none;color:#1E1E1E;
+        font-size:18px;cursor:pointer;padding:4px;">✕</button>
+    </div>
+  `;
+  document.body.appendChild(banner);
+}
+
+window.installPWA = async function() {
+  if (deferredPrompt) {
+    deferredPrompt.prompt();
+    await deferredPrompt.userChoice;
+    deferredPrompt = null;
+    document.getElementById('install-banner')?.remove();
+  }
+};
+
+window.dismissInstall = function() {
+  document.getElementById('install-banner')?.remove();
+  sessionStorage.setItem('install-dismissed', '1');
+};
+
+// iOS install hint (Safari non supporta beforeinstallprompt)
+(function(){
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+  const isInStandalone = window.matchMedia('(display-mode: standalone)').matches
+    || window.navigator.standalone === true;
+  if (isIOS && !isInStandalone && !sessionStorage.getItem('install-dismissed')) {
+    setTimeout(() => {
+      if (document.getElementById('install-banner')) return;
+      const banner = document.createElement('div');
+      banner.id = 'install-banner';
+      banner.innerHTML = `
+        <div style="position:fixed;bottom:20px;left:50%;transform:translateX(-50%);
+          background:#FFD60A;color:#1E1E1E;padding:12px 20px;border-radius:12px;
+          display:flex;align-items:center;gap:12px;box-shadow:0 4px 20px rgba(0,0,0,0.4);
+          z-index:9999;max-width:90%;font-family:sans-serif;">
+          <span style="font-size:24px;">📲</span>
+          <div>
+            <div style="font-weight:bold;font-size:13px;">Installa Shanghai Card</div>
+            <div style="font-size:11px;">Tocca <strong>Condividi ⬆️</strong> poi <strong>"Aggiungi a Home"</strong></div>
+          </div>
+          <button onclick="dismissInstall()" style="background:none;border:none;color:#1E1E1E;
+            font-size:18px;cursor:pointer;padding:4px;">✕</button>
+        </div>
+      `;
+      document.body.appendChild(banner);
+    }, 3000);
+  }
+})();
+
 const SB_URL = 'https://kbcrtwqtzuipcsfiyupu.supabase.co';
 const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtiY3J0d3F0enVpcGNzZml5dXB1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1MTc3NzEsImV4cCI6MjA5OTA5Mzc3MX0.BYpoUqhiqREsA7MosC2jnLCkvXbcwjTeBdT7LhRS1UA';
 let db, currentUser = null, staffTarget = null, allAdminUsers = [], staffOps = [];
+let _gadgetsAdminCache = {}, _promosAdminCache = {}, _eventsAdminCache = {}, _unseenEventsQueue = [];
+let _incompleteUsersMap = {};
+let _adminUsersRole = 'all', _adminUsersSearch = '', _adminUsersSort = {key: 'card_id', dir: 'asc'};
 
 // ── EVENT DELEGATION (bottoni generati da innerHTML) ──────────────────
 document.addEventListener('click', function(e) {
@@ -93,10 +176,19 @@ window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('modal-ok').addEventListener('click', () => { const cb = window._mcb; modalCancel(); cb && cb(); });
   document.getElementById('l-pin').addEventListener('keydown', e => { if(e.key==='Enter') doLogin('user'); });
   document.getElementById('s-lookup').addEventListener('keydown', e => { if(e.key==='Enter') staffLookup(); });
+  document.getElementById('a-lookup')?.addEventListener('keydown', e => { if(e.key==='Enter') adminLookup(); });
+  document.getElementById('ac-lookup')?.addEventListener('keydown', e => { if(e.key==='Enter') adminCassaLookup(); });
 
   // Rilevamento landing evento pubblica
   const eventSlug = new URLSearchParams(window.location.search).get('event');
   if (eventSlug) { loadPublicEvent(eventSlug); return; }
+
+  // Monta image uploader nei form statici admin (gadget/promo/edit modals/edit event/edit user non hanno uploader)
+  mountImageUploader('fg-img-mount',  'fg-img',  'gadgets');
+  mountImageUploader('fp-img-mount',  'fp-img',  'promos');
+  mountImageUploader('fpe-img-mount', 'fpe-img', 'promos');
+  mountImageUploader('gae-img-mount', 'gae-img', 'gadgets');
+  mountImageUploader('eve-img-mount', 'eve-img', 'events');
 
   const saved = sessionStorage.getItem('sh_u');
   const role  = sessionStorage.getItem('sh_r');
@@ -106,7 +198,29 @@ window.addEventListener('DOMContentLoaded', () => {
 // ── UTILITIES ────────────────────────────────────────────────────────
 const eur = c => '€ ' + Number(c||0).toFixed(2).replace('.',',');
 const fdt = iso => { if(!iso) return '—'; const d=new Date(iso); return d.toLocaleDateString('it-IT',{day:'2-digit',month:'2-digit',year:'2-digit'})+' '+d.toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'}); };
-const txic = t => ({recharge:'🔄',purchase:'🛍️',event_fee:'🎫',refund:'↩️'}[t]||'•');
+const txic = t => ({recharge:'🔄',purchase:'🛍️',event_fee:'🎫',refund:'↩️',transfer_out:'💸',transfer_in:'💰'}[t]||'•');
+function _imgWrap16x9(url, alt, radius) {
+  if (!url) return '';
+  const r = radius || '12px 12px 0 0';
+  const a = String(alt||'').replace(/"/g,'&quot;');
+  const uEnc = String(url).replace(/"/g,'&quot;').replace(/'/g,"\\'");
+  return `<div onclick="openEventImageFullscreen('${uEnc}')" style="width:100%;padding-top:40%;position:relative;overflow:hidden;background:#1a1a1a;border-radius:${r};cursor:pointer">
+    <img src="${url}" alt="${a}" loading="lazy" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;-webkit-object-fit:cover;display:block">
+  </div>`;
+}
+function openEventImageFullscreen(url) {
+  if (!url) return;
+  const prev = document.getElementById('imgFullscreen');
+  if (prev) prev.remove();
+  const uEsc = _esc(url);
+  const wrap = document.createElement('div');
+  wrap.id = 'imgFullscreen';
+  wrap.setAttribute('style', 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.95);display:flex;align-items:center;justify-content:center;padding:16px;padding-top:calc(16px + env(safe-area-inset-top,0px));padding-bottom:calc(16px + env(safe-area-inset-bottom,0px))');
+  wrap.onclick = function(e){ if (e.target === wrap) wrap.remove(); };
+  wrap.innerHTML = `<img src="${uEsc}" alt="" style="max-width:100%;max-height:100%;object-fit:contain;-webkit-object-fit:contain;border-radius:8px">
+    <button aria-label="Chiudi" onclick="event.stopPropagation();document.getElementById('imgFullscreen').remove()" style="position:absolute;top:calc(16px + env(safe-area-inset-top,0px));right:16px;width:44px;height:44px;border-radius:50%;border:none;background:rgba(255,255,255,0.2);color:#fff;font-size:24px;cursor:pointer">✕</button>`;
+  document.body.appendChild(wrap);
+}
 
 let _tt;
 function toast(msg, type='err') {
@@ -166,7 +280,8 @@ function toggleEl(id) { const el=document.getElementById(id); el.style.display=e
 function filterUsers(btn) {
   document.getElementById('a-filter').querySelectorAll('.fbtn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
-  renderAUsers(btn.dataset.role);
+  _adminUsersRole = btn.dataset.role;
+  renderAUsers(_adminUsersRole);
 }
 
 // ── LOGIN ────────────────────────────────────────────────────────────
@@ -178,13 +293,16 @@ async function doLogin(role) {
   const { data, error } = await db.rpc(rpc, {p_card_id: card, p_pin: pin});
   if (error) return toast(error.message);
   if (!data.ok) return toast(data.error);
-  currentUser = data.user;
+  currentUser = data.user || {
+    id: data.id, card_id: data.card_id, display_name: data.display_name,
+    balance: data.balance, is_staff: data.is_staff, role: data.role
+  };
   sessionStorage.setItem('sh_u', JSON.stringify(currentUser));
   sessionStorage.setItem('sh_r', role);
   route(role);
 }
 function route(role) {
-  if (role==='user')  gotoUser();
+  if (role==='user')  { gotoUser(); setTimeout(checkUnseenEvents, 600); }
   else if (role==='staff') gotoStaff();
   else gotoAdmin();
 }
@@ -200,12 +318,13 @@ function logout() {
 // ── MOVIMENTI FILTRI ─────────────────────────────────────────────────
 let _movTipo = 'all', _movDays = 0, _allTx = [];
 let _pendingEvents = [], _myEventIds = new Set(), _myEventRegs = {}, _eventsCache = [], _promoCache = [];
+let _userBalance = 0;
 let _staffTxAll = [], _staffTxTipo = 'all', _staffTxDays = 0;
 let _adminTxAll = [], _adminTxTipo = 'all', _adminTxDays = 0, _adminTxSearch = '';
 let _adminGadgets = [], _adminEvents = [];
 let _gqtyId, _gqtyName, _gqtyPrice, _gqtyN = 1;
 let _compRegId = null, _compMode = 'user', _compEventId = '', _compCtx = '', _compCache = [];
-let _compEventPrice = 0, _compSelfStatus = '', _compEventTitle = '';
+let _compEventPrice = 0, _compSelfStatus = '', _compEventTitle = '', _compSumupLink = '';
 let _myRegs = [], _myGadgetRes = null, _gadgetsCache = [], _sizeSel = {};
 const PRESET_SIZES = ['XS','S','M','L','XL','XXL'];
 function setMovFiltro(btn, group) {
@@ -226,8 +345,11 @@ function renderMovimentiFiltered() {
   if (!list.length) { el.innerHTML='<div class="empty">Nessun movimento</div>'; return; }
   el.innerHTML = list.map(t=>`
     <div class="tx-row">
-      <span class="tx-ic">${txic(t.type)}</span>
-      <div class="tx-inf"><div class="tx-dsc">${t.description||t.type}</div><div class="tx-dt">${fdt(t.created_at)}</div></div>
+      <span class="tx-ic">${_txIconHtml(t)}</span>
+      <div class="tx-inf">
+        <div class="tx-dsc">${_esc(t.description||t.type)}</div>
+        ${_txMetaHtml(t, 'Operatore')}
+      </div>
       <div class="tx-amt ${t.amount>=0?'pos':'neg-c'}">${t.amount>=0?'+':''}${eur(t.amount)}</div>
     </div>`).join('');
 }
@@ -241,6 +363,10 @@ function renderProfile() {
       <div style="font-size:18px;font-weight:700">${u.display_name}</div>
       <div style="font-family:monospace;font-size:15px;color:var(--gold);margin-top:4px">${u.card_id}</div>
       <div style="font-size:12px;color:var(--mut);margin-top:4px"><span class="role-badge ru">${u.role}</span></div>
+    </div>
+    <div class="card" style="margin-bottom:12px">
+      <button class="btn btn-p w100" onclick="openTransferModal()">💸 Trasferisci credito a un socio</button>
+      <div style="font-size:11px;color:var(--mut);text-align:center;margin-top:8px">Invia una parte del tuo saldo a un altro socio del Rione</div>
     </div>
     <div class="card">
       <div class="sec-lbl">Dati profilo</div>
@@ -275,11 +401,220 @@ async function userChangePin() {
   ['p-old-pin','p-new-pin','p-new-pin2'].forEach(id => document.getElementById(id).value='');
 }
 
+// ── TRASFERIMENTO CREDITO TRA SOCI ───────────────────────────────────
+let _trRecipient = null;
+let _trStep = 1;
+let _trSearchTimer = null;
+let _trScanner = null;
+
+function openTransferModal() {
+  _trRecipient = null;
+  _trStep = 1;
+  document.getElementById('tr-selected').style.display = 'none';
+  document.getElementById('tr-step1').style.display = '';
+  document.getElementById('tr-step2').style.display = 'none';
+  document.getElementById('tr-step3').style.display = 'none';
+  document.getElementById('tr-query').value = '';
+  document.getElementById('tr-results').innerHTML = '';
+  document.getElementById('tr-amount').value = '';
+  document.getElementById('tr-note').value = '';
+  document.getElementById('tr-pin').value = '';
+  document.getElementById('tr-amount-err').style.display = 'none';
+  document.getElementById('tr-pin-err').style.display = 'none';
+  document.getElementById('tr-balance').textContent = eur(_userBalance);
+  _transferSetNextBtn('Avanti', false);
+  _transferStopScanner();
+  document.getElementById('transfer-modal').classList.add('open');
+}
+function closeTransferModal() {
+  _transferStopScanner();
+  document.getElementById('transfer-modal').classList.remove('open');
+  _trRecipient = null;
+  _trStep = 1;
+}
+function _transferSetNextBtn(label, enabled) {
+  const b = document.getElementById('tr-next-btn');
+  b.textContent = label;
+  b.disabled = !enabled;
+  b.style.opacity = enabled ? '' : '.5';
+}
+function _transferSearchDebounced() {
+  clearTimeout(_trSearchTimer);
+  _trSearchTimer = setTimeout(_transferSearch, 300);
+}
+async function _transferSearch() {
+  const q = document.getElementById('tr-query').value.trim();
+  const box = document.getElementById('tr-results');
+  if (q.length < 2) { box.innerHTML = ''; return; }
+  const {data, error} = await db.rpc('user_search_recipient', {p_query: q});
+  if (error) { box.innerHTML = `<div class="empty">Errore: ${_esc(error.message)}</div>`; return; }
+  if (!data || !data.ok) { box.innerHTML = `<div class="empty">${_esc((data&&data.error)||'Errore ricerca')}</div>`; return; }
+  const results = (data.results || []).filter(r => r.card_id !== currentUser.card_id);
+  if (!results.length) { box.innerHTML = '<div class="empty">Nessun socio trovato</div>'; return; }
+  box.innerHTML = results.map(r => {
+    const nome = _esc((r.nome||'') + ' ' + (r.cognome||'')).trim();
+    const cid = _esc(r.card_id);
+    return `<div class="search-result-item" onclick="_transferSelectRecipient('${cid.replace(/'/g,"\\'")}','${nome.replace(/'/g,"\\'")}')">
+      <div style="flex:1;min-width:0">
+        <div style="font-family:monospace;font-size:12px;color:var(--mut)">${cid}</div>
+        <div style="font-weight:600">${nome||'—'}</div>
+      </div>
+      <div style="font-size:18px;color:var(--gold)">›</div>
+    </div>`;
+  }).join('');
+}
+function _transferSelectRecipient(cardId, fullName) {
+  _trRecipient = {card_id: cardId, name: fullName};
+  document.getElementById('tr-rec-name').textContent = fullName || '—';
+  document.getElementById('tr-rec-card').textContent = cardId;
+  document.getElementById('tr-selected').style.display = '';
+  document.getElementById('tr-step1').style.display = 'none';
+  document.getElementById('tr-step2').style.display = '';
+  document.getElementById('tr-results').innerHTML = '';
+  _transferStopScanner();
+  _trStep = 2;
+  _transferValidateAmount();
+  setTimeout(() => document.getElementById('tr-amount').focus(), 60);
+}
+function _transferResetRecipient() {
+  _trRecipient = null;
+  _trStep = 1;
+  document.getElementById('tr-selected').style.display = 'none';
+  document.getElementById('tr-step1').style.display = '';
+  document.getElementById('tr-step2').style.display = 'none';
+  document.getElementById('tr-step3').style.display = 'none';
+  _transferSetNextBtn('Avanti', false);
+}
+function _parseAmount(s) {
+  const n = Number(String(s||'').replace(',', '.'));
+  return isFinite(n) ? n : NaN;
+}
+function _transferValidateAmount() {
+  const amt = _parseAmount(document.getElementById('tr-amount').value);
+  const err = document.getElementById('tr-amount-err');
+  err.style.display = 'none';
+  err.textContent = '';
+  if (isNaN(amt) || amt <= 0) {
+    _transferSetNextBtn('Avanti', false);
+    return false;
+  }
+  if (amt > _userBalance) {
+    err.textContent = 'Credito insufficiente';
+    err.style.display = '';
+    _transferSetNextBtn('Avanti', false);
+    return false;
+  }
+  _transferSetNextBtn('Avanti', true);
+  return true;
+}
+function _transferNext() {
+  if (_trStep === 2) {
+    if (!_transferValidateAmount()) return;
+    const amt = _parseAmount(document.getElementById('tr-amount').value);
+    const note = document.getElementById('tr-note').value.trim().slice(0,100);
+    const rec = _trRecipient;
+    const notePart = note ? `<br>Nota: ${_esc(note)}` : '';
+    document.getElementById('tr-confirm-msg').innerHTML =
+      `Confermi il trasferimento?<br><br><strong>${eur(amt)}</strong> a <strong>${_esc(rec.name)}</strong> (<span style="font-family:monospace">${_esc(rec.card_id)}</span>)${notePart}`;
+    document.getElementById('tr-step2').style.display = 'none';
+    document.getElementById('tr-step3').style.display = '';
+    _transferSetNextBtn('Conferma trasferimento', true);
+    _trStep = 3;
+    setTimeout(() => document.getElementById('tr-pin').focus(), 60);
+  } else if (_trStep === 3) {
+    _transferSubmit();
+  }
+}
+async function _transferSubmit() {
+  const pin = document.getElementById('tr-pin').value.trim();
+  const pinErr = document.getElementById('tr-pin-err');
+  pinErr.style.display = 'none';
+  pinErr.textContent = '';
+  if (!pin) { pinErr.textContent = 'Inserisci il PIN'; pinErr.style.display = ''; return; }
+  const amt = _parseAmount(document.getElementById('tr-amount').value);
+  const note = document.getElementById('tr-note').value.trim().slice(0,100);
+  const rec = _trRecipient;
+  if (!rec) return toast('Seleziona un destinatario');
+  const btn = document.getElementById('tr-next-btn');
+  btn.disabled = true; btn.style.opacity = '.5'; btn.textContent = 'Trasferimento…';
+  const {data, error} = await db.rpc('user_transfer_credit', {
+    p_sender_card: currentUser.card_id,
+    p_sender_pin: pin,
+    p_recipient_card: rec.card_id,
+    p_amount: amt,
+    p_note: note || null
+  });
+  btn.disabled = false; btn.style.opacity = ''; btn.textContent = 'Conferma trasferimento';
+  if (error) { pinErr.textContent = error.message || 'Errore'; pinErr.style.display = ''; return; }
+  if (!data || !data.ok) {
+    const msg = (data && data.error) || 'Errore trasferimento';
+    if (/pin/i.test(msg) && /err/i.test(msg)) {
+      pinErr.textContent = 'PIN errato';
+      pinErr.style.display = '';
+      document.getElementById('tr-pin').value = '';
+      document.getElementById('tr-pin').focus();
+    } else if (/insuff/i.test(msg)) {
+      document.getElementById('tr-step3').style.display = 'none';
+      document.getElementById('tr-step2').style.display = '';
+      _trStep = 2;
+      _transferSetNextBtn('Avanti', false);
+      const amtErr = document.getElementById('tr-amount-err');
+      amtErr.textContent = 'Credito insufficiente';
+      amtErr.style.display = '';
+    } else if (/te stesso/i.test(msg) || /self/i.test(msg)) {
+      toast(msg);
+      _transferResetRecipient();
+    } else {
+      pinErr.textContent = msg;
+      pinErr.style.display = '';
+    }
+    return;
+  }
+  const recName = data.recipient_name || rec.name;
+  closeTransferModal();
+  toast(`✓ Trasferiti ${eur(amt)} a ${recName}`, 'ok');
+  await refreshUser();
+}
+function _transferToggleScanner() {
+  const wrap = document.getElementById('tr-scanner-wrap');
+  if (wrap.style.display === 'none' || !wrap.style.display) {
+    wrap.style.display = 'block';
+    if (typeof Html5Qrcode === 'undefined') { toast('Libreria QR non disponibile'); wrap.style.display = 'none'; return; }
+    _trScanner = new Html5Qrcode('tr-scanner-reader');
+    _trScanner.start(
+      {facingMode: 'environment'},
+      {fps: 10, qrbox: {width: 220, height: 220}},
+      async text => {
+        _transferStopScanner();
+        const cid = String(text||'').trim().toUpperCase();
+        if (!cid) return;
+        if (cid === currentUser.card_id) { toast('Non puoi trasferire credito a te stesso'); return; }
+        const {data} = await db.rpc('user_search_recipient', {p_query: cid});
+        const match = (data && data.ok && (data.results||[]).find(r => (r.card_id||'').toUpperCase() === cid));
+        if (!match) { toast('Tessera non trovata o non valida'); return; }
+        _transferSelectRecipient(match.card_id, ((match.nome||'') + ' ' + (match.cognome||'')).trim());
+      },
+      () => {}
+    ).catch(() => { toast('Fotocamera non disponibile'); _transferStopScanner(); });
+  } else {
+    _transferStopScanner();
+  }
+}
+function _transferStopScanner() {
+  const wrap = document.getElementById('tr-scanner-wrap');
+  if (wrap) wrap.style.display = 'none';
+  if (_trScanner) {
+    _trScanner.stop().catch(()=>{}).finally(() => { try { _trScanner.clear(); } catch(_){} _trScanner = null; });
+  }
+}
+
 // ── USER AREA ─────────────────────────────────────────────────────────
 async function gotoUser() {
   document.getElementById('u-name').textContent = currentUser.display_name;
   document.getElementById('u-card').textContent = currentUser.card_id;
   showScreen('screen-user');
+  const toggle = document.getElementById('u-staff-toggle');
+  if (toggle) toggle.style.display = currentUser.is_staff ? '' : 'none';
   showNav('user');
   navGo('home');
   renderQR(currentUser.card_id);
@@ -299,6 +634,7 @@ function renderQR(cardId) {
 async function refreshUser() {
   const {data, error} = await db.rpc('get_user_state', {p_user_id: currentUser.id});
   if (error || !data.ok) return toast((error&&error.message)||data.error);
+  _userBalance   = Number(data.balance || 0);
   renderBal(data.balance);
   _allTx         = data.transactions   || [];
   _pendingEvents = data.pending_events || [];
@@ -325,8 +661,11 @@ function renderTx(txs) {
   if (!txs.length) { el.innerHTML='<div class="empty">Nessuna transazione</div>'; return; }
   el.innerHTML = txs.map(t=>`
     <div class="tx-row">
-      <span class="tx-ic">${txic(t.type)}</span>
-      <div class="tx-inf"><div class="tx-dsc">${t.description||t.type}</div><div class="tx-dt">${fdt(t.created_at)}</div></div>
+      <span class="tx-ic">${_txIconHtml(t)}</span>
+      <div class="tx-inf">
+        <div class="tx-dsc">${_esc(t.description||t.type)}</div>
+        ${_txMetaHtml(t, 'Operatore')}
+      </div>
       <div class="tx-amt ${t.amount>=0?'pos':'neg-c'}">${t.amount>=0?'+':''}${eur(t.amount)}</div>
     </div>`).join('');
 }
@@ -354,6 +693,30 @@ function _calcPromo(amount) {
   const charged = +(amount - discount).toFixed(2);
   return {code: active.code, discount, charged, original: amount};
 }
+function _userRegRoster(reg) {
+  if (!reg || !reg.registration_id) return '';
+  const u = currentUser || {};
+  const selfName = u.display_name || 'Tu';
+  const selfPaid = reg.payment_status && reg.payment_status !== 'da_saldare';
+  const isFree = !reg.event_price || Number(reg.event_price) === 0;
+  const rows = [];
+  rows.push({ label: `${_esc(selfName)} (tu)`, paid: selfPaid || isFree, ci: !!reg.checked_in });
+  (reg.companions || []).forEach(c => {
+    const p = c.payment_status && c.payment_status !== 'da_saldare';
+    const name = `${_esc(c.nome || '')} ${_esc(c.cognome || '')}`.trim() || 'Accompagnatore';
+    rows.push({ label: name, paid: p || isFree, ci: !!c.checked_in });
+  });
+  const pSz = 1 + (reg.companions || []).length;
+  return `<div style="margin-top:10px;padding:10px;background:var(--bg);border-radius:8px;border:1px solid var(--brd)">
+    <div style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Iscritti: ${pSz}</div>
+    ${rows.map(r => `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--brd);min-height:36px">
+      <span style="flex-shrink:0">👤</span>
+      <div style="flex:1;min-width:0;font-size:14px;overflow-wrap:anywhere;word-break:break-word">${r.label}</div>
+      ${r.ci ? '<span style="font-size:11px;color:var(--grn);flex-shrink:0">✅ Check-in</span>' : ''}
+      <span class="badge ${r.paid?'bg':'by'}" style="flex-shrink:0">${r.paid?'✓ Pagato':'⏳ Da pagare'}</span>
+    </div>`).join('')}
+  </div>`;
+}
 function renderEvents(evs) {
   _eventsCache = evs;
   renderMyRegistrations();
@@ -365,43 +728,77 @@ function renderEvents(evs) {
     const isRegistered = _myEventIds.has(e.id);
     const t = _esc(e.title);
     const tj = e.title.replace(/'/g,"\\'");
+    const hasImg = !!e.image_url;
+    const img = hasImg ? _imgWrap16x9(e.image_url, e.title, '12px 12px 0 0') : '';
+    const cardCls = ['cat-card'];
+    if (hasImg) cardCls.push('has-img');
+    const bodyOpen  = hasImg ? '<div class="cat-body">' : '';
+    const bodyClose = hasImg ? '</div>' : '';
     if (pend) {
-      return `<div class="cat-card ev-card-pending">
+      cardCls.push('ev-card-pending');
+      const canPayCredit = _userBalance >= Number(pend.amount || 0);
+      const hasSumup = !!pend.sumup_link;
+      const reg = _myEventRegs[e.id] || {};
+      const roster = _userRegRoster(reg);
+      const regId = reg.registration_id || pend.registration_id;
+      return `<div class="${cardCls.join(' ')}">
+        ${img}
+        ${bodyOpen}
         <div class="ev-status ev-pending">⏳ Da saldare · <strong>${eur(pend.amount)}</strong></div>
         <div class="cat-title">${t}</div>
         <div class="cat-sub">${e.event_date?fdt(e.event_date):'—'}${e.location?' · '+_esc(e.location):''}</div>
-        <div class="ev-pay-grid">
-          <button class="btn btn-p" onclick="userPayEventCredit('${pend.registration_id}','${tj}',${pend.amount})">💳 Credito</button>
-          ${pend.sumup_link
-            ?`<a href="${pend.sumup_link}" target="_blank" rel="noopener" class="btn btn-g">📱 SumUp</a>`
-            :`<button class="btn btn-g" onclick="toast('Paga con SumUp in cassa: lo staff registrerà il pagamento.','ok')">📱 SumUp</button>`}
+        ${roster}
+        <div class="ev-pay-grid" style="margin-top:10px">
+          ${canPayCredit
+            ? `<button class="btn btn-p" onclick="userPayEventCredit('${pend.registration_id}','${tj}',${pend.amount})">💳 Paga con credito</button>`
+            : ''}
+          ${hasSumup
+            ? `<a href="${pend.sumup_link}" target="_blank" rel="noopener" class="btn btn-g">📱 Paga con SumUp</a>`
+            : ''}
           <button class="btn btn-q" onclick="toast('Recati in cassa con il tuo QR per saldare','ok')">🏠 In cassa</button>
-        </div></div>`;
-    }
-    if (isRegistered) {
-      const reg = _myEventRegs[e.id] || {};
-      const pSz = reg.party_size || 1;
-      const regId = reg.registration_id || '';
-      const companions = reg.companions || [];
-      const compDisp = companions.length
-        ? `<div style="font-size:12px;color:var(--mut);margin-top:4px">👥 ${companions.map(c=>_esc(c.nome)+' '+_esc(c.cognome)).join(', ')}</div>`
-        : '';
-      return `<div class="cat-card ev-card-paid">
-        <div class="ev-status ev-paid">✓ Iscritto${pSz>1?' · 👥 '+pSz+' persone':''}</div>
-        <div class="cat-title">${t}</div>
-        <div class="cat-sub">${e.event_date?fdt(e.event_date):'—'}${e.location?' · '+_esc(e.location):''}</div>
-        ${compDisp}
-        ${regId?`<button class="btn-sm" style="margin-top:8px" onclick="openCompanionsModal('${regId}')">👥 Gestisci gruppo</button>`:''}
+        </div>
+        ${regId ? `<button class="btn-sm w100" style="margin-top:8px" onclick="openCompanionsModal('${regId}')">👥 Gestisci iscrizione (aggiungi persone o paga singolarmente)</button>` : ''}
+        ${hasSumup ? `<div class="sumup-note" style="text-align:left;padding:6px 2px 0">Dopo il pagamento, la cassa confermerà l'iscrizione</div>` : ''}
+        ${!canPayCredit ? `<div class="sumup-note" style="text-align:left;padding:4px 2px 0;color:var(--mut)">Saldo insufficiente per pagare con credito (${eur(_userBalance)} disponibili)</div>` : ''}
+        ${bodyClose}
       </div>`;
     }
-    return `<div class="cat-card">
+    if (isRegistered) {
+      cardCls.push('ev-card-paid');
+      const reg = _myEventRegs[e.id] || {};
+      const pSz = 1 + (reg.companions || []).length;
+      const regId = reg.registration_id || '';
+      const unpaidCount = Number(reg.unpaid_count || 0);
+      const roster = _userRegRoster(reg);
+      const statusHtml = unpaidCount === 0
+        ? `<div class="ev-status ev-paid">✓ Tutti pagati${pSz>1?' · 👥 '+pSz+' persone':''}</div>`
+        : `<div class="ev-status ev-pending">⏳ ${unpaidCount} da pagare · 👥 ${pSz} ${pSz===1?'persona':'persone'}</div>`;
+      return `<div class="${cardCls.join(' ')}">
+        ${img}
+        ${bodyOpen}
+        ${statusHtml}
+        <div class="cat-title">${t}</div>
+        <div class="cat-sub">${e.event_date?fdt(e.event_date):'—'}${e.location?' · '+_esc(e.location):''}</div>
+        ${roster}
+        <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+          ${regId ? `<button class="btn-sm" style="flex:1;min-width:140px;min-height:44px" onclick="openCompanionsModal('${regId}')">➕ Aggiungi persone</button>` : ''}
+          ${regId && unpaidCount > 0 ? `<button class="btn-sm p" style="flex:1;min-width:140px;min-height:44px" onclick="openCompanionsModal('${regId}')">💰 Paga persone (${unpaidCount})</button>` : ''}
+        </div>
+        ${bodyClose}
+      </div>`;
+    }
+    return `<div class="${cardCls.join(' ')}">
+      ${img}
+      ${bodyOpen}
       <div class="cat-title">${t}</div>
       <div class="cat-sub">${e.event_date?fdt(e.event_date):'—'}${e.location?' · '+_esc(e.location):''}</div>
       ${e.max_participants?`<div class="cat-sub">Max ${e.max_participants} posti</div>`:''}
       <div class="cat-foot">
         <div class="cat-price">${isFree?'Gratuito':eur(e.price)}</div>
         <button class="btn-sm p" onclick="openRegEvModal('${e.id}')">${isFree?'🎁 Iscriviti gratis':'Iscriviti'}</button>
-      </div></div>`;
+      </div>
+      ${bodyClose}
+    </div>`;
   }).join('');
 }
 function _gadgetSizes(g) { return (g && g.has_sizes && Array.isArray(g.sizes)) ? g.sizes : []; }
@@ -426,7 +823,7 @@ function renderGadgets(gads) {
     const btnLabel = needSize ? 'Scegli una taglia' : (waitlist ? 'Prenota (attesa ordine)' : '📌 Prenota');
     return `
     <div class="cat-card">
-      ${g.image_url?`<img src="${g.image_url}" class="cat-img" alt="${_esc(g.name)}">` : ''}
+      ${g.image_url ? `<div style="margin-bottom:12px">${_imgWrap16x9(g.image_url, g.name, '12px')}</div>` : ''}
       <div class="cat-title">${_esc(g.name)}</div>
       <div class="cat-sub">${_esc(g.description||'')}</div>
       ${sizes.length ? `<div class="size-pills">${sizes.map(s => `
@@ -487,12 +884,16 @@ async function confirmGqty() {
 function _renderCompModal(mode) {
   // Self row (user mode + evento con prezzo)
   const selfEl = document.getElementById('comp-self-row');
+  const selfReg = (_compMode === 'user') ? (Object.values(_myEventRegs).find(r => r.registration_id === _compRegId) || {}) : {};
+  const selfCheckedIn = !!selfReg.checked_in;
+  const selfName = (currentUser && currentUser.display_name) ? currentUser.display_name : 'Tu';
   if (mode === 'user' && _compEventPrice > 0) {
     const paid = _compSelfStatus && _compSelfStatus !== 'da_saldare';
-    selfEl.innerHTML = `<div style="display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid var(--brd)">
+    selfEl.innerHTML = `<div style="display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid var(--brd);min-height:36px">
       ${!paid ? `<input type="checkbox" id="chk-self" onchange="_updateCompTotal()" style="width:16px;height:16px;flex-shrink:0">` : '<span style="width:16px;flex-shrink:0"></span>'}
-      <div style="flex:1;font-size:14px">Tu</div>
-      <span style="font-size:12px;color:${paid?'var(--grn)':'var(--gold)'}">${paid?'✅ Pagato':'⏳ Da saldare'}</span>
+      <div style="flex:1;min-width:0;font-size:14px">${_esc(selfName)} (tu)</div>
+      ${selfCheckedIn ? '<span style="font-size:11px;color:var(--grn);flex-shrink:0">✅ Check-in</span>' : ''}
+      <span class="badge ${paid?'bg':'by'}" style="flex-shrink:0">${paid?'✓ Pagato':'⏳ Da pagare'}</span>
     </div>`;
     selfEl.style.display = '';
   } else {
@@ -505,11 +906,12 @@ function _renderCompModal(mode) {
   } else if (mode === 'user') {
     listEl.innerHTML = _compCache.map(c => {
       const paid = c.payment_status && c.payment_status !== 'da_saldare';
-      return `<div style="display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid var(--brd)">
+      return `<div style="display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid var(--brd);min-height:36px">
         ${(!paid && _compEventPrice > 0) ? `<input type="checkbox" id="chk-c-${c.id}" onchange="_updateCompTotal()" style="width:16px;height:16px;flex-shrink:0">` : '<span style="width:16px;flex-shrink:0"></span>'}
-        <div style="flex:1;font-size:14px">${_esc(c.nome)} ${_esc(c.cognome)}</div>
-        <span style="font-size:12px;color:${paid?'var(--grn)':'var(--gold)'}">${paid?'✅':'⏳'}</span>
-        <button class="btn-sm" style="color:var(--neg);font-size:11px;padding:2px 6px" onclick="removeCompanion('${c.id}')">×</button>
+        <div style="flex:1;min-width:0;font-size:14px">${_esc(c.nome)} ${_esc(c.cognome)}</div>
+        ${c.checked_in ? '<span style="font-size:11px;color:var(--grn);flex-shrink:0">✅ Check-in</span>' : ''}
+        <span class="badge ${paid?'bg':'by'}" style="flex-shrink:0">${paid?'✓ Pagato':'⏳ Da pagare'}</span>
+        ${!paid ? `<button class="btn-sm" style="color:var(--neg);font-size:11px;padding:2px 6px;flex-shrink:0" title="Rimuovi" onclick="removeCompanion('${c.id}')">×</button>` : ''}
       </div>`;
     }).join('');
   } else {
@@ -532,8 +934,15 @@ function _renderCompModal(mode) {
   // Footer pagamento (user mode)
   const footerEl = document.getElementById('comp-pay-footer');
   if (mode === 'user' && _compEventPrice > 0) {
-    footerEl.style.display = '';
-    _updateCompTotal();
+    const selfUnpaid = !_compSelfStatus || _compSelfStatus === 'da_saldare';
+    const anyCompanionUnpaid = _compCache.some(c => !c.payment_status || c.payment_status === 'da_saldare');
+    if (!selfUnpaid && !anyCompanionUnpaid) {
+      footerEl.style.display = '';
+      footerEl.innerHTML = `<div style="font-size:13px;color:var(--grn);text-align:center;padding:6px 0;font-weight:600">✓ Tutti pagati</div>`;
+    } else {
+      footerEl.style.display = '';
+      _updateCompTotal();
+    }
   } else {
     footerEl.style.display = 'none';
   }
@@ -545,12 +954,26 @@ function _updateCompTotal() {
     .forEach(c => { if (document.getElementById('chk-c-' + c.id)?.checked) count++; });
   const footerEl = document.getElementById('comp-pay-footer');
   if (!footerEl) return;
-  footerEl.innerHTML = count > 0
-    ? `<div style="font-size:13px;margin-bottom:8px">💰 ${count} ${count===1?'persona':'persone'} × ${eur(_compEventPrice)} = <strong>${eur(count * _compEventPrice)}</strong></div>
-       <button class="btn btn-p w100" onclick="userPaySelected()">💳 Paga col credito</button>
-       <div style="font-size:11px;color:var(--mut);text-align:center;margin-top:6px">oppure paga in cassa o SumUp</div>`
-    : `<div style="font-size:12px;color:var(--mut);text-align:center;padding:4px 0">Seleziona chi vuoi pagare</div>
-       <div style="font-size:11px;color:var(--mut);text-align:center;margin-top:4px">oppure paga in cassa o SumUp</div>`;
+  const total = count * _compEventPrice;
+  const canCredit = _userBalance >= total;
+  const sumup = _compSumupLink || '';
+  const sumupBtn = sumup
+    ? `<a href="${sumup}" target="_blank" rel="noopener" class="btn btn-g w100" style="margin-top:6px;text-align:center;text-decoration:none;display:block">📱 Paga con SumUp</a>
+       <div style="font-size:11px;color:var(--mut);margin-top:6px;text-align:center">Dopo il pagamento, la cassa confermerà le persone selezionate</div>`
+    : '';
+  if (count > 0) {
+    const creditBtn = canCredit
+      ? `<button class="btn btn-p w100" onclick="userPaySelected()">💳 Paga con credito</button>`
+      : `<div style="font-size:12px;color:var(--mut);text-align:center;padding:6px 0">Credito insufficiente per pagare (${eur(_userBalance)} disponibili)</div>`;
+    footerEl.innerHTML =
+      `<div style="font-size:13px;margin-bottom:8px">💰 ${count} ${count===1?'persona':'persone'} × ${eur(_compEventPrice)} = <strong>${eur(total)}</strong></div>
+       ${creditBtn}
+       ${sumupBtn}`;
+  } else {
+    footerEl.innerHTML =
+      `<div style="font-size:12px;color:var(--mut);text-align:center;padding:4px 0">Seleziona chi vuoi pagare</div>
+       ${sumupBtn}`;
+  }
 }
 function openCompanionsModal(regId) {
   _compMode = 'user'; _compRegId = regId;
@@ -559,6 +982,7 @@ function openCompanionsModal(regId) {
   _compEventPrice = reg.event_price || 0;
   _compSelfStatus = reg.payment_status || 'da_saldare';
   _compEventTitle = reg.event_title || '';
+  _compSumupLink = reg.event_sumup_link || '';
   document.getElementById('comp-reg-id').value = regId;
   document.getElementById('comp-mode').value = 'user';
   document.getElementById('comp-event-id').value = '';
@@ -644,19 +1068,23 @@ async function userPaySelected() {
     .filter(c => (!c.payment_status || c.payment_status === 'da_saldare') && document.getElementById('chk-c-' + c.id)?.checked)
     .map(c => c.id);
   if (!self_selected && !companion_ids.length) return toast('Seleziona almeno una persona');
-  const {data, error} = await db.rpc('user_pay_event_people', {
-    p_user_id: currentUser.id,
-    p_registration_id: _compRegId,
-    p_targets: {self: self_selected, companion_ids}
+  const count = (self_selected ? 1 : 0) + companion_ids.length;
+  const total = count * _compEventPrice;
+  modalConfirm(`Pagare ${eur(total)} per ${count} ${count===1?'persona':'persone'} con il credito?`, async () => {
+    const {data, error} = await db.rpc('user_pay_event_people', {
+      p_user_id: currentUser.id,
+      p_registration_id: _compRegId,
+      p_targets: {self: self_selected, companion_ids}
+    });
+    if (error||!data||!data.ok) return toast((error&&error.message)||(data&&data.error)||'Errore pagamento');
+    toast(data.message || '✅ Pagamento effettuato!', 'ok');
+    await refreshUser();
+    if (_eventsCache.length) renderEvents(_eventsCache);
+    const reg = Object.values(_myEventRegs).find(r => r.registration_id === _compRegId) || {};
+    _compCache = (reg.companions || []).map(c => ({...c}));
+    _compSelfStatus = reg.payment_status || 'da_saldare';
+    _renderCompModal('user');
   });
-  if (error||!data||!data.ok) return toast((error&&error.message)||(data&&data.error)||'Errore pagamento');
-  toast('✅ Pagamento effettuato!', 'ok');
-  await refreshUser();
-  if (_eventsCache.length) renderEvents(_eventsCache);
-  const reg = Object.values(_myEventRegs).find(r => r.registration_id === _compRegId) || {};
-  _compCache = (reg.companions || []).map(c => ({...c}));
-  _compSelfStatus = reg.payment_status || 'da_saldare';
-  _renderCompModal('user');
 }
 async function staffCompPay(compId, method) {
   const {data, error} = await db.rpc('staff_pay_event_people', {
@@ -843,6 +1271,7 @@ function renderPromos(prs) {
   if (!prs.length) { el.innerHTML='<div class="empty">Nessuna promo attiva</div>'; return; }
   el.innerHTML = prs.map(p=>`
     <div class="promo-row">
+      ${p.image_url ? `<div style="margin-bottom:12px">${_imgWrap16x9(p.image_url, p.code, '12px')}</div>` : ''}
       <div class="promo-code">${p.code}</div>
       <div class="promo-desc">${p.description||''}</div>
       <div class="promo-detail">${p.discount_type==='percent'?p.discount_value+'%':eur(p.discount_value)} di sconto${p.valid_until?' · fino al '+fdt(p.valid_until).split(' ')[0]:''}</div>
@@ -871,19 +1300,26 @@ function renderPendingEvents(evs) {
   const el = document.getElementById('u-pending-events');
   if (!evs || !evs.length) { el.innerHTML = ''; return; }
   el.innerHTML = `<div class="sec-title" style="margin-bottom:8px">Da saldare</div>` +
-    evs.map(e => `
+    evs.map(e => {
+      const canPayCredit = _userBalance >= Number(e.amount || 0);
+      const hasSumup = !!e.sumup_link;
+      return `
     <div class="card ev-card-pending" style="margin-bottom:8px">
       <div class="ev-status ev-pending">⏳ Da saldare · <strong>${eur(e.amount)}</strong></div>
       <div style="font-weight:700;margin:8px 0 2px">${_esc(e.evento)}</div>
       <div style="font-size:12px;color:var(--mut);margin-bottom:12px">${e.event_date?fdt(e.event_date):'—'}</div>
       <div class="ev-pay-grid">
-        <button class="btn btn-p" onclick="userPayEventCredit('${e.registration_id}','${e.evento.replace(/'/g,"\\'")}',${e.amount})">💳 Credito</button>
-        ${e.sumup_link
-          ?`<a href="${e.sumup_link}" target="_blank" rel="noopener" class="btn btn-g">📱 SumUp</a>`
-          :`<button class="btn btn-g" onclick="toast('Paga con SumUp in cassa: lo staff registrerà il pagamento.','ok')">📱 SumUp</button>`}
+        ${canPayCredit
+          ? `<button class="btn btn-p" onclick="userPayEventCredit('${e.registration_id}','${e.evento.replace(/'/g,"\\'")}',${e.amount})">💳 Paga con credito</button>`
+          : ''}
+        ${hasSumup
+          ? `<a href="${e.sumup_link}" target="_blank" rel="noopener" class="btn btn-g">📱 Paga con SumUp</a>`
+          : ''}
         <button class="btn btn-q" onclick="toast('Recati in cassa con il tuo QR per saldare','ok')">🏠 In cassa</button>
       </div>
-    </div>`).join('');
+      ${hasSumup ? `<div class="sumup-note" style="text-align:left;padding:6px 2px 0">Dopo il pagamento, la cassa confermerà l'iscrizione</div>` : ''}
+      ${!canPayCredit ? `<div class="sumup-note" style="text-align:left;padding:4px 2px 0;color:var(--mut)">Saldo insufficiente per pagare con credito (${eur(_userBalance)} disponibili)</div>` : ''}
+    </div>`;}).join('');
 }
 async function userPayEventCredit(regId, eventName, amount) {
   modalConfirm(`Pagare "${eventName}" (${eur(amount)}) con il tuo credito?`, async () => {
@@ -1163,17 +1599,23 @@ function stopAdminScanner() {
   if (_adminScanner) { _adminScanner.stop().catch(()=>{}).finally(() => { _adminScanner.clear(); _adminScanner = null; }); }
 }
 async function adminLookup() {
-  const card = document.getElementById('a-lookup').value.trim().toUpperCase();
-  if (!card) return toast('Inserisci il codice tessera');
-  const {data, error} = await db.rpc('staff_lookup', {p_card_id: card});
-  const el = document.getElementById('a-lookup-result');
-  if (error || !data.ok) { el.style.display='none'; return toast((error&&error.message)||data.error); }
-  el.style.display = 'block';
-  el.innerHTML = `<div class="card card-gold" style="margin-bottom:0">
-    <div class="res-name">${data.user.display_name}</div>
-    <div class="res-sub">${data.user.card_id}</div>
-    <div class="res-bal">${eur(data.user.balance)}</div>
-  </div>`;
+  const raw = document.getElementById('a-lookup').value.trim();
+  if (!raw) return toast('Inserisci codice tessera o nome');
+  try {
+    const cassaTabBtn = document.querySelector('#atabs .tab[data-p="at-cassa"]');
+    if (cassaTabBtn) switchTab(cassaTabBtn, 'atabs');
+    const acLookup = document.getElementById('ac-lookup');
+    if (acLookup) acLookup.value = raw;
+    document.getElementById('a-lookup-result').style.display = 'none';
+    await adminCassaLookup();
+    const target = document.getElementById('ac-result').style.display !== 'none'
+      ? document.getElementById('ac-result')
+      : document.getElementById('ac-sr');
+    if (target) target.scrollIntoView({behavior:'smooth', block:'start'});
+  } catch (e) {
+    console.error('adminLookup', e);
+    toast('Errore lookup: ' + (e.message||e));
+  }
 }
 
 // ── STAFF AREA ────────────────────────────────────────────────────────
@@ -1207,25 +1649,118 @@ function stopScanner() {
 function gotoStaff() {
   document.getElementById('s-name').textContent = currentUser.display_name;
   showScreen('screen-staff');
+  const backToggle = document.getElementById('s-socio-toggle');
+  if (backToggle) backToggle.style.display = currentUser.is_staff ? '' : 'none';
   renderStaffHist();
 }
+function switchToStaffMode() {
+  if (!currentUser || !currentUser.is_staff) return;
+  sessionStorage.setItem('sh_r', 'staff');
+  gotoStaff();
+}
+function switchToSocioMode() {
+  if (!currentUser) return;
+  sessionStorage.setItem('sh_r', 'user');
+  gotoUser();
+  setTimeout(checkUnseenEvents, 400);
+}
+// ── RICERCA SOCI: card_id + nome/cognome ─────────────────────────────
+function _normalizeCardInput(q) {
+  const u = (q||'').trim().toUpperCase();
+  let m;
+  if ((m = u.match(/^SH-?(\d+)$/))) return 'SH-' + m[1].padStart(3, '0');
+  if (/^\d+$/.test(u))              return 'SH-' + u.padStart(3, '0');
+  return null;
+}
+async function _searchUsersByName(q) {
+  const needle = (q||'').trim().toLowerCase();
+  if (!needle) return [];
+  const {data} = await db.rpc('admin_list_users');
+  if (!data) return [];
+  return data
+    .filter(u => u.role === 'user' && u.active !== false && (u.display_name||'').toLowerCase().includes(needle))
+    .sort((a,b) => (a.display_name||'').localeCompare(b.display_name||''));
+}
+function _renderCassaSearch(prefix, matches) {
+  const id = prefix + '-sr';
+  let el = document.getElementById(id);
+  if (!el) {
+    el = document.createElement('div');
+    el.id = id;
+    el.className = 'search-results';
+    const inp = document.getElementById(prefix + '-lookup');
+    const card = inp.closest('.card');
+    card.parentNode.insertBefore(el, card.nextSibling);
+  }
+  if (!matches.length) {
+    el.innerHTML = '<div class="empty" style="padding:14px;text-align:center">Nessun socio trovato</div>';
+  } else {
+    el.innerHTML = matches.map(u => `
+      <div class="search-result-item" onclick="pickSearchResult('${u.card_id}','${prefix}')">
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600;font-size:14px">${_esc(u.display_name)}</div>
+          <div style="font-size:11px;color:var(--mut);font-family:monospace">${u.card_id}</div>
+        </div>
+        <div style="font-size:13px;color:var(--gold);font-weight:600">${eur(u.balance||0)}</div>
+      </div>`).join('');
+  }
+  el.style.display = 'block';
+  const result = document.getElementById(prefix + '-result');
+  if (result) result.style.display = 'none';
+}
+function _hideCassaSearch(prefix) {
+  const el = document.getElementById(prefix + '-sr');
+  if (el) el.style.display = 'none';
+}
+function pickSearchResult(cardId, prefix) {
+  const inp = document.getElementById(prefix + '-lookup');
+  if (inp) inp.value = cardId;
+  _hideCassaSearch(prefix);
+  if (prefix === 's')  return staffLookup();
+  if (prefix === 'ac') return adminCassaLookup();
+}
 async function staffLookup() {
-  const card = document.getElementById('s-lookup').value.trim().toUpperCase();
-  if (!card) return toast('Inserisci il codice tessera');
-  const {data, error} = await db.rpc('staff_lookup', {p_card_id: card});
+  const raw = document.getElementById('s-lookup').value;
+  const cardId = _normalizeCardInput(raw);
+  if (!cardId) {
+    const q = (raw||'').trim();
+    if (!q) return toast('Inserisci codice tessera o nome');
+    const matches = await _searchUsersByName(q);
+    if (matches.length === 1) {
+      document.getElementById('s-lookup').value = matches[0].card_id;
+      _hideCassaSearch('s');
+      return staffLookup();
+    }
+    _renderCassaSearch('s', matches);
+    return;
+  }
+  document.getElementById('s-lookup').value = cardId;
+  _hideCassaSearch('s');
+  const {data, error} = await db.rpc('staff_lookup', {p_card_id: cardId});
   if (error||!data.ok) return toast((error&&error.message)||data.error);
-  staffTarget = data.user;
-  document.getElementById('s-res-name').textContent = data.user.display_name;
-  document.getElementById('s-res-card').textContent = data.user.card_id;
-  document.getElementById('s-res-bal').textContent  = eur(data.user.balance);
+  const u = data.user || data;
+  staffTarget = u;
+  document.getElementById('s-res-name').textContent = u.display_name;
+  document.getElementById('s-res-card').textContent = u.card_id;
+  document.getElementById('s-res-bal').textContent  = eur(u.balance);
   document.getElementById('s-result').style.display = 'block';
+  _renderEventRegs('s', data.event_registrations || u.event_registrations || []);
+  if (Array.isArray(data.transactions) && data.transactions.length) {
+    _staffTxAll = data.transactions;
+    _staffTxTipo = 'all'; _staffTxDays = 0;
+    const wrap = document.getElementById('s-tx-wrap');
+    wrap.querySelectorAll('.fbtn').forEach(b => b.classList.toggle('active', b.dataset.mf==='all'||b.dataset.mf==='0'));
+    wrap.style.display = 'block';
+    _renderStaffTx();
+  } else {
+    loadStaffUserTx(u.card_id);
+  }
   await Promise.all([
-    loadStaffPendingEvents(data.user.card_id),
-    loadStaffCheckin(data.user.card_id),
-    loadStaffUserTx(data.user.card_id)
+    loadStaffPendingEvents(u.card_id),
+    loadStaffCheckin(u.card_id)
   ]);
-  loadStaffGadgetReservationsForUser(data.user.id);
-  loadStaffRegisterEventDropdown(data.user.card_id);
+  loadStaffGadgetReservationsForUser(u.id);
+  loadStaffRegisterEventDropdown(u.card_id);
 }
 async function loadStaffUserTx(cardId) {
   const wrap = document.getElementById('s-tx-wrap');
@@ -1254,15 +1789,71 @@ function _renderStaffTx() {
   });
   const el = document.getElementById('s-tx-list');
   if (!list.length) { el.innerHTML='<div class="empty">Nessuna transazione</div>'; return; }
-  el.innerHTML = list.map(t => `
-    <div class="tx-row">
-      <span class="tx-ic">${txic(t.type)}</span>
+  el.innerHTML = list.map(t => _txRowHtml(t)).join('');
+}
+function _txIconHtml(t) {
+  const type = t.type || '';
+  if (type === 'recharge') return '<span style="color:var(--grn);font-weight:700">↑</span>';
+  if (type === 'refund')   return '<span style="color:var(--gold);font-weight:700">↩</span>';
+  if (type === 'purchase' || type === 'event_fee' || type === 'transfer_out') return '<span style="color:var(--neg);font-weight:700">↓</span>';
+  if (type === 'transfer_in') return '<span style="color:var(--grn);font-weight:700">↑</span>';
+  return '<span>•</span>';
+}
+function _txMetaHtml(t, operatorLabel) {
+  const parts = [fdt(t.created_at)];
+  if (t.category)       parts.push(_capitalize(t.category));
+  if (t.type === 'recharge' && t.payment_method) parts.push(_capitalize(t.payment_method));
+  const main = parts.join(' · ');
+  const op = t.operator_name ? `${operatorLabel || 'Op'}: ${_esc(t.operator_name)}` : (operatorLabel === 'Operatore' ? 'Operatore: Sistema' : '');
+  return `<div class="tx-dt">${main}</div>${op ? `<div class="tx-dt" style="opacity:.7">${op}</div>` : ''}`;
+}
+function _txRowHtml(t) {
+  const balAfter = (t.balance_after != null) ? ` · Saldo dopo: ${eur(t.balance_after)}` : '';
+  return `<div class="tx-row">
+      <span class="tx-ic">${_txIconHtml(t)}</span>
       <div class="tx-inf">
-        <div class="tx-dsc">${t.description||t.type}</div>
-        <div class="tx-dt">${fdt(t.created_at)}${t.operator_name?' · '+t.operator_name:''}</div>
+        <div class="tx-dsc">${_esc(t.description||t.type)}</div>
+        ${_txMetaHtml(t, 'Op')}
+        ${balAfter ? `<div class="tx-dt" style="opacity:.7">${balAfter.replace(/^ · /,'')}</div>` : ''}
       </div>
       <div class="tx-amt ${t.amount>=0?'pos':'neg-c'}">${t.amount>=0?'+':''}${eur(t.amount)}</div>
-    </div>`).join('');
+    </div>`;
+}
+function _capitalize(s) { s = String(s||''); return s ? s.charAt(0).toUpperCase() + s.slice(1) : ''; }
+function _renderEventRegs(prefix, regs) {
+  const wrap = document.getElementById(prefix + '-eventregs-wrap');
+  const list = document.getElementById(prefix + '-eventregs-list');
+  if (!wrap || !list) return;
+  if (!Array.isArray(regs) || !regs.length) { wrap.style.display = 'none'; return; }
+  wrap.style.display = 'block';
+  const paidBadge = (s) => {
+    const map = {paid:'✅ Pagato', pending:'⏳ Da saldare', refunded:'↩️ Rimborsato', free:'🎁 Gratuito'};
+    return `<span class="badge ${s==='paid'?'bg':s==='pending'?'by':'br'}" style="font-size:10px">${map[s]||s||'—'}</span>`;
+  };
+  const checkinBadge = (b) => b ? '<span class="badge bg" style="font-size:10px">✓ Check-in</span>' : '';
+  list.innerHTML = regs.map(r => {
+    const comps = Array.isArray(r.companions) ? r.companions : [];
+    const size = r.party_size || (1 + comps.length);
+    const groupLine = size > 1
+      ? `<div style="font-size:12px;color:var(--mut);margin-top:4px">👥 Gruppo di ${size}</div>`
+      : `<div style="font-size:12px;color:var(--mut);margin-top:4px">Singolo</div>`;
+    const compsList = comps.length ? `
+      <div style="margin-top:8px;padding-left:12px;border-left:2px solid var(--brd)">
+        ${comps.map(c => `<div style="font-size:12px;display:flex;gap:6px;align-items:center;margin-bottom:2px">
+          <span>${_esc(c.nome||'')} ${_esc(c.cognome||'')}</span>
+          ${paidBadge(c.payment_status)}${checkinBadge(c.checked_in)}
+        </div>`).join('')}
+      </div>` : '';
+    return `<div class="card" style="margin-bottom:8px;padding:12px">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <div style="font-weight:700;flex:1">${_esc(r.event_title || r.title || 'Evento')}</div>
+        ${paidBadge(r.payment_status)}${checkinBadge(r.checked_in)}
+      </div>
+      <div style="font-size:12px;color:var(--mut);margin-top:2px">${r.event_date?fdt(r.event_date):''}</div>
+      ${groupLine}
+      ${compsList}
+    </div>`;
+  }).join('');
 }
 async function loadStaffPendingEvents(cardId) {
   const {data, error} = await db.rpc('staff_list_pending_events', {p_card_id: cardId});
@@ -1321,7 +1912,7 @@ async function staffFulfillGadget(resId, method, name, total) {
       ? `✅ Consegnato! Promo ${data.promo_code}: -${eur(data.discount)} → Addebitato ${eur(data.charged)}`
       : `✅ Consegnato! ${eur(data.amount)} (${label})`;
     toast(msg, 'ok');
-    if (staffTarget) { const {data: u} = await db.rpc('staff_lookup', {p_card_id: staffTarget.card_id}); if (u?.ok) { staffTarget = u.user; document.getElementById('s-res-bal').textContent = eur(u.user.balance); } }
+    if (staffTarget) { const {data: r} = await db.rpc('staff_lookup', {p_card_id: staffTarget.card_id}); if (r?.ok) { const nu = r.user || r; staffTarget = nu; document.getElementById('s-res-bal').textContent = eur(nu.balance); } }
     loadStaffGadgetReservationsForUser(staffTarget?.id);
   });
 }
@@ -1400,12 +1991,17 @@ async function staffPayEvent(regId, method, eventName, amount) {
 }
 async function staffRecharge(amount) {
   if (!staffTarget) return toast('Cerca prima una tessera');
-  const {data, error} = await db.rpc('staff_recharge', {p_operator_id:currentUser.id, p_card_id:staffTarget.card_id, p_amount:amount});
-  if (error||!data.ok) return toast((error&&error.message)||data.error);
-  toast(`Ricarica ok! ${eur(staffTarget.balance)} → ${eur(data.new_balance)}`, 'ok');
-  document.getElementById('s-res-bal').textContent = eur(data.new_balance);
-  staffTarget.balance = data.new_balance;
-  addSOp({type:'recharge', card:staffTarget.card_id, name:staffTarget.display_name, amount, nb:data.new_balance});
+  const pmSel = document.getElementById('s-recharge-pm');
+  const pm = (pmSel?.value || 'contanti').toLowerCase();
+  const pmLabel = pmSel?.selectedOptions?.[0]?.text || _capitalize(pm);
+  modalConfirm(`Ricaricare ${eur(amount)} a ${staffTarget.display_name}?\n\nMetodo: ${pmLabel}`, async () => {
+    const {data, error} = await db.rpc('staff_recharge', {p_operator_id:currentUser.id, p_card_id:staffTarget.card_id, p_amount:amount, p_payment_method: pm});
+    if (error||!data.ok) return toast((error&&error.message)||data.error);
+    toast(`Ricarica ok! ${eur(staffTarget.balance)} → ${eur(data.new_balance)}`, 'ok');
+    document.getElementById('s-res-bal').textContent = eur(data.new_balance);
+    staffTarget.balance = data.new_balance;
+    addSOp({type:'recharge', card:staffTarget.card_id, name:staffTarget.display_name, amount, nb:data.new_balance});
+  });
 }
 async function staffRechargeCustom() {
   const v = parseFloat(document.getElementById('s-custom').value);
@@ -1416,14 +2012,17 @@ async function staffRechargeCustom() {
 async function staffCharge() {
   if (!staffTarget) return toast('Cerca prima una tessera');
   const v    = parseFloat(document.getElementById('s-charge-amt').value);
-  const desc = document.getElementById('s-charge-desc').value.trim()||'Addebito';
+  const cat  = (document.getElementById('s-charge-cat')?.value || 'consumazione').toLowerCase();
+  const note = document.getElementById('s-charge-desc').value.trim();
+  const catLabel = document.getElementById('s-charge-cat')?.selectedOptions?.[0]?.text || cat;
+  const desc = note || catLabel;
   if (!v||v<=0) return toast('Importo non valido');
   const {data: pv} = await db.rpc('staff_preview_charge', {p_operator_id: currentUser.id, p_card_id: staffTarget.card_id, p_amount: v});
   const promoLine = (pv && pv.promo_code)
     ? `\n\n⚡ Promo [${pv.promo_code}] attiva: -${eur(pv.promo_discount)}\nImporto originale: ${eur(v)} → Addebito finale: ${eur(pv.final_amount)} (sconto ${eur(pv.promo_discount)})`
     : '';
-  modalConfirm(`Addebitare ${eur(v)} a ${staffTarget.display_name}?${promoLine}`, async () => {
-    const {data, error} = await db.rpc('staff_charge', {p_operator_id:currentUser.id, p_card_id:staffTarget.card_id, p_amount:v, p_description:desc});
+  modalConfirm(`Addebitare ${eur(v)} a ${staffTarget.display_name}?\n\nCategoria: ${catLabel}${promoLine}`, async () => {
+    const {data, error} = await db.rpc('staff_charge', {p_operator_id:currentUser.id, p_card_id:staffTarget.card_id, p_amount:v, p_description:desc, p_category:cat});
     if (error||!data.ok) return toast((error&&error.message)||data.error);
     if (data.promo_code) {
       toast(`Promo ${data.promo_code}! Originale: ${eur(data.original_amount)} → Sconto: -${eur(data.discount)} → Addebitato: ${eur(data.charged)}`, 'ok');
@@ -1433,6 +2032,7 @@ async function staffCharge() {
     document.getElementById('s-res-bal').textContent = eur(data.new_balance);
     staffTarget.balance = data.new_balance;
     document.getElementById('s-charge-amt').value = '';
+    document.getElementById('s-charge-desc').value = '';
     addSOp({type:'charge', card:staffTarget.card_id, name:staffTarget.display_name, amount:-v, nb:data.new_balance, desc});
   });
 }
@@ -1574,22 +2174,45 @@ function stopAcScanner() {
   if (_acScanner) { _acScanner.stop().catch(()=>{}).finally(()=>{ _acScanner.clear(); _acScanner=null; }); }
 }
 async function adminCassaLookup() {
-  const card = document.getElementById('ac-lookup').value.trim().toUpperCase();
-  if (!card) return toast('Inserisci il codice tessera');
-  const {data, error} = await db.rpc('staff_lookup', {p_card_id: card});
+  const raw = document.getElementById('ac-lookup').value;
+  const cardId = _normalizeCardInput(raw);
+  if (!cardId) {
+    const q = (raw||'').trim();
+    if (!q) return toast('Inserisci codice tessera o nome');
+    const matches = await _searchUsersByName(q);
+    if (matches.length === 1) {
+      document.getElementById('ac-lookup').value = matches[0].card_id;
+      _hideCassaSearch('ac');
+      return adminCassaLookup();
+    }
+    _renderCassaSearch('ac', matches);
+    return;
+  }
+  document.getElementById('ac-lookup').value = cardId;
+  _hideCassaSearch('ac');
+  const {data, error} = await db.rpc('staff_lookup', {p_card_id: cardId});
   if (error||!data.ok) return toast((error&&error.message)||data.error);
-  staffTarget = data.user;
-  document.getElementById('ac-res-name').textContent = data.user.display_name;
-  document.getElementById('ac-res-card').textContent = data.user.card_id;
-  document.getElementById('ac-res-bal').textContent  = eur(data.user.balance);
+  const u = data.user || data;
+  staffTarget = u;
+  document.getElementById('ac-res-name').textContent = u.display_name;
+  document.getElementById('ac-res-card').textContent = u.card_id;
+  document.getElementById('ac-res-bal').textContent  = eur(u.balance);
   document.getElementById('ac-result').style.display = 'block';
+  _renderEventRegs('ac', data.event_registrations || u.event_registrations || []);
+  if (Array.isArray(data.transactions) && data.transactions.length) {
+    const wrap = document.getElementById('ac-tx-wrap');
+    const list = document.getElementById('ac-tx-list');
+    wrap.style.display = 'block';
+    list.innerHTML = data.transactions.map(t => _txRowHtml(t)).join('');
+  } else {
+    loadAcUserTx(u.card_id);
+  }
   await Promise.all([
-    loadAcPendingEvents(data.user.card_id),
-    loadAcCheckin(data.user.card_id),
-    loadAcUserTx(data.user.card_id)
+    loadAcPendingEvents(u.card_id),
+    loadAcCheckin(u.card_id)
   ]);
-  loadAcGadgetReservationsForUser(data.user.id);
-  loadAcRegisterEventDropdown(data.user.card_id);
+  loadAcGadgetReservationsForUser(u.id);
+  loadAcRegisterEventDropdown(u.card_id);
 }
 async function loadAcPendingEvents(cardId) {
   const wrap = document.getElementById('ac-pending-wrap');
@@ -1642,7 +2265,7 @@ async function acFulfillGadget(resId, method, name, total) {
       ? `✅ Consegnato! Promo ${data.promo_code}: -${eur(data.discount)} → ${eur(data.charged)}`
       : `✅ Consegnato! ${eur(data.amount)} (${label})`;
     toast(msg, 'ok');
-    if (staffTarget) { const {data: u} = await db.rpc('staff_lookup', {p_card_id: staffTarget.card_id}); if (u?.ok) { staffTarget = u.user; document.getElementById('ac-res-bal').textContent = eur(u.user.balance); } }
+    if (staffTarget) { const {data: r} = await db.rpc('staff_lookup', {p_card_id: staffTarget.card_id}); if (r?.ok) { const nu = r.user || r; staffTarget = nu; document.getElementById('ac-res-bal').textContent = eur(nu.balance); } }
     loadAcGadgetReservationsForUser(staffTarget?.id);
   });
 }
@@ -1700,23 +2323,25 @@ async function loadAcUserTx(cardId) {
   const {data, error} = await db.rpc('staff_get_user_transactions', {p_operator_id:currentUser.id, p_card_id:cardId});
   if (error || !data || !data.ok || !data.transactions.length) { wrap.style.display='none'; return; }
   wrap.style.display = 'block';
-  list.innerHTML = data.transactions.map(t => `
-    <div class="tx-row">
-      <span class="tx-ic">${txic(t.type)}</span>
-      <div class="tx-inf">
-        <div class="tx-dsc">${t.description||t.type}</div>
-        <div class="tx-dt">${fdt(t.created_at)}${t.operator_name?' · '+t.operator_name:''}</div>
-      </div>
-      <div class="tx-amt ${t.amount>=0?'pos':'neg-c'}">${t.amount>=0?'+':''}${eur(t.amount)}</div>
-    </div>`).join('');
+  list.innerHTML = data.transactions.map(t => _txRowHtml(t)).join('');
 }
 async function adminCassaRecharge(amount) {
   if (!staffTarget) return toast('Cerca prima una tessera');
-  const {data, error} = await db.rpc('staff_recharge', {p_operator_id:currentUser.id, p_card_id:staffTarget.card_id, p_amount:amount});
-  if (error||!data.ok) return toast((error&&error.message)||data.error);
-  toast(`Ricarica ok! ${eur(staffTarget.balance)} → ${eur(data.new_balance)}`, 'ok');
-  staffTarget.balance = data.new_balance;
-  document.getElementById('ac-res-bal').textContent = eur(data.new_balance);
+  const pmSel = document.getElementById('ac-recharge-pm');
+  const pm = (pmSel?.value || 'contanti').toLowerCase();
+  const pmLabel = pmSel?.selectedOptions?.[0]?.text || _capitalize(pm);
+  modalConfirm(`Ricaricare ${eur(amount)} a ${staffTarget.display_name}?\n\nMetodo: ${pmLabel}`, async () => {
+    try {
+      const {data, error} = await db.rpc('admin_recharge', {p_admin_id: currentUser.id, p_card_id: staffTarget.card_id, p_amount: amount, p_description: 'Ricarica admin', p_payment_method: pm});
+      if (error||!data.ok) { console.error('admin_recharge', error, data); return toast((error&&error.message)||(data&&data.error)||'Errore ricarica'); }
+      toast(`Ricarica ok! ${eur(staffTarget.balance)} → ${eur(data.new_balance)}`, 'ok');
+      staffTarget.balance = data.new_balance;
+      document.getElementById('ac-res-bal').textContent = eur(data.new_balance);
+    } catch (e) {
+      console.error('adminCassaRecharge', e);
+      toast('Errore ricarica: ' + (e.message||e));
+    }
+  });
 }
 async function adminCassaRechargeCustom() {
   const v = parseFloat(document.getElementById('ac-custom').value);
@@ -1727,19 +2352,26 @@ async function adminCassaRechargeCustom() {
 async function adminCassaCharge() {
   if (!staffTarget) return toast('Cerca prima una tessera');
   const v    = parseFloat(document.getElementById('ac-charge-amt').value);
-  const desc = document.getElementById('ac-charge-desc').value.trim()||'Addebito';
+  const cat  = (document.getElementById('ac-charge-cat')?.value || 'consumazione').toLowerCase();
+  const note = document.getElementById('ac-charge-desc').value.trim();
+  const catLabel = document.getElementById('ac-charge-cat')?.selectedOptions?.[0]?.text || cat;
+  const desc = note || catLabel;
   if (!v||v<=0) return toast('Importo non valido');
   const {data: pv} = await db.rpc('staff_preview_charge', {p_operator_id: currentUser.id, p_card_id: staffTarget.card_id, p_amount: v});
   const promoLine = (pv && pv.promo_code)
     ? `\n\n⚡ Promo [${pv.promo_code}] attiva: -${eur(pv.promo_discount)}\nImporto originale: ${eur(v)} → Addebito finale: ${eur(pv.final_amount)} (sconto ${eur(pv.promo_discount)})`
     : '';
-  modalConfirm(`Addebitare ${eur(v)} a ${staffTarget.display_name}?${promoLine}`, async () => {
-    const {data, error} = await db.rpc('staff_charge', {p_operator_id:currentUser.id, p_card_id:staffTarget.card_id, p_amount:v, p_description:desc});
-    if (error||!data.ok) return toast((error&&error.message)||data.error);
-    toast(`Addebito ok! ${eur(data.old_balance)} → ${eur(data.new_balance)}`, 'ok');
+  modalConfirm(`Addebitare ${eur(v)} a ${staffTarget.display_name}?\n\nCategoria: ${catLabel}${promoLine}`, async () => {
+    const {data, error} = await db.rpc('admin_charge', {p_admin_id: currentUser.id, p_card_id: staffTarget.card_id, p_amount: v, p_description: desc, p_category: cat});
+    if (error||!data.ok) {
+      if (data?.error === 'insufficient_balance') return toast(`Saldo insufficiente (${eur(data.balance)})`);
+      return toast((error&&error.message)||data.error);
+    }
+    toast(`Addebito ok! ${eur(staffTarget.balance)} → ${eur(data.new_balance)}`, 'ok');
     staffTarget.balance = data.new_balance;
     document.getElementById('ac-res-bal').textContent = eur(data.new_balance);
     document.getElementById('ac-charge-amt').value = '';
+    document.getElementById('ac-charge-desc').value = '';
   });
 }
 async function adminCassaPayEvent(regId, method, eventName, amount) {
@@ -1825,28 +2457,127 @@ async function loadDash() {
     </div>`).join('');
 }
 async function loadAUsers() {
-  const {data} = await db.rpc('admin_list_users');
+  const [{data}, {data: incomplete}] = await Promise.all([
+    db.rpc('admin_list_users'),
+    db.rpc('admin_list_incomplete_users', {p_admin_id: currentUser.id})
+  ]);
   if (!data) return;
   allAdminUsers = data;
-  renderAUsers('all');
+  _incompleteUsersMap = {};
+  if (Array.isArray(incomplete)) {
+    incomplete.forEach(u => { _incompleteUsersMap[u.card_id] = u; });
+  }
+  _updateAUsersCounts();
+  renderAUsers(_adminUsersRole);
+}
+function _updateAUsersCounts() {
+  const all = allAdminUsers || [];
+  const counts = {
+    all:   all.length,
+    user:  all.filter(u => u.role === 'user' && !u.is_staff).length,
+    staff: all.filter(u => u.is_staff === true).length,
+    admin: all.filter(u => u.role === 'admin').length
+  };
+  document.querySelectorAll('#a-filter .fbtn-cnt').forEach(el => {
+    const k = el.dataset.cnt;
+    el.textContent = counts[k] != null ? counts[k] : 0;
+  });
+}
+function _onAdminUsersSearch(val) {
+  _adminUsersSearch = (val || '').toLowerCase().trim();
+  renderAUsers(_adminUsersRole);
+}
+function _setAdminUsersSort(key) {
+  if (_adminUsersSort.key === key) {
+    _adminUsersSort.dir = _adminUsersSort.dir === 'asc' ? 'desc' : 'asc';
+  } else {
+    _adminUsersSort = {key, dir: 'asc'};
+  }
+  renderAUsers(_adminUsersRole);
 }
 function renderAUsers(role) {
   const el = document.getElementById('a-users-list');
-  const us = role==='all' ? allAdminUsers : allAdminUsers.filter(u=>u.role===role);
-  if (!us.length) { el.innerHTML='<div class="empty">Nessun utente</div>'; return; }
-  el.innerHTML = `<div class="tbl-wrap"><table><thead><tr><th>Tessera</th><th>Nome</th><th>Ruolo</th><th>Saldo</th><th>Stato</th><th></th></tr></thead><tbody>`
-    + us.map(u=>`<tr>
+  let us = role==='all' ? allAdminUsers.slice()
+    : role==='staff' ? allAdminUsers.filter(u => u.is_staff === true)
+    : role==='user'  ? allAdminUsers.filter(u => u.role === 'user' && !u.is_staff)
+    : allAdminUsers.filter(u => u.role === role);
+  const q = _adminUsersSearch;
+  if (q) {
+    us = us.filter(u =>
+      (u.display_name || '').toLowerCase().includes(q) ||
+      (u.card_id      || '').toLowerCase().includes(q) ||
+      ((u.nome || '') + ' ' + (u.cognome || '')).toLowerCase().includes(q) ||
+      (u.email        || '').toLowerCase().includes(q));
+  }
+  const s = _adminUsersSort;
+  us.sort((a, b) => {
+    let va = a[s.key], vb = b[s.key];
+    if (s.key === 'balance') { va = Number(va || 0); vb = Number(vb || 0); return s.dir === 'asc' ? va - vb : vb - va; }
+    va = (va || '').toString().toLowerCase();
+    vb = (vb || '').toString().toLowerCase();
+    if (va < vb) return s.dir === 'asc' ? -1 : 1;
+    if (va > vb) return s.dir === 'asc' ?  1 : -1;
+    return 0;
+  });
+  if (!us.length) {
+    el.innerHTML = q ? '<div class="empty">Nessun risultato per la ricerca</div>' : '<div class="empty">Nessun utente</div>';
+    return;
+  }
+  const arr = (col) => `<span class="sort-arr${s.key===col?' on':''}">${s.key===col ? (s.dir==='asc'?'↑':'↓') : '↕'}</span>`;
+  el.innerHTML = `<div class="tbl-wrap"><table><thead><tr>
+    <th class="sort-th" onclick="_setAdminUsersSort('card_id')">Tessera ${arr('card_id')}</th>
+    <th class="sort-th" onclick="_setAdminUsersSort('display_name')">Nome ${arr('display_name')}</th>
+    <th>Ruolo</th>
+    <th class="sort-th" onclick="_setAdminUsersSort('balance')">Saldo ${arr('balance')}</th>
+    <th>Stato</th>
+    <th></th></tr></thead><tbody>`
+    + us.map(u=>{
+      const inc = _incompleteUsersMap[u.card_id];
+      let badge = '';
+      if (inc) {
+        const label = inc.missing_cf ? '⚠️ Da completare' : '📋 Privacy mancante';
+        const title = inc.missing_cf ? 'Codice fiscale mancante' : 'Consenso privacy non registrato';
+        badge = `<span title="${title}" style="display:inline-block;margin-left:6px;padding:2px 6px;border-radius:6px;font-size:10px;font-weight:600;background:rgba(255,183,3,.18);color:#e6a800;border:1px solid rgba(255,183,3,.35)">${label}</span>`;
+      }
+      return `<tr>
         <td class="mono">${u.card_id}</td>
         <td>
-          <div>${u.display_name}</div>
+          <div>${u.display_name}${badge}</div>
           ${(u.email||u.nome)?`<div style="font-size:11px;color:var(--mut)">${[u.nome&&u.cognome?u.nome+' '+u.cognome:'',u.email].filter(Boolean).join(' · ')}</div>`:''}
         </td>
-        <td><span class="role-badge r${u.role[0]}">${u.role}</span></td>
+        <td style="white-space:nowrap">
+          <span class="role-badge r${u.role[0]}">${u.role}</span>${u.is_staff ? ' <span class="role-badge rs" title="Puo\' operare come staff">staff</span>' : ''}
+        </td>
         <td class="${u.balance>0?'pos':''}">${eur(u.balance)}</td>
         <td style="font-size:11px;color:${u.active?'var(--grn)':'var(--neg)'}">${u.active?'attivo':'disattivo'}</td>
-        <td><button class="btn-sm" onclick="openPinModal('${u.card_id}')">🔑</button></td>
-      </tr>`).join('')
+        <td style="white-space:nowrap">
+          <button class="btn-sm" title="Reset PIN" onclick="openPinModal('${u.card_id}')">🔑</button>
+          <button class="btn-sm" title="Modifica" onclick="openEditUser('${u.id}')">✏️</button>
+          ${u.is_staff ? `<button class="btn-sm" title="Rimuovi da staff" onclick="demoteFromStaff('${u.id}','${_esc(u.card_id)}','${_esc((u.display_name||'').replace(/'/g,"\\'"))}')">⬇️</button>` : ''}
+          <button class="btn-sm" title="Elimina" style="color:var(--neg)" onclick="adminDeleteUser('${u.id}','${_esc(u.card_id)}','${_esc((u.display_name||'').replace(/'/g,"\\'"))}')">🗑️</button>
+        </td>
+      </tr>`;
+    }).join('')
     + '</tbody></table></div>';
+}
+async function openNewUserForm() {
+  const form = document.getElementById('nu-form');
+  if (form.style.display === 'block') { form.style.display = 'none'; return; }
+  try {
+    let users = allAdminUsers;
+    if (!users || !users.length) {
+      const {data} = await db.rpc('admin_list_users');
+      users = data || [];
+    }
+    let max = 0;
+    users.forEach(u => {
+      const m = (u.card_id||'').match(/^SH-(\d+)$/i);
+      if (m) { const n = parseInt(m[1], 10); if (n > max) max = n; }
+    });
+    document.getElementById('nu-card').value = 'SH-' + String(max + 1).padStart(3, '0');
+  } catch (e) { console.error('openNewUserForm', e); }
+  form.style.display = 'block';
+  document.getElementById('nu-name').focus();
 }
 async function createUser() {
   const card = document.getElementById('nu-card').value.trim().toUpperCase();
@@ -1895,14 +2626,23 @@ function _renderAdminTx() {
   });
   const el = document.getElementById('a-tx-list');
   if (!list.length) { el.innerHTML='<div class="empty">Nessuna transazione</div>'; return; }
-  el.innerHTML = `<div class="tbl-wrap"><table><thead><tr><th>Data</th><th>Tessera</th><th>Tipo</th><th>Importo</th><th>Operatore</th></tr></thead><tbody>`
-    + list.map(t=>`<tr>
+  el.innerHTML = `<div class="tbl-wrap"><table><thead><tr><th>Data</th><th>Tessera</th><th>Tipo</th><th>Descrizione</th><th>Importo</th><th>Operatore</th><th></th></tr></thead><tbody>`
+    + list.map(t=>{
+      const canVoid = t.type !== 'refund';
+      const dscRaw = (t.description||'').replace(/'/g,"\\'");
+      return `<tr>
         <td class="dt-cell">${fdt(t.created_at)}</td>
         <td class="mono">${t.card_id}</td>
         <td>${txic(t.type)} ${t.type}</td>
+        <td style="font-size:12px;color:var(--mut);max-width:220px;white-space:normal;word-break:break-word">${_esc(t.description||'')}</td>
         <td class="${t.amount>=0?'pos':'neg-c'}">${t.amount>=0?'+':''}${eur(t.amount)}</td>
         <td>${t.operator_name||'—'}</td>
-      </tr>`).join('')
+        <td style="white-space:nowrap">
+          <button class="btn-sm" title="Modifica descrizione" onclick="adminEditTxDesc('${t.id}','${dscRaw}')">✏️</button>
+          ${canVoid ? `<button class="btn-sm" title="Storna" style="color:var(--neg)" onclick="adminVoidTx('${t.id}',${t.amount},'${dscRaw}','${_esc(t.card_id)}')">↩️</button>` : ''}
+        </td>
+      </tr>`;
+    }).join('')
     + '</tbody></table></div>';
 }
 async function loadAGest() {
@@ -1938,9 +2678,11 @@ async function loadAGest() {
           <input type="checkbox" id="fe-public" style="width:18px;height:18px;accent-color:var(--gold)">
           <label for="fe-public">🌐 Apri iscrizioni esterne (link pubblico)</label>
         </div>
+        <div class="fg"><label>Immagine (opz.)</label><div id="fe-img-mount"></div><input type="hidden" id="fe-img"></div>
         <button class="btn btn-p w100" data-action="create-event">Crea Evento</button>
       </div>
       <div id="gs-ev-list"></div>`;
+    mountImageUploader('fe-img-mount', 'fe-img', 'events');
   }
   const evList  = document.getElementById('gs-ev-list');
   const gadList = document.getElementById('gs-gad-list');
@@ -1965,6 +2707,7 @@ async function loadAGest() {
           <span style="font-size:11px;color:var(--mut)">⏳ carico…</span>
         </div>
         <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn-sm" onclick="openEditEvent('${e.id}')">✏️ Modifica</button>
           <button class="btn-sm" onclick="adminToggleVisibility('${e.id}',${e.visible!==false})">${e.visible===false?'🔓 Mostra':'🔒 Nascondi'}</button>
           <button class="btn-sm" onclick="toggleEventGuests('${e.id}','${e.title.replace(/'/g,"\\'")}',this)">👥 Iscritti</button>
           <button class="btn-sm" onclick="exportEventCSV('${e.id}','${e.title.replace(/'/g,"\\'")}')">📥 CSV</button>
@@ -1976,6 +2719,8 @@ async function loadAGest() {
   }
   const cat = catData||{};
   const gads = cat.gadgets||[];
+  _gadgetsAdminCache = {}; gads.forEach(g => _gadgetsAdminCache[g.id] = g);
+  _eventsAdminCache = {}; (evs||[]).forEach(e => _eventsAdminCache[e.id] = e);
   _adminGadgets = gads;
   _adminEvents  = cat.events || evs || [];
   const gadSummary = (gadSum && gadSum.gadgets) ? gadSum.gadgets : [];
@@ -2015,6 +2760,7 @@ async function loadAGest() {
     el.dataset.pren = JSON.stringify(g.prenotazioni || []);
   });
   const prs = cat.promos||[];
+  _promosAdminCache = {}; prs.forEach(p => _promosAdminCache[p.id] = p);
   proList.innerHTML = prs.length
     ? prs.map(p => {
         const sconto = p.discount_type==='percent' ? p.discount_value+'%' : eur(p.discount_value);
@@ -2149,6 +2895,8 @@ async function adminCreateEvent() {
     if (!title) { modalInfo('⚠️ Inserisci il titolo'); return; }
     if (pub && !slug) slug = _slugify(title);
 
+    const imgUrl = (document.getElementById('fe-img')?.value || '').trim();
+
     const { data, error } = await db.rpc('admin_create_event', {
       p_admin_id:            currentUser.id,
       p_title:               title,
@@ -2167,9 +2915,14 @@ async function adminCreateEvent() {
     if (error) throw new Error('Errore RPC: ' + error.message);
     if (!data || data.ok === false) throw new Error('RPC ko: ' + (data?.error || JSON.stringify(data)));
 
+    if (imgUrl && data.event_id) {
+      await db.rpc('admin_update_event', {p_admin_id: currentUser.id, p_event_id: data.event_id, p_image_url: imgUrl});
+    }
+
     // Reset form
-    ['fe-title','fe-desc','fe-date','fe-loc','fe-maxp','fe-price','fe-sumup','fe-slug']
+    ['fe-title','fe-desc','fe-date','fe-loc','fe-maxp','fe-price','fe-sumup','fe-slug','fe-img']
       .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+    resetImageUploader('fe-img-mount');
     if (pubEl) pubEl.checked = false;
     const fEl = document.getElementById('fe-form');
     if (fEl) fEl.style.display = 'none';
@@ -2199,6 +2952,7 @@ async function createGadget() {
   if (error||!data.ok) return toast((error&&error.message)||data.error);
   toast('Gadget creato!', 'ok');
   ['fg-name','fg-desc','fg-price','fg-stock','fg-img'].forEach(id=>document.getElementById(id).value='');
+  resetImageUploader('fg-img-mount');
   document.getElementById('fg-form').style.display='none';
   loadAGest();
 }
@@ -2236,14 +2990,16 @@ function _renderSizeRows(sizes) {
            value="${map[sz] != null ? map[sz] : ''}" placeholder="—" style="padding:6px 8px;font-size:14px"></td>
     </tr>`).join('');
 }
-function openEditGadget(id) {
-  const g = _adminGadgets.find(x => x.id === id);
-  if (!g) return toast('Gadget non trovato');
-  document.getElementById('gae-id').value    = g.id;
-  document.getElementById('gae-name').value  = g.name || '';
-  document.getElementById('gae-price').value = g.price != null ? g.price : '';
-  document.getElementById('gae-desc').value  = g.description || '';
-  document.getElementById('gae-stock').value = g.stock != null ? g.stock : 0;
+function openEditGadget(id, name, price, desc, stock) {
+  const g = (typeof _gadgetsAdminCache !== 'undefined' && _gadgetsAdminCache[id]) || {};
+  document.getElementById('gae-id').value    = id;
+  document.getElementById('gae-name').value  = name  != null ? name  : (g.name || '');
+  document.getElementById('gae-price').value = price != null ? price : (g.price != null ? g.price : '');
+  document.getElementById('gae-desc').value  = desc  != null ? desc  : (g.description || '');
+  document.getElementById('gae-stock').value = stock != null ? stock : (g.stock != null ? g.stock : 0);
+  const curImg = g.image_url || '';
+  document.getElementById('gae-img').value = curImg;
+  setImageUploaderPreview('gae-img-mount', curImg);
   document.getElementById('gae-has-sizes').checked = !!g.has_sizes;
   _renderSizeRows(g.sizes);
   toggleGadgetSizes();
@@ -2257,12 +3013,18 @@ async function saveEditGadget() {
   const desc  = document.getElementById('gae-desc').value.trim();
   const stock = parseInt(document.getElementById('gae-stock').value)||0;
   const hasSizes = document.getElementById('gae-has-sizes').checked;
+  const img   = document.getElementById('gae-img').value.trim();
   if (!name || !price) return toast('Nome e prezzo obbligatori');
   const sizes = hasSizes
     ? Array.from(document.querySelectorAll('.gae-size-in')).map(i => ({size: i.dataset.size, stock: parseInt(i.value) || 0}))
     : [];
   const {data, error} = await db.rpc('admin_update_gadget', {p_admin_id: currentUser.id, p_gadget_id: id, p_name: name, p_price: price, p_description: desc||null, p_stock: stock});
   if (error||!data||!data.ok) return toast((error&&error.message)||(data&&data.error)||'Errore');
+  const cachedImg = ((typeof _gadgetsAdminCache !== 'undefined' && _gadgetsAdminCache[id]) || {}).image_url || '';
+  if (img !== cachedImg) {
+    const {data: imgRes, error: imgErr} = await db.rpc('admin_set_gadget_image', {p_admin_id: currentUser.id, p_gadget_id: id, p_image_url: img || null});
+    if (imgErr || !imgRes || !imgRes.ok) { toast('Salvato ma immagine non aggiornata'); }
+  }
   const {data: sd, error: se} = await db.rpc('admin_set_gadget_sizes', {p_admin_id: currentUser.id, p_gadget_id: id, p_sizes: sizes});
   if (se || (sd && sd.ok === false)) return toast((se&&se.message)||(sd&&sd.error)||'Errore salvataggio taglie');
   toast('Gadget aggiornato!', 'ok');
@@ -2334,6 +3096,7 @@ async function loadPublicEvent(slug) {
     ? `<div style="margin-top:8px"><span class="badge ${_publicEvent.spots_left>0?'bg':'br'}">${_publicEvent.spots_left>0?_publicEvent.spots_left+' posti disponibili':'Sold out'}</span></div>`
     : '';
   document.getElementById('ev-info').innerHTML = `
+    ${_publicEvent.image_url ? `<div style="margin-bottom:12px">${_imgWrap16x9(_publicEvent.image_url, _publicEvent.title, '12px')}</div>` : ''}
     <div style="font-size:15px;font-weight:700;margin-bottom:6px">${_publicEvent.title}</div>
     ${_publicEvent.description?`<div style="font-size:13px;color:var(--mut);margin-bottom:8px">${_publicEvent.description}</div>`:''}
     <div style="font-size:13px;margin-bottom:3px">📅 ${dateStr}</div>
@@ -2414,7 +3177,17 @@ function showLogin() {
   document.getElementById('register-view').style.display = 'none';
   document.getElementById('login-view').style.display = '';
 }
+function _toggleClaimMode(isClaim) {
+  document.getElementById('r-card-wrap').style.display = isClaim ? 'block' : 'none';
+  const btn = document.getElementById('reg-btn');
+  if (btn) btn.textContent = isClaim ? 'Attiva la mia tessera' : 'Crea la mia card';
+}
+function _isClaimMode() {
+  const el = document.querySelector('input[name="r-mode"]:checked');
+  return el && el.value === 'claim';
+}
 async function doRegister() {
+  const claim   = _isClaimMode();
   const nome    = document.getElementById('r-nome').value.trim();
   const cognome = document.getElementById('r-cognome').value.trim();
   const cf      = document.getElementById('r-cf').value.trim();
@@ -2426,29 +3199,59 @@ async function doRegister() {
   const gdpr2   = document.getElementById('r-gdpr2').checked;
   const gdpr3   = document.getElementById('r-gdpr3').checked;
   const gdpr4   = document.getElementById('r-gdpr4').checked;
+  const cardIn  = document.getElementById('r-card').value.trim().toUpperCase();
 
+  if (claim && !cardIn) return toast('Inserisci il codice tessera (es. SH-015)');
   if (!nome || !cognome || !cf || !email) return toast('Compila tutti i campi obbligatori (*)');
   if (pin !== pin2) return toast('I PIN non coincidono');
   if (pin.length < 4 || pin.length > 6 || !/^\d+$/.test(pin)) return toast('Il PIN deve essere di 4-6 cifre numeriche');
   if (!gdpr1 || !gdpr2) return toast('Accetta i consensi obbligatori per continuare');
 
   const btn = document.getElementById('reg-btn');
-  btn.disabled = true; btn.textContent = 'Creazione in corso…';
+  const btnLabel = claim ? 'Attiva la mia tessera' : 'Crea la mia card';
+  btn.disabled = true; btn.textContent = claim ? 'Attivazione in corso…' : 'Creazione in corso…';
 
-  const {data, error} = await db.rpc('public_register', {
-    p_nome: nome, p_cognome: cognome, p_codice_fiscale: cf,
-    p_email: email, p_telefono: tel || null, p_pin: pin,
-    p_gdpr_trattamento: gdpr1, p_gdpr_privacy: gdpr2,
-    p_gdpr_comunicazioni: gdpr3, p_gdpr_immagini: gdpr4
-  });
+  let data, error;
+  if (claim) {
+    ({data, error} = await db.rpc('claim_account', {
+      p_card_id: cardIn,
+      p_nome: nome, p_cognome: cognome, p_codice_fiscale: cf,
+      p_email: email, p_telefono: tel || null, p_pin: pin,
+      p_gdpr_trattamento: gdpr1, p_gdpr_privacy_letta: gdpr2,
+      p_gdpr_comunicazioni: gdpr3, p_gdpr_immagini: gdpr4
+    }));
+  } else {
+    ({data, error} = await db.rpc('public_register', {
+      p_nome: nome, p_cognome: cognome, p_codice_fiscale: cf,
+      p_email: email, p_telefono: tel || null, p_pin: pin,
+      p_gdpr_trattamento: gdpr1, p_gdpr_privacy: gdpr2,
+      p_gdpr_comunicazioni: gdpr3, p_gdpr_immagini: gdpr4
+    }));
+  }
 
-  btn.disabled = false; btn.textContent = 'Crea la mia card';
-  if (error || !data.ok) return toast((error && error.message) || data.error);
+  btn.disabled = false; btn.textContent = btnLabel;
+
+  if (error) return toast(error.message);
+  if (!data || !data.ok) {
+    const code = data && data.error;
+    if (code === 'already_claimed') return toast('Questa tessera è già registrata. Accedi con il PIN.');
+    if (code === 'not_found')       return toast('Tessera non trovata. Verifica il codice.');
+    return toast((data && (data.message || data.error)) || 'Errore');
+  }
 
   document.getElementById('reg-form-area').style.display = 'none';
   document.getElementById('reg-success-code').textContent = data.card_id;
-  document.getElementById('reg-success').style.display = 'block';
-  toast('Tessera creata con successo!', 'ok');
+  const successBox = document.getElementById('reg-success');
+  successBox.style.display = 'block';
+  if (claim) {
+    successBox.querySelector('div[style*="font-size:40px"]').textContent = '✨';
+    successBox.querySelector('div[style*="font-weight:700"]').textContent = 'Tessera attivata!';
+    const info = successBox.querySelector('div[style*="margin-bottom:16px"]');
+    if (info) info.innerHTML = `Ciao <strong>${_esc(data.display_name || '')}</strong>!<br>Il tuo saldo residuo è <strong style="color:var(--gold)">${eur(data.balance||0)}</strong>.<br>Il tuo codice tessera è:`;
+    toast('Tessera attivata con successo!', 'ok');
+  } else {
+    toast('Tessera creata con successo!', 'ok');
+  }
 }
 
 // ── RESET PIN ────────────────────────────────────────────────────────
@@ -2723,7 +3526,10 @@ const _GUIDE = {
 <p><strong>👤 PROFILO</strong><br>
 • Vedi i tuoi dati, la tessera e il QR<br>
 • Cambia il PIN<br>
-• Scegli tema chiaro o scuro</p>`,
+• Scegli tema chiaro o scuro</p>
+<p><strong>📤 INVITA GLI AMICI</strong><br>
+• Condividi l'app col link breve: <a href="https://bit.ly/shanghai-card" target="_blank" rel="noopener" style="color:var(--gold)">bit.ly/shanghai-card</a><br>
+• Suggerisci "Aggiungi a Home" dopo l'apertura — l'app si installa come una vera app</p>`,
 
   staff: `<h3 style="color:var(--gold);margin:0 0 16px">🏪 GUIDA CASSA — Staff</h3>
 <p><strong>📷 CERCA SOCIO</strong><br>
@@ -2760,7 +3566,9 @@ const _GUIDE = {
 • ✅ Conferma se il pagamento è arrivato · ❌ Rifiuta per riportarla a "da saldare"</p>
 <p><strong>🏷️ PROMO</strong><br>
 • Vedi le promo attive — le promo si applicano automaticamente sugli addebiti<br>
-• Solo l'admin può creare/modificare/eliminare promo</p>`,
+• Solo l'admin può creare/modificare/eliminare promo</p>
+<p><strong>📤 INVITA NUOVI SOCI</strong><br>
+• Link app per passaparola e volantini: <a href="https://bit.ly/shanghai-card" target="_blank" rel="noopener" style="color:var(--gold)">bit.ly/shanghai-card</a></p>`,
 
   admin: `<h3 style="color:var(--gold);margin:0 0 16px">⚙️ GUIDA AMMINISTRAZIONE</h3>
 <p><strong>📊 DASHBOARD</strong><br>
@@ -2813,7 +3621,9 @@ const _GUIDE = {
 • Gestisci i link SumUp del Rione (etichetta, URL, importo opzionale)<br>
 • I link sono visibili ai soci nella sezione Catalogo → SumUp</p>
 <p><strong>📥 EXPORT</strong><br>
-• Esporta tutti i dati (soci, transazioni, iscritti eventi) in CSV</p>`
+• Esporta tutti i dati (soci, transazioni, iscritti eventi) in CSV</p>
+<p><strong>📤 LINK APP</strong><br>
+• Link breve per volantini, social, passaparola: <a href="https://bit.ly/shanghai-card" target="_blank" rel="noopener" style="color:var(--gold)">bit.ly/shanghai-card</a></p>`
 };
 function openGuide(role) {
   document.getElementById('guide-content').innerHTML = _GUIDE[role] || '';
@@ -2833,11 +3643,16 @@ async function createPromo() {
   const val   = parseInt(document.getElementById('fp-val').value);
   const until = document.getElementById('fp-until').value;
   const maxu  = parseInt(document.getElementById('fp-maxu').value)||null;
+  const img   = document.getElementById('fp-img').value.trim();
   if (!code||!val) return toast('Inserisci codice e valore');
   const {data, error} = await db.rpc('admin_create_promo', {p_code:code, p_description:desc||null, p_discount_type:type, p_discount_value:val, p_valid_until:until?new Date(until+'T23:59:59').toISOString():null, p_max_uses:maxu});
   if (error||!data.ok) return toast((error&&error.message)||data.error);
+  if (img && data.promo_id) {
+    await db.rpc('admin_set_promo_image', {p_admin_id: currentUser.id, p_promo_id: data.promo_id, p_image_url: img});
+  }
   toast('Promo creata!', 'ok');
-  ['fp-code','fp-desc','fp-val','fp-until','fp-maxu'].forEach(id=>document.getElementById(id).value='');
+  ['fp-code','fp-desc','fp-val','fp-until','fp-maxu','fp-img'].forEach(id=>document.getElementById(id).value='');
+  resetImageUploader('fp-img-mount');
   document.getElementById('fp-form').style.display='none';
   loadAGest();
 }
@@ -2848,6 +3663,10 @@ function openEditPromo(id, code, desc, type, val, until) {
   document.getElementById('fpe-type').value = type;
   document.getElementById('fpe-val').value  = val;
   document.getElementById('fpe-until').value= until;
+  const pCached = (typeof _promosAdminCache !== 'undefined' && _promosAdminCache[id]) || {};
+  const curImg = pCached.image_url || '';
+  document.getElementById('fpe-img').value = curImg;
+  setImageUploaderPreview('fpe-img-mount', curImg);
   document.getElementById('fpe-bg').style.display = 'block';
 }
 function closeEditPromo() {
@@ -2860,6 +3679,7 @@ async function saveEditPromo() {
   const type  = document.getElementById('fpe-type').value;
   const val   = parseFloat(document.getElementById('fpe-val').value);
   const until = document.getElementById('fpe-until').value;
+  const img   = document.getElementById('fpe-img').value.trim();
   if (!code || !val) return toast('Codice e valore obbligatori');
   const {data, error} = await db.rpc('admin_update_promo', {
     p_admin_id: currentUser.id, p_promo_id: id,
@@ -2867,6 +3687,10 @@ async function saveEditPromo() {
     p_valid_until: until || null
   });
   if (error||!data.ok) return toast((error&&error.message)||data.error);
+  const cachedImg = ((typeof _promosAdminCache !== 'undefined' && _promosAdminCache[id]) || {}).image_url || '';
+  if (img !== cachedImg) {
+    await db.rpc('admin_set_promo_image', {p_admin_id: currentUser.id, p_promo_id: id, p_image_url: img || null});
+  }
   toast('Promo aggiornata!', 'ok');
   closeEditPromo();
   if (currentUser.role === 'admin') loadAGest(); else loadStaffPromos();
@@ -2877,6 +3701,370 @@ async function deletePromo(id, code) {
     if (error||!data.ok) return toast((error&&error.message)||data.error);
     toast('Promo eliminata', 'ok');
     loadAGest();
+  });
+}
+
+// =====================================================================
+// ADMIN EXTENSIONS (17/07/2026)
+// Aggiunte: image uploader, edit socio, delete socio, edit evento,
+// storno/edit transazione, popup nuovi eventi per soci.
+// =====================================================================
+
+// ── IMAGE UPLOADER ──────────────────────────────────────────────────
+async function uploadImageToBucket(file, folder) {
+  if (!file) return null;
+  if (file.size > 2 * 1024 * 1024) { toast('Immagine troppo grande (max 2 MB)'); return null; }
+  const ok = ['image/jpeg','image/png','image/webp'].includes(file.type);
+  if (!ok) { toast('Formato non supportato (jpg, png, webp)'); return null; }
+  const ext = ({'image/jpeg':'jpg','image/png':'png','image/webp':'webp'})[file.type];
+  const name = `${crypto.randomUUID()}.${ext}`;
+  const path = `${folder}/${name}`;
+  const { error } = await db.storage.from('images').upload(path, file, {
+    cacheControl: '31536000', upsert: false, contentType: file.type
+  });
+  if (error) { console.error('upload error', error); toast('Upload fallito: ' + error.message); return null; }
+  const { data } = db.storage.from('images').getPublicUrl(path);
+  return data?.publicUrl || null;
+}
+function mountImageUploader(mountId, hiddenId, folder) {
+  const host = document.getElementById(mountId);
+  if (!host) return;
+  host.dataset.folder = folder;
+  host.dataset.hidden = hiddenId;
+  host.innerHTML = `
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <label class="btn-sm" style="cursor:pointer;margin:0">
+        📷 Scegli immagine
+        <input type="file" accept="image/jpeg,image/png,image/webp" style="display:none" onchange="_onImagePicked(this,'${mountId}')">
+      </label>
+      <button type="button" class="btn-sm" style="color:var(--neg);display:none" data-role="rm" onclick="_clearImage('${mountId}')">🗑️ Rimuovi</button>
+      <span data-role="status" style="font-size:11px;color:var(--mut)"></span>
+    </div>
+    <div data-role="preview" style="margin-top:8px;display:none">
+      <img data-role="img" src="" style="max-width:100%;max-height:140px;border-radius:8px;border:1px solid var(--brd)">
+    </div>`;
+}
+function setImageUploaderPreview(mountId, url) {
+  const host = document.getElementById(mountId);
+  if (!host) return;
+  const preview = host.querySelector('[data-role="preview"]');
+  const img = host.querySelector('[data-role="img"]');
+  const rm = host.querySelector('[data-role="rm"]');
+  if (url) { img.src = url; preview.style.display = 'block'; if (rm) rm.style.display = ''; }
+  else { img.src = ''; preview.style.display = 'none'; if (rm) rm.style.display = 'none'; }
+}
+function resetImageUploader(mountId) {
+  const host = document.getElementById(mountId);
+  if (!host) return;
+  const hiddenId = host.dataset.hidden;
+  if (hiddenId) { const h = document.getElementById(hiddenId); if (h) h.value = ''; }
+  setImageUploaderPreview(mountId, '');
+  const status = host.querySelector('[data-role="status"]');
+  if (status) status.textContent = '';
+}
+async function _onImagePicked(input, mountId) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  const host = document.getElementById(mountId);
+  const status = host.querySelector('[data-role="status"]');
+  const folder = host.dataset.folder || 'misc';
+  const hiddenId = host.dataset.hidden;
+  status.textContent = 'Carico…';
+  const url = await uploadImageToBucket(file, folder);
+  input.value = ''; // reset per permettere upload dello stesso file dopo
+  if (!url) { status.textContent = ''; return; }
+  if (hiddenId) { const h = document.getElementById(hiddenId); if (h) h.value = url; }
+  setImageUploaderPreview(mountId, url);
+  status.textContent = '✓ Caricata';
+  setTimeout(() => { status.textContent = ''; }, 2000);
+}
+function _clearImage(mountId) {
+  resetImageUploader(mountId);
+}
+
+// ── EDIT SOCIO ──────────────────────────────────────────────────────
+function openEditUser(userId) {
+  const u = (allAdminUsers || []).find(x => x.id === userId);
+  if (!u) { toast('Utente non trovato'); return; }
+  document.getElementById('ue-id').value      = u.id;
+  document.getElementById('ue-card').textContent = u.card_id || '';
+  document.getElementById('ue-display').value = u.display_name || '';
+  document.getElementById('ue-nome').value    = u.nome || '';
+  document.getElementById('ue-cognome').value = u.cognome || '';
+  document.getElementById('ue-email').value   = u.email || '';
+  document.getElementById('ue-tel').value     = u.telefono || '';
+  document.getElementById('ue-role').value    = u.role || 'user';
+  document.getElementById('ue-active').value  = String(u.active !== false);
+  document.getElementById('u-edit-bg').style.display = 'block';
+}
+function closeEditUser() {
+  document.getElementById('u-edit-bg').style.display = 'none';
+}
+async function saveEditUser() {
+  const id = document.getElementById('ue-id').value;
+  if (!id) return;
+  const payload = {
+    p_admin_id:    currentUser.id,
+    p_user_id:     id,
+    p_display_name:document.getElementById('ue-display').value.trim() || null,
+    p_nome:        document.getElementById('ue-nome').value.trim() || null,
+    p_cognome:     document.getElementById('ue-cognome').value.trim() || null,
+    p_email:       document.getElementById('ue-email').value.trim() || null,
+    p_telefono:    document.getElementById('ue-tel').value.trim() || null,
+    p_role:        document.getElementById('ue-role').value,
+    p_active:      document.getElementById('ue-active').value === 'true'
+  };
+  const { data, error } = await db.rpc('admin_update_user', payload);
+  if (error) return toast(error.message);
+  if (!data || !data.ok) return toast(data?.error || 'Errore');
+  toast('Socio aggiornato', 'ok');
+  closeEditUser();
+  loadAUsers();
+}
+
+// ── DELETE SOCIO ────────────────────────────────────────────────────
+async function adminDeleteUser(userId, cardId, displayName) {
+  modalConfirm(`Eliminare il socio ${cardId} – ${displayName}?\n\nOperazione irreversibile.`, async () => {
+    const { data, error } = await db.rpc('admin_delete_user', {p_admin_id: currentUser.id, p_user_id: userId});
+    if (error) return modalInfo('❌ Errore\n\n' + error.message);
+    if (!data || !data.ok) {
+      const code = data?.error;
+      if (code === 'cannot_delete_admin')     return modalInfo('❌ Impossibile eliminare\n\nNon si può eliminare un amministratore.');
+      if (code === 'has_transactions')        return _offerDeactivate(userId, cardId, `Il socio ha ${data.count} transazioni collegate. Non può essere eliminato per motivi contabili.`);
+      if (code === 'has_event_registrations') return _offerDeactivate(userId, cardId, `Il socio ha ${data.count} iscrizioni a eventi. Non può essere eliminato.`);
+      if (code === 'not_found')               return modalInfo('❌ Socio non trovato');
+      return modalInfo('❌ Errore\n\n' + (code || 'sconosciuto'));
+    }
+    toast('Socio eliminato', 'ok');
+    loadAUsers();
+  });
+}
+function _offerDeactivate(userId, cardId, reasonMsg) {
+  modalConfirm(`${reasonMsg}\n\nVuoi disattivarlo invece?`, async () => {
+    const { data, error } = await db.rpc('admin_update_user', {p_admin_id: currentUser.id, p_user_id: userId, p_active: false});
+    if (error || !data?.ok) return toast(error?.message || data?.error || 'Errore');
+    toast(`${cardId} disattivato`, 'ok');
+    loadAUsers();
+  });
+}
+
+// ── EDIT EVENTO ─────────────────────────────────────────────────────
+function openEditEvent(eventId) {
+  const e = _eventsAdminCache[eventId];
+  if (!e) { toast('Evento non trovato'); return; }
+  document.getElementById('eve-id').value    = e.id;
+  document.getElementById('eve-title').value = e.title || '';
+  document.getElementById('eve-desc').value  = e.description || '';
+  // datetime-local vuole "YYYY-MM-DDTHH:MM"
+  document.getElementById('eve-date').value  = e.event_date ? new Date(e.event_date).toISOString().slice(0,16) : '';
+  document.getElementById('eve-loc').value   = e.location || '';
+  document.getElementById('eve-maxp').value  = e.max_participants || 0;
+  document.getElementById('eve-price').value = e.price || 0;
+  document.getElementById('eve-sumup').value = e.sumup_link || '';
+  document.getElementById('eve-slug').value  = e.slug || '';
+  document.getElementById('eve-public').checked = !!e.public_registration;
+  const curImg = e.image_url || '';
+  document.getElementById('eve-img').value = curImg;
+  setImageUploaderPreview('eve-img-mount', curImg);
+  document.getElementById('ev-edit-bg').style.display = 'block';
+}
+function closeEditEvent() {
+  document.getElementById('ev-edit-bg').style.display = 'none';
+}
+async function saveEditEvent() {
+  const id = document.getElementById('eve-id').value;
+  if (!id) return;
+  const dateVal = document.getElementById('eve-date').value;
+  const payload = {
+    p_admin_id:            currentUser.id,
+    p_event_id:            id,
+    p_title:               document.getElementById('eve-title').value.trim() || null,
+    p_description:         document.getElementById('eve-desc').value.trim() || null,
+    p_event_date:          dateVal ? new Date(dateVal).toISOString() : null,
+    p_location:            document.getElementById('eve-loc').value.trim() || null,
+    p_max_participants:    parseInt(document.getElementById('eve-maxp').value) || 0,
+    p_price:               parseFloat(document.getElementById('eve-price').value) || 0,
+    p_sumup_link:          document.getElementById('eve-sumup').value.trim() || null,
+    p_slug:                document.getElementById('eve-slug').value.trim() || null,
+    p_public_registration: document.getElementById('eve-public').checked,
+    p_image_url:           document.getElementById('eve-img').value.trim() || null
+  };
+  const { data, error } = await db.rpc('admin_update_event', payload);
+  if (error) return toast(error.message);
+  if (!data || !data.ok) return toast(data?.error || 'Errore');
+  toast('Evento aggiornato', 'ok');
+  closeEditEvent();
+  loadAGest();
+}
+
+// ── STORNO / EDIT TX ────────────────────────────────────────────────
+function adminVoidTx(txId, amount, desc, cardId) {
+  const amt = Number(amount||0);
+  const label = (amt >= 0 ? '+' : '') + eur(amt);
+  const reason = prompt(`Storna transazione di ${label} su ${cardId}?\n\nDescrizione: ${desc || '(vuota)'}\n\nMotivo dello storno:`, 'Storno admin');
+  if (reason === null) return;
+  modalConfirm(`Confermi lo storno di ${label} per ${cardId}?\n\nMotivo: ${reason || 'Storno admin'}\n\nVerrà creata una transazione inversa e aggiornato il saldo.`, async () => {
+    const { data, error } = await db.rpc('admin_void_transaction', {p_admin_id: currentUser.id, p_transaction_id: txId, p_reason: reason || 'Storno admin'});
+    if (error) return modalInfo('❌ Errore\n\n' + error.message);
+    if (!data || !data.ok) {
+      if (data?.error === 'already_refund') return modalInfo('❌ Questa è già una transazione di storno.');
+      return modalInfo('❌ Errore\n\n' + (data?.error || 'sconosciuto'));
+    }
+    toast('Transazione stornata', 'ok');
+    loadATx();
+  });
+}
+async function adminEditTxDesc(txId, currentDesc) {
+  const next = prompt('Modifica descrizione transazione:', currentDesc || '');
+  if (next === null) return;
+  const { data, error } = await db.rpc('admin_update_transaction_description', {p_admin_id: currentUser.id, p_transaction_id: txId, p_description: next});
+  if (error) return toast(error.message);
+  if (!data || !data.ok) return toast(data?.error || 'Errore');
+  toast('Descrizione aggiornata', 'ok');
+  loadATx();
+}
+
+// ── POPUP NUOVI EVENTI PER SOCI ─────────────────────────────────────
+async function checkUnseenEvents() {
+  if (!currentUser || currentUser.role !== 'user') return;
+  try {
+    const { data, error } = await db.rpc('user_unseen_events', {p_user_id: currentUser.id});
+    if (error) { console.warn('user_unseen_events', error); return; }
+    if (!Array.isArray(data) || !data.length) return;
+    _unseenEventsQueue = data;
+    openEventPopup(data[0], data.length);
+  } catch (e) { console.warn('checkUnseenEvents', e); }
+}
+function openEventPopup(ev, total) {
+  if (!ev) return;
+  const imgWrap = document.getElementById('evp-img-wrap');
+  const img = document.getElementById('evp-img');
+  if (ev.image_url) { img.src = ev.image_url; imgWrap.style.display = ''; }
+  else { imgWrap.style.display = 'none'; img.src = ''; }
+  document.getElementById('evp-title').textContent = ev.title || 'Nuovo evento';
+  const meta = [];
+  if (ev.event_date) meta.push('📅 ' + fdt(ev.event_date));
+  if (ev.location)   meta.push('📍 ' + ev.location);
+  if (ev.price > 0)  meta.push('💶 ' + eur(ev.price));
+  else if (ev.price === 0) meta.push('🎁 Gratuito');
+  document.getElementById('evp-meta').textContent = meta.join(' · ');
+  document.getElementById('evp-desc').textContent = ev.description || '';
+  const more = document.getElementById('evp-more');
+  if (total > 1) { more.textContent = `E altri ${total - 1} nuovi eventi in bacheca.`; more.style.display = ''; }
+  else { more.style.display = 'none'; }
+  document.getElementById('ev-popup-bg').dataset.eventId   = ev.id;
+  document.getElementById('ev-popup-bg').dataset.eventSlug = ev.slug || '';
+  document.getElementById('ev-popup-bg').style.display = 'block';
+  document.body.style.overflow = 'hidden';
+}
+async function closeEventPopup() {
+  const bg = document.getElementById('ev-popup-bg');
+  const eventId = bg.dataset.eventId;
+  bg.style.display = 'none';
+  document.body.style.overflow = '';
+  if (eventId && currentUser) {
+    try { await db.rpc('user_mark_event_seen', {p_user_id: currentUser.id, p_event_id: eventId}); }
+    catch (e) { console.warn('mark_event_seen', e); }
+  }
+}
+async function goToEventFromPopup() {
+  const bg = document.getElementById('ev-popup-bg');
+  const eventId = bg.dataset.eventId;
+  await closeEventPopup();
+  if (typeof navGo === 'function') navGo('eventi');
+  if (eventId) {
+    setTimeout(() => {
+      const card = document.getElementById('ev-item-' + eventId) || document.querySelector(`[data-event-id="${eventId}"]`);
+      if (card && card.scrollIntoView) card.scrollIntoView({behavior:'smooth', block:'center'});
+    }, 350);
+  }
+}
+
+// ── ADD/REMOVE STAFF (promozione/degradazione soci) ─────────────────
+let _astSelectedUserId = null;
+
+function openAddStaffModal() {
+  _astSelectedUserId = null;
+  document.getElementById('ast-search').value = '';
+  document.getElementById('ast-detail').style.display = 'none';
+  document.getElementById('ast-noresult').style.display = 'none';
+  _filterAddStaffCandidates('');
+  document.getElementById('add-staff-bg').style.display = 'block';
+}
+function closeAddStaffModal() {
+  document.getElementById('add-staff-bg').style.display = 'none';
+  _astSelectedUserId = null;
+}
+function _filterAddStaffCandidates(query) {
+  const q = (query || '').toLowerCase().trim();
+  const list = (allAdminUsers || []).filter(u => u.role === 'user' && u.active !== false && u.is_staff !== true);
+  const filtered = q
+    ? list.filter(u =>
+        (u.display_name || '').toLowerCase().includes(q) ||
+        (u.card_id || '').toLowerCase().includes(q) ||
+        ((u.nome || '') + ' ' + (u.cognome || '')).toLowerCase().includes(q))
+    : list;
+  const results = document.getElementById('ast-results');
+  const noresult = document.getElementById('ast-noresult');
+  const detail = document.getElementById('ast-detail');
+  if (!filtered.length) {
+    results.innerHTML = '';
+    noresult.style.display = q ? 'block' : 'none';
+    detail.style.display = 'none';
+    return;
+  }
+  noresult.style.display = 'none';
+  results.innerHTML = filtered.slice(0, 30).map(u => `
+    <div onclick="_selectAddStaffCandidate('${u.id}')" style="padding:10px 12px;border-bottom:1px solid var(--brd);cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:8px">
+      <div>
+        <span class="mono" style="color:var(--gold);font-weight:600">${_esc(u.card_id)}</span>
+        <span style="margin-left:8px">${_esc(u.display_name || '')}</span>
+      </div>
+      <span style="font-size:11px;color:var(--mut)">${eur(u.balance || 0)}</span>
+    </div>`).join('');
+}
+function _selectAddStaffCandidate(userId) {
+  const u = (allAdminUsers || []).find(x => x.id === userId);
+  if (!u) return;
+  _astSelectedUserId = userId;
+  document.getElementById('ast-detail-name').textContent = `${u.card_id} · ${u.display_name}`;
+  const meta = [];
+  if (u.nome && u.cognome) meta.push(`${u.nome} ${u.cognome}`);
+  if (u.email) meta.push(u.email);
+  meta.push('Saldo ' + eur(u.balance || 0));
+  document.getElementById('ast-detail-meta').textContent = meta.join(' · ');
+  document.getElementById('ast-detail').style.display = 'block';
+  document.getElementById('ast-noresult').style.display = 'none';
+  document.getElementById('ast-results').innerHTML = '';
+}
+async function promoteSelectedToStaff() {
+  if (!_astSelectedUserId) return toast('Seleziona un socio');
+  const u = (allAdminUsers || []).find(x => x.id === _astSelectedUserId) || {};
+  const { data, error } = await db.rpc('admin_promote_to_staff', {p_admin_id: currentUser.id, p_user_id: _astSelectedUserId});
+  if (error) return toast(error.message);
+  if (!data || !data.ok) {
+    const code = data && data.error;
+    if (code === 'already_staff') return toast('È già Staff');
+    if (code === 'is_admin')      return toast('Non puoi assegnare Staff a un admin');
+    if (code === 'not_found')     return toast('Socio non trovato');
+    return toast(code || 'Errore');
+  }
+  toast(`${u.display_name || 'Socio'} può ora operare come staff`, 'ok');
+  closeAddStaffModal();
+  loadAUsers();
+}
+function demoteFromStaff(userId, cardId, displayName) {
+  modalConfirm(`Rimuovere il ruolo staff a ${displayName} (${cardId})?\n\nResterà iscritto come socio.`, async () => {
+    const { data, error } = await db.rpc('admin_demote_to_user', {p_admin_id: currentUser.id, p_user_id: userId});
+    if (error) return toast(error.message);
+    if (!data || !data.ok) {
+      const code = data && data.error;
+      if (code === 'not_staff') return toast('Non è staff');
+      if (code === 'not_found') return toast('Utente non trovato');
+      return toast(code || 'Errore');
+    }
+    toast(`Ruolo staff rimosso. Resta iscritto come socio con tessera ${cardId}.`, 'ok');
+    loadAUsers();
   });
 }
 

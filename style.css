@@ -2,8 +2,9 @@
 :root{--bg:#0A0A0A;--bgc:#161616;--brd:#272727;--red:#C0392B;--gold:#FFD60A;--txt:#FFFFFF;--mut:#B5B5B5;--grn:#22C55E;--neg:#EF4444;--r:12px;--shadow:0 2px 12px rgba(0,0,0,.5)}
 /* LIGHT */
 :root.light{--bg:#F4F4F4;--bgc:#FFFFFF;--brd:#E0E0E0;--red:#C0392B;--gold:#9A6F00;--txt:#0A0A0A;--mut:#555555;--grn:#16A34A;--neg:#DC2626;--shadow:0 2px 8px rgba(0,0,0,.1)}
-*{box-sizing:border-box;margin:0;padding:0}
-html,body{height:100%}
+*,*::before,*::after{box-sizing:border-box}
+*{margin:0;padding:0}
+html,body{height:100%;max-width:100vw;overflow-x:hidden}
 body{background:var(--bg);color:var(--txt);font-family:'Inter',system-ui,sans-serif;font-size:14px;line-height:1.5}
 .screen{display:none;min-height:100vh;flex-direction:column}
 .screen.active{display:flex}
@@ -19,8 +20,16 @@ body{background:var(--bg);color:var(--txt);font-family:'Inter',system-ui,sans-se
 .card{background:var(--bgc);border:1px solid var(--brd);border-radius:var(--r);padding:20px;box-shadow:var(--shadow)}
 .fg{margin-bottom:14px}
 label{display:block;font-size:11px;color:var(--mut);margin-bottom:5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase}
-input,select,textarea{width:100%;background:#0f0f0f;border:1px solid var(--brd);border-radius:8px;padding:11px 13px;color:var(--txt);font-family:inherit;font-size:16px;outline:none;transition:border-color .2s;-webkit-appearance:none}
-input:focus,select:focus,textarea:focus{border-color:var(--gold)}
+input:not([type=checkbox]):not([type=radio]),select,textarea{width:100%;background:#0f0f0f;border:1px solid var(--brd);border-radius:8px;padding:11px 13px;color:var(--txt);font-family:inherit;font-size:16px;outline:none;transition:border-color .2s;-webkit-appearance:none}
+input:not([type=checkbox]):not([type=radio]):focus,select:focus,textarea:focus{border-color:var(--gold)}
+input[type=checkbox],input[type=radio]{-webkit-appearance:auto;appearance:auto;width:auto;padding:0;margin:0;background:transparent;border:none;cursor:pointer;accent-color:var(--gold)}
+
+/* RISULTATI RICERCA CASSA (nome/cognome) */
+.search-results{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}
+.search-result-item{display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--bgc);border:1px solid var(--brd);border-radius:10px;padding:12px 14px;cursor:pointer;transition:border-color .15s,background .15s;color:var(--txt)}
+.search-result-item:hover{border-color:var(--gold);background:#1a1a1a}
+:root.light .search-result-item{background:#FFFFFF;color:#0A0A0A}
+:root.light .search-result-item:hover{background:#F5F5F5;border-color:var(--gold)}
 select option{background:var(--bgc)}
 
 /* BUTTONS */
@@ -106,8 +115,10 @@ button{cursor:pointer;font-family:inherit;transition:opacity .2s}
 .sub-panel.active{display:block}
 
 /* CATALOG */
-.cat-card{background:var(--bgc);border:1px solid var(--brd);border-radius:var(--r);padding:16px;margin-bottom:8px;box-shadow:var(--shadow);transition:border-color .2s}
+.cat-card{background:var(--bgc);border:1px solid var(--brd);border-radius:12px;padding:16px;margin-bottom:8px;box-shadow:var(--shadow);transition:border-color .2s;overflow:hidden}
 .cat-card:hover{border-color:rgba(255,214,10,.4)}
+.cat-card.has-img{padding:0}
+.cat-card.has-img > .cat-body{padding:16px}
 .cat-img{width:100%;height:110px;object-fit:cover;border-radius:8px;margin-bottom:10px}
 .cat-title{font-weight:600;font-size:15px;margin-bottom:3px}
 .cat-sub{font-size:12px;color:var(--mut);margin-bottom:6px}
@@ -141,11 +152,19 @@ button{cursor:pointer;font-family:inherit;transition:opacity .2s}
 .filter-row{display:flex;gap:6px;flex-wrap:wrap}
 .fbtn{background:transparent;border:1px solid var(--brd);border-radius:6px;padding:5px 12px;font-family:inherit;font-size:12px;color:var(--mut);transition:all .2s}
 .fbtn.active{border-color:var(--red);color:var(--red)}
+.fbtn-cnt{display:inline-block;margin-left:4px;padding:1px 6px;border-radius:999px;background:rgba(255,255,255,.08);font-size:10px;font-weight:600;color:inherit;opacity:.85}
+.fbtn.active .fbtn-cnt{background:rgba(196,30,58,.18)}
+.sort-th{cursor:pointer;user-select:none}
+.sort-th:hover{color:var(--gold)}
+.sort-arr{opacity:.5;font-size:10px;margin-left:3px}
+.sort-arr.on{opacity:1;color:var(--gold)}
 .form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 
 /* TABLE */
-.tbl-wrap{overflow-x:auto;border-radius:var(--r);border:1px solid var(--brd)}
+.tbl-wrap{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:var(--r);border:1px solid var(--brd)}
+.tbl-wrap table{min-width:640px}
 table{width:100%;border-collapse:collapse;font-size:13px}
+table td,table th{white-space:nowrap}
 th{background:#111;color:var(--mut);font-weight:500;padding:9px 12px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--brd)}
 td{padding:9px 12px;border-bottom:1px solid var(--brd)}
 tr:last-child td{border-bottom:none}
@@ -229,8 +248,8 @@ body.nav-sidebar .screen .hdr{padding-left:80px}
 :root.light .ev-paid{background:rgba(22,163,74,.1);color:#15803D}
 
 /* LIGHT MODE FIXES — contrasto e leggibilità */
-:root.light input,:root.light select,:root.light textarea{background:#F8F8F8;color:#0A0A0A;border-color:#D0D0D0}
-:root.light input:focus,:root.light select:focus,:root.light textarea:focus{border-color:var(--gold);background:#FFFFFF}
+:root.light input:not([type=checkbox]):not([type=radio]),:root.light select,:root.light textarea{background:#F8F8F8;color:#0A0A0A;border-color:#D0D0D0}
+:root.light input:not([type=checkbox]):not([type=radio]):focus,:root.light select:focus,:root.light textarea:focus{border-color:var(--gold);background:#FFFFFF}
 :root.light .cat-price{color:#0A0A0A}
 :root.light .kpi-val{color:#0A0A0A}
 :root.light .saldo-val{color:#0A0A0A;text-shadow:none}
@@ -286,7 +305,7 @@ label.pr-row{text-transform:none;letter-spacing:normal;color:var(--txt);font-wei
 .bar-chart{width:100%;height:auto;overflow:visible}
 
 /* RESPONSIVE — touch targets + mobile layout */
-.btn-sm{min-height:40px}
+.btn-sm{min-height:44px}
 .btn-ico{min-height:44px;padding:9px 14px}
 .tab{min-height:44px}
 .stab{min-height:44px;padding:10px 4px}
@@ -311,3 +330,7 @@ label.pr-row{text-transform:none;letter-spacing:normal;color:var(--txt);font-wei
   .content{padding:24px;gap:20px}
   .login-card{max-width:400px}
 }
+
+/* MOBILE SAFETY */
+img{max-width:100%;height:auto}
+.tx-dsc,.res-name,.res-sub{overflow-wrap:anywhere;word-break:break-word}
