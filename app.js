@@ -1496,6 +1496,8 @@ async function _execRegEvent(ev, comps, selfPay) {
 const _PAY_BADGE = {
   da_saldare:       ['🟡 Da saldare',        'pb-wait'],
   sumup_in_attesa:  ['🟠 In attesa conferma','pb-wait'],
+  cassa_in_attesa:  ['🟠 Attende cassa',     'pb-cash'],
+  saldato_cassa:    ['🟢 Pagato in cassa',   'pb-ok'],
   saldato_credito:  ['🟢 Pagato credito',    'pb-ok'],
   saldato_sumup:    ['🟢 Pagato SumUp',      'pb-ok'],
   saldato_contanti: ['🟢 Pagato in cassa',   'pb-ok'],
@@ -1519,7 +1521,13 @@ function renderMyRegistrations() {
   if (!regs.length) { el.innerHTML = ''; return; }
   el.innerHTML = `<div class="sec-title" style="margin-bottom:8px">Le mie iscrizioni</div>` + regs.map(_myRegCard).join('');
 }
-function _payPickHtml(r, method, label, btnLabel) {
+const _PAY_BLOCKS = {
+  credito: {cls: 'pay-credito', title: '💳 Paga col credito', btn: 'Paga col credito'},
+  sumup:   {cls: 'pay-sumup',   title: '🔗 Paga con SumUp',   btn: 'Vai a SumUp'},
+  cassa:   {cls: 'pay-cassa',   title: '💵 Paga in cassa',    btn: 'Segnala alla cassa'}
+};
+function _payPickHtml(r, method) {
+  const cfg = _PAY_BLOCKS[method];
   const id = _regId(r);
   const up = _regUnpaid(r);
   const rows = [];
@@ -1529,10 +1537,10 @@ function _payPickHtml(r, method, label, btnLabel) {
   up.comps.forEach(c => rows.push(`<label class="pr-row">
       <input type="checkbox" class="pr-chk" id="mrp-${method}-${id}-${c.id}">
       <span class="pr-name">${_esc(c.nome)} ${_esc(c.cognome)}</span></label>`));
-  return `<div style="margin-top:10px;padding:10px;background:var(--bg);border-radius:8px">
-    <div class="sec-lbl" style="margin-bottom:4px">${label}</div>
+  return `<div class="pay-blk ${cfg.cls}">
+    <div class="pay-blk-t">${cfg.title}</div>
     ${rows.join('')}
-    <button class="btn btn-p w100" style="margin-top:8px" onclick="myRegPay('${id}','${method}')">${btnLabel}</button>
+    <button class="btn btn-p w100" style="margin-top:8px" onclick="myRegPay('${id}','${method}')">${cfg.btn}</button>
   </div>`;
 }
 function _myRegCard(r) {
@@ -1542,18 +1550,24 @@ function _myRegCard(r) {
   const loc   = r.event_location || r.location || '';
   const up    = _regUnpaid(r);
   const sumupLink = r.event_sumup_link || r.sumup_link || '';
-  const pend  = r.sumup_pending_count || 0;
+  const price = Number(r.event_price || r.amount || 0);
+  const canCredit = price <= 0 || _userBalance >= price;
+  const people = [{status: r.payment_status}].concat((r.companions || []).map(c => ({status: c.payment_status || 'da_saldare'})));
+  const pend  = people.filter(p => String(p.status || '').endsWith('_in_attesa')).length || (r.sumup_pending_count || 0);
   const rows  = [`<div class="pr-row"><span class="pr-name">${_esc(currentUser.display_name)} <span style="color:var(--mut);font-size:11px">(tu)</span></span>${payBadge(r.payment_status)}</div>`]
     .concat((r.companions || []).map(c =>
       `<div class="pr-row"><span class="pr-name">${_esc(c.nome)} ${_esc(c.cognome)}</span>${payBadge(c.payment_status || 'da_saldare')}</div>`));
   return `<div class="card" style="margin-bottom:10px">
     <div style="font-weight:700;font-size:15px">${_esc(title)}</div>
     <div class="cat-sub">${date}${loc ? ' · ' + _esc(loc) : ''}</div>
-    ${pend > 0 ? `<div style="font-size:12px;color:var(--gold);margin-bottom:6px">🟠 ${pend} pagament${pend === 1 ? 'o' : 'i'} SumUp in attesa di conferma</div>` : ''}
+    ${pend > 0 ? `<div style="font-size:12px;color:var(--gold);margin-bottom:6px">🟠 ${pend} pagament${pend === 1 ? 'o' : 'i'} in attesa di conferma dello staff</div>` : ''}
     <div style="margin:8px 0">${rows.join('')}</div>
     <button class="btn-sm" onclick="openCompanionsModal('${id}')">➕ Aggiungi persone</button>
-    ${up.count > 0 ? _payPickHtml(r, 'credito', '💳 Paga con credito', 'Paga col credito') : ''}
-    ${up.count > 0 && sumupLink ? _payPickHtml(r, 'sumup', '📱 Paga con SumUp', 'Paga con SumUp') : ''}
+    ${up.count > 0 ? `<div class="pay-blk-hint">Scegli come pagare: puoi usare metodi diversi per persone diverse.</div>` : ''}
+    ${up.count > 0 && canCredit ? _payPickHtml(r, 'credito') : ''}
+    ${up.count > 0 && !canCredit ? `<div class="pay-blk-hint">💳 Credito non sufficiente per pagare una quota (${eur(_userBalance)} disponibili).</div>` : ''}
+    ${up.count > 0 && sumupLink ? _payPickHtml(r, 'sumup') : ''}
+    ${up.count > 0 ? _payPickHtml(r, 'cassa') : ''}
   </div>`;
 }
 async function myRegPay(regId, method) {
@@ -1565,14 +1579,20 @@ async function myRegPay(regId, method) {
   if (!self && !companion_ids.length) return toast('Seleziona almeno una persona');
   const n = (self ? 1 : 0) + companion_ids.length;
   const price = r.event_price || r.amount || 0;
-  const msg = method === 'credito'
-    ? `Pagare ${n} ${n === 1 ? 'quota' : 'quote'} con il tuo credito?\n\nTotale addebitato: ${eur(price * n)}`
-    : `Segnare ${n} ${n === 1 ? 'quota' : 'quote'} come pagate con SumUp?\n\nTotale: ${eur(price * n)}\nLo staff dovrà confermare il pagamento.`;
+  const tot = eur(price * n);
+  const quote = `${n} ${n === 1 ? 'quota' : 'quote'}`;
+  const msg = {
+    credito: `Pagare ${quote} con il tuo credito?\n\nTotale addebitato: ${tot}`,
+    sumup:   `Segnare ${quote} come pagate con SumUp?\n\nTotale: ${tot}\nLo staff dovrà confermare il pagamento.`,
+    cassa:   `Segnalare alla cassa ${quote} da pagare in contanti?\n\nTotale: ${tot}\nIl cassiere dovrà confermare l'incasso.`
+  }[method];
+  const rpc = {credito: 'user_pay_event_people', sumup: 'user_pay_event_sumup', cassa: 'user_pay_event_cash'}[method];
+  if (!rpc) return toast('Metodo di pagamento non valido');
   modalConfirm(msg, async () => {
-    const rpc = method === 'credito' ? 'user_pay_event_people' : 'user_pay_event_sumup';
     const {data, error} = await db.rpc(rpc, {p_user_id: currentUser.id, p_registration_id: regId, p_targets: {self, companion_ids}});
     if (error || !data || !data.ok) return toast((error && error.message) || (data && data.error) || 'Errore pagamento');
-    if (method === 'sumup') { _openSumup(data.sumup_link); toast(data.message || 'In attesa conferma staff', 'ok'); }
+    if (method === 'sumup') { _openSumup(data.sumup_link); toast('Attende conferma dello staff', 'ok'); }
+    else if (method === 'cassa') toast('Segnalato al cassiere. Attende conferma.', 'ok');
     else toast('✅ Pagamento effettuato!', 'ok');
     await refreshUser();
     await loadCatalog();
@@ -2434,13 +2454,12 @@ async function loadDash() {
   const {data} = await db.rpc('admin_dashboard');
   if (!data) return;
   loadChart(null);
-  _tabBadge('a-sumup-tab',  data.pending_sumup_count,  '📱 SumUp da confermare');
+  _tabBadge('a-sumup-tab',  data.pending_sumup_count,  '💳 Pagamenti da confermare');
   _tabBadge('a-refund-tab', data.pending_refund_count, '↩️ Rimborsi');
   _tabBadge('a-orders-tab', data.waitlist_count,       '📦 Ordini gadget');
-  const soci  = data.total_soci       != null ? data.total_soci       : data.total_users;
-  const staff = data.total_soci_staff != null ? data.total_soci_staff : data.total_staff;
+  const soci = data.total_soci != null ? data.total_soci : data.total_users;
   const kpis = [
-    {ic:'👥', v:soci, l:'Soci attivi', sub:`di cui staff: ${staff}`},
+    {ic:'👥', v:soci, l:'Soci attivi'},
     {ic:'💰', v:eur(data.total_balance),   l:'Saldo in circolo'},
     {ic:'🔄', v:eur(data.total_recharges), l:'Tot. ricariche'},
     {ic:'🛍️', v:eur(data.total_purchases), l:'Tot. acquisti'},
@@ -2453,7 +2472,6 @@ async function loadDash() {
       <div class="kpi-ic">${k.ic}</div>
       <div class="kpi-val">${k.v}</div>
       <div class="kpi-lbl">${k.l}</div>
-      ${k.sub?`<div class="kpi-sub">${k.sub}</div>`:''}
     </div>`).join('');
 }
 async function loadAUsers() {
@@ -2984,11 +3002,11 @@ function _renderSizeRows(sizes) {
   const map = {};
   (sizes || []).forEach(s => { map[s.size] = s.stock; });
   document.getElementById('gae-sizes-body').innerHTML = PRESET_SIZES.map(sz => `
-    <tr>
-      <td style="font-weight:600">${sz}</td>
-      <td><input type="number" min="0" step="1" class="gae-size-in" data-size="${sz}"
-           value="${map[sz] != null ? map[sz] : ''}" placeholder="—" style="padding:6px 8px;font-size:14px"></td>
-    </tr>`).join('');
+    <label class="size-cell">
+      <span class="size-cell-lbl">${sz}</span>
+      <input type="number" min="0" step="1" class="gae-size-in" data-size="${sz}"
+             value="${map[sz] != null ? map[sz] : ''}" placeholder="—" inputmode="numeric">
+    </label>`).join('');
 }
 function openEditGadget(id, name, price, desc, stock) {
   const g = (typeof _gadgetsAdminCache !== 'undefined' && _gadgetsAdminCache[id]) || {};
@@ -4069,33 +4087,42 @@ function demoteFromStaff(userId, cardId, displayName) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// PAGAMENTI SUMUP DA CONFERMARE (admin + staff)
+// PAGAMENTI DA CONFERMARE — coda unificata SumUp + Cassa (admin + staff)
 // ═══════════════════════════════════════════════════════════════════════
 let _sumupPending = [];
+const _PM_BADGE = {
+  sumup: ['🔗 SumUp', 'pb-sumup'],
+  cassa: ['💵 Cassa', 'pb-cash']
+};
+function payMethodBadge(method) {
+  const [label, cls] = _PM_BADGE[method] || ['—', 'pb-off'];
+  return `<span class="pb ${cls}">${label}</span>`;
+}
 async function loadPendingSumup(ctx) {
   const listId = ctx === 'admin' ? 'a-sumup-list' : 's-sumup-list';
   const tabId  = ctx === 'admin' ? 'a-sumup-tab'  : 's-sumup-tab';
-  const label  = ctx === 'admin' ? '📱 SumUp da confermare' : '📱 SumUp';
   const el = document.getElementById(listId);
   if (!el) return;
   el.innerHTML = '<div class="empty">⏳ Carico…</div>';
-  const {data, error} = await db.rpc('admin_list_pending_sumup', {p_operator_id: currentUser.id});
+  const {data, error} = await db.rpc('admin_list_pending_payments', {p_operator_id: currentUser.id});
   if (error || !data || !data.ok) {
     el.innerHTML = `<div class="empty">${_esc((error && error.message) || (data && data.error) || 'Errore caricamento')}</div>`;
     return;
   }
-  _sumupPending = data.pending || [];
-  _tabBadge(tabId, _sumupPending.length, label);
-  if (!_sumupPending.length) { el.innerHTML = '<div class="empty">Nessun pagamento SumUp in attesa</div>'; return; }
+  _sumupPending = data.pending || data.items || [];
+  _tabBadge(tabId, _sumupPending.length, '💳 Pagamenti da confermare');
+  if (!_sumupPending.length) { el.innerHTML = '<div class="empty">Nessun pagamento in attesa</div>'; return; }
   el.innerHTML = _sumupPending.map(p => `
     <div class="card" style="margin-bottom:8px;padding:12px">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <span style="font-weight:700;flex:1;min-width:120px">${_esc(p.event_title || '—')}</span>
         <span style="font-weight:700;color:var(--gold)">${eur(p.amount)}</span>
       </div>
-      <div style="font-size:12px;color:var(--mut);margin-top:3px">
-        👤 ${_esc(p.person_name || '—')}${p.card_id ? ' · <span class="mono">' + _esc(p.card_id) + '</span>' : ''}
-        ${p.target_type === 'companion' ? ' · accompagnatore' : ''}
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:12px;color:var(--mut);margin-top:4px">
+        <span>👤 ${_esc(p.person_name || '—')}</span>
+        ${payMethodBadge(p.payment_method)}
+        ${p.card_id ? '<span class="mono">' + _esc(p.card_id) + '</span>' : ''}
+        ${p.target_type === 'companion' ? '<span>· accompagnatore</span>' : ''}
       </div>
       <div style="font-size:11px;color:var(--mut);margin-top:2px">
         ${p.event_date ? '📅 ' + fdt(p.event_date) : ''}${p.marked_at ? ' · segnato ' + fdt(p.marked_at) : ''}
@@ -4112,12 +4139,13 @@ async function sumupDecide(ctx, action, targetType, targetId) {
   const p = _sumupPending.find(x => String(x.target_id) === String(targetId) && x.target_type === targetType);
   const personName = (p && p.person_name) || 'questa persona';
   const amount = p ? _num(p.amount) : 0;
+  const metodo = p && p.payment_method === 'cassa' ? 'in cassa' : 'con SumUp';
   const isOk = action === 'confirm';
   const msg = isOk
-    ? `Confermare il pagamento SumUp di ${personName} (${eur(amount)})?\n\nLa quota risulterà saldata.`
-    : `Rifiutare il pagamento SumUp di ${personName} (${eur(amount)})?\n\nLa quota tornerà "da saldare".`;
+    ? `Confermare il pagamento ${metodo} di ${personName} (${eur(amount)})?\n\nLa quota risulterà saldata.`
+    : `Rifiutare il pagamento ${metodo} di ${personName} (${eur(amount)})?\n\nLa quota tornerà "da saldare".`;
   modalConfirm(msg, async () => {
-    const rpc = isOk ? 'admin_confirm_sumup_payment' : 'admin_reject_sumup_payment';
+    const rpc = isOk ? 'admin_confirm_payment' : 'admin_reject_payment';
     const {data, error} = await db.rpc(rpc, {p_operator_id: currentUser.id, p_target_type: targetType, p_target_id: targetId});
     if (error || !data || !data.ok) return toast((error && error.message) || (data && data.error) || 'Errore');
     toast(data.message || (isOk ? '✅ Pagamento confermato' : '❌ Pagamento rifiutato'), 'ok');

@@ -14,7 +14,7 @@
 <meta http-equiv="Cache-Control" content="no-cache">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=32">
+<link rel="stylesheet" href="style.css?v=33">
 </head>
 <body>
 
@@ -255,7 +255,7 @@
         <button class="tab active" data-p="st-tessere" onclick="switchTab(this,'stabs')">🏷️ Tessere</button>
         <button class="tab" data-p="st-eventi" onclick="switchTab(this,'stabs');loadStaffEvents()">📅 Catalogo</button>
         <button class="tab" data-p="st-gad" onclick="switchTab(this,'stabs');loadStaffGadgets()">🛍️ Gadget</button>
-        <button class="tab" data-p="st-sumup" id="s-sumup-tab" onclick="switchTab(this,'stabs');loadPendingSumup('staff')">📱 SumUp</button>
+        <button class="tab" data-p="st-sumup" id="s-sumup-tab" onclick="switchTab(this,'stabs');loadPendingSumup('staff')">💳 Pagamenti da confermare</button>
         <button class="tab" data-p="st-promo" onclick="switchTab(this,'stabs');loadStaffPromos()">🏷️ Promo</button>
       </div>
 
@@ -400,7 +400,7 @@
 
       <!-- ── TAB: PAGAMENTI SUMUP DA CONFERMARE (STAFF) ── -->
       <div id="st-sumup" class="tab-panel">
-        <div class="sec-lbl">📱 Pagamenti SumUp da confermare</div>
+        <div class="sec-lbl">💳 Pagamenti da confermare (SumUp e cassa)</div>
         <div id="s-sumup-list"><div class="empty">⏳ Carico…</div></div>
       </div>
 
@@ -450,7 +450,7 @@
         <button class="tab" data-p="at-users" onclick="switchTab(this,'atabs');loadAUsers()">👥 Soci</button>
         <button class="tab" data-p="at-tx" onclick="switchTab(this,'atabs');loadATx()">📋 Tx</button>
         <button class="tab" data-p="at-gest" onclick="switchTab(this,'atabs');loadAGest()">⚙️ Gest.</button>
-        <button class="tab" data-p="at-sumup" id="a-sumup-tab" onclick="switchTab(this,'atabs');loadPendingSumup('admin')">📱 SumUp da confermare</button>
+        <button class="tab" data-p="at-sumup" id="a-sumup-tab" onclick="switchTab(this,'atabs');loadPendingSumup('admin')">💳 Pagamenti da confermare</button>
         <button class="tab" data-p="at-orders" id="a-orders-tab" onclick="switchTab(this,'atabs');loadGadgetOrders()">📦 Ordini gadget</button>
         <button class="tab" data-p="at-ext" onclick="switchTab(this,'atabs');loadExternalGuests()">🎟️ Iscritti esterni</button>
         <button class="tab" data-p="at-refund" id="a-refund-tab" onclick="switchTab(this,'atabs');loadRefundQueue()">↩️ Rimborsi</button>
@@ -678,7 +678,7 @@
 
       <!-- PAGAMENTI SUMUP DA CONFERMARE -->
       <div id="at-sumup" class="tab-panel">
-        <div class="sec-lbl">📱 Pagamenti SumUp da confermare</div>
+        <div class="sec-lbl">💳 Pagamenti da confermare (SumUp e cassa)</div>
         <div id="a-sumup-list"><div class="empty">⏳ Carico…</div></div>
       </div>
 
@@ -897,7 +897,7 @@
     </div>
     <div id="gae-sizes-wrap" style="display:none;margin-bottom:12px">
       <div class="sec-lbl" style="margin-bottom:6px">Stock per taglia</div>
-      <div class="tbl-wrap"><table><thead><tr><th>Taglia</th><th>Stock</th></tr></thead><tbody id="gae-sizes-body"></tbody></table></div>
+      <div id="gae-sizes-body" class="size-grid"></div>
       <div style="font-size:11px;color:var(--mut);margin-top:6px">Stock 0 = taglia esaurita, le prenotazioni finiscono in lista d'attesa.</div>
     </div>
     <div style="display:flex;gap:8px;margin-top:12px">
@@ -1140,6 +1140,6 @@
 </script>
 <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-<script src="app.js?v=45"></script>
+<script src="app.js?v=46"></script>
 </body>
 </html>

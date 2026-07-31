@@ -298,8 +298,37 @@ body.nav-sidebar .screen .hdr{padding-left:80px}
 label.pr-row{text-transform:none;letter-spacing:normal;color:var(--txt);font-weight:400;font-size:14px;margin-bottom:0;cursor:pointer}
 .pr-chk{width:16px;height:16px;flex-shrink:0;accent-color:var(--gold)}
 
-/* KPI con sotto-valore */
-.kpi-sub{font-size:11px;color:var(--mut);margin-top:4px}
+/* GRIGLIA TAGLIE COMPATTA (editor gadget) — 3 colonne */
+.size-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.size-cell{display:flex;align-items:center;gap:6px;background:var(--bg);border:1px solid var(--brd);border-radius:8px;padding:5px 7px;margin-bottom:0;text-transform:none;letter-spacing:normal;color:var(--txt);cursor:pointer}
+.size-cell-lbl{font-size:12px;font-weight:700;color:var(--mut);flex-shrink:0;min-width:24px;text-align:left}
+.size-cell input{padding:8px 2px;font-size:15px;text-align:center;min-width:0;border-radius:6px;-moz-appearance:textfield}
+.size-cell input::-webkit-outer-spin-button,.size-cell input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+@media(max-width:340px){
+  .size-cell{flex-direction:column;align-items:stretch;gap:2px;padding:5px}
+  .size-cell-lbl{text-align:center;min-width:0}
+}
+
+/* BLOCCHI PAGAMENTO SOCIO (credito / SumUp / cassa) */
+.pay-blk{margin-top:10px;padding:10px 12px;border-radius:10px;border:1px solid var(--brd)}
+.pay-blk-t{font-size:12px;font-weight:700;letter-spacing:.04em;margin-bottom:2px}
+.pay-blk-hint{font-size:11px;color:var(--mut);margin-top:8px;line-height:1.45}
+.pay-credito{background:rgba(34,197,94,.10);border-color:rgba(34,197,94,.35)}
+.pay-credito .pay-blk-t{color:var(--grn)}
+.pay-sumup{background:rgba(59,130,246,.10);border-color:rgba(59,130,246,.35)}
+.pay-sumup .pay-blk-t{color:#60A5FA}
+.pay-cassa{background:rgba(245,158,11,.10);border-color:rgba(245,158,11,.35)}
+.pay-cassa .pay-blk-t{color:#F59E0B}
+.pay-blk .pr-row{border-bottom-color:rgba(255,255,255,.08)}
+:root.light .pay-sumup .pay-blk-t{color:#1D4ED8}
+:root.light .pay-cassa .pay-blk-t{color:#B45309}
+:root.light .pay-blk .pr-row{border-bottom-color:rgba(0,0,0,.08)}
+
+/* BADGE METODO PAGAMENTO (coda staff) */
+.pb-sumup{background:rgba(255,214,10,.15);color:var(--gold)}
+.pb-cash{background:rgba(245,158,11,.18);color:#F59E0B}
+:root.light .pb-sumup{background:rgba(154,111,0,.1);color:#7A5800}
+:root.light .pb-cash{background:rgba(180,83,9,.12);color:#B45309}
 
 /* GRAFICO A BARRE INLINE (statistiche taglie) */
 .bar-chart{width:100%;height:auto;overflow:visible}
