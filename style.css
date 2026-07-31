@@ -300,14 +300,28 @@ label.pr-row{text-transform:none;letter-spacing:normal;color:var(--txt);font-wei
 
 /* GRIGLIA TAGLIE COMPATTA (editor gadget) — 3 colonne */
 .size-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
-.size-cell{display:flex;align-items:center;gap:6px;background:var(--bg);border:1px solid var(--brd);border-radius:8px;padding:5px 7px;margin-bottom:0;text-transform:none;letter-spacing:normal;color:var(--txt);cursor:pointer}
-.size-cell-lbl{font-size:12px;font-weight:700;color:var(--mut);flex-shrink:0;min-width:24px;text-align:left}
-.size-cell input{padding:8px 2px;font-size:15px;text-align:center;min-width:0;border-radius:6px;-moz-appearance:textfield}
+.size-cell{display:flex;flex-direction:column;align-items:stretch;gap:2px;background:var(--bg);border:1px solid var(--brd);border-radius:8px;padding:5px;margin-bottom:0;text-transform:none;letter-spacing:normal;color:var(--txt);cursor:pointer}
+.size-cell-lbl{font-size:11px;font-weight:700;color:var(--mut);text-align:center;line-height:1.2}
+.size-cell input{width:100%;min-width:60px;padding:6px 2px;font-size:15px;text-align:center;border-radius:6px;-moz-appearance:textfield}
 .size-cell input::-webkit-outer-spin-button,.size-cell input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
-@media(max-width:340px){
-  .size-cell{flex-direction:column;align-items:stretch;gap:2px;padding:5px}
-  .size-cell-lbl{text-align:center;min-width:0}
-}
+
+/* SEGMENTED CONTROL METODO PAGAMENTO */
+.pm-seg{display:flex;gap:6px;flex-wrap:wrap}
+.pm-btn{flex:1;min-width:88px;background:transparent;border:1px solid var(--brd);border-radius:10px;padding:9px 4px;font-family:inherit;font-size:13px;font-weight:600;color:var(--mut);min-height:44px;transition:all .2s}
+.pm-btn.active{border-color:var(--gold);color:var(--gold);background:rgba(255,214,10,.12)}
+
+/* PILL METODO PAGAMENTO DICHIARATO */
+.pm-pill{font-size:11px;padding:3px 9px;border-radius:20px;font-weight:600;white-space:nowrap;display:inline-block}
+.pm-credito{background:rgba(34,197,94,.12);color:var(--grn)}
+.pm-contanti{background:rgba(245,158,11,.14);color:#F59E0B}
+.pm-sumup{background:rgba(59,130,246,.14);color:#60A5FA}
+:root.light .pm-contanti{background:rgba(180,83,9,.12);color:#B45309}
+:root.light .pm-sumup{background:rgba(29,78,216,.10);color:#1D4ED8}
+
+/* RIGA CONSEGNA GADGET (staff/admin) */
+.dlv-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.dlv-main{flex:1;min-width:150px}
+.dlv-size{color:var(--gold);font-weight:700}
 
 /* BLOCCHI PAGAMENTO SOCIO (credito / SumUp / cassa) */
 .pay-blk{margin-top:10px;padding:10px 12px;border-radius:10px;border:1px solid var(--brd)}

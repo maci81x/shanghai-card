@@ -14,7 +14,7 @@
 <meta http-equiv="Cache-Control" content="no-cache">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=33">
+<link rel="stylesheet" href="style.css?v=34">
 </head>
 <body>
 
@@ -255,6 +255,7 @@
         <button class="tab active" data-p="st-tessere" onclick="switchTab(this,'stabs')">🏷️ Tessere</button>
         <button class="tab" data-p="st-eventi" onclick="switchTab(this,'stabs');loadStaffEvents()">📅 Catalogo</button>
         <button class="tab" data-p="st-gad" onclick="switchTab(this,'stabs');loadStaffGadgets()">🛍️ Gadget</button>
+        <button class="tab" data-p="st-deliv" id="s-deliv-tab" onclick="switchTab(this,'stabs');loadDeliveries('staff')">📦 Consegne gadget</button>
         <button class="tab" data-p="st-sumup" id="s-sumup-tab" onclick="switchTab(this,'stabs');loadPendingSumup('staff')">💳 Pagamenti da confermare</button>
         <button class="tab" data-p="st-promo" onclick="switchTab(this,'stabs');loadStaffPromos()">🏷️ Promo</button>
       </div>
@@ -398,6 +399,20 @@
         <div id="st-gad-list"><div class="empty">Carico gadget…</div></div>
       </div>
 
+      <!-- ── TAB: CONSEGNE GADGET (STAFF) ── -->
+      <div id="st-deliv" class="tab-panel">
+        <div class="sec-hdr">
+          <div class="sec-title">📦 Consegne gadget</div>
+          <button class="btn-sm" onclick="loadDeliveries('staff')">↻ Aggiorna</button>
+        </div>
+        <div class="filter-row" id="sd-filters" style="margin-bottom:8px"></div>
+        <div class="filter-row" style="margin-bottom:10px">
+          <input id="sd-f-name" type="text" placeholder="Filtra gadget…" style="flex:1;min-width:120px" oninput="renderDeliveries()">
+          <select id="sd-f-size" style="width:auto;min-width:96px" onchange="renderDeliveries()"><option value="">Tutte le taglie</option></select>
+        </div>
+        <div id="sd-list"><div class="empty">⏳ Carico…</div></div>
+      </div>
+
       <!-- ── TAB: PAGAMENTI SUMUP DA CONFERMARE (STAFF) ── -->
       <div id="st-sumup" class="tab-panel">
         <div class="sec-lbl">💳 Pagamenti da confermare (SumUp e cassa)</div>
@@ -451,7 +466,7 @@
         <button class="tab" data-p="at-tx" onclick="switchTab(this,'atabs');loadATx()">📋 Tx</button>
         <button class="tab" data-p="at-gest" onclick="switchTab(this,'atabs');loadAGest()">⚙️ Gest.</button>
         <button class="tab" data-p="at-sumup" id="a-sumup-tab" onclick="switchTab(this,'atabs');loadPendingSumup('admin')">💳 Pagamenti da confermare</button>
-        <button class="tab" data-p="at-orders" id="a-orders-tab" onclick="switchTab(this,'atabs');loadGadgetOrders()">📦 Ordini gadget</button>
+        <button class="tab" data-p="at-orders" id="a-orders-tab" onclick="switchTab(this,'atabs');loadDeliveries('admin')">📦 Consegne gadget</button>
         <button class="tab" data-p="at-ext" onclick="switchTab(this,'atabs');loadExternalGuests()">🎟️ Iscritti esterni</button>
         <button class="tab" data-p="at-refund" id="a-refund-tab" onclick="switchTab(this,'atabs');loadRefundQueue()">↩️ Rimborsi</button>
       </div>
@@ -682,21 +697,16 @@
         <div id="a-sumup-list"><div class="empty">⏳ Carico…</div></div>
       </div>
 
-      <!-- ORDINI GADGET -->
+      <!-- CONSEGNE GADGET -->
       <div id="at-orders" class="tab-panel">
         <div class="sec-hdr">
-          <div class="sec-title">📦 Ordini gadget</div>
-          <button class="btn-sm" onclick="loadGadgetOrders()">↻ Aggiorna</button>
+          <div class="sec-title">📦 Consegne gadget</div>
+          <button class="btn-sm" onclick="loadDeliveries('admin')">↻ Aggiorna</button>
         </div>
+        <div class="filter-row" id="go-filters" style="margin-bottom:8px"></div>
         <div class="filter-row" style="margin-bottom:10px">
-          <input id="go-f-name" type="text" placeholder="Filtra gadget…" style="flex:1;min-width:120px" oninput="renderGadgetOrders()">
-          <select id="go-f-size" style="width:auto;min-width:96px" onchange="renderGadgetOrders()"><option value="">Tutte le taglie</option></select>
-          <select id="go-f-status" style="width:auto;min-width:120px" onchange="renderGadgetOrders()">
-            <option value="">Tutti gli stati</option>
-            <option value="prenotato">Prenotato</option>
-            <option value="attesa_ordine">Attesa ordine</option>
-            <option value="consegnato">Consegnato</option>
-          </select>
+          <input id="go-f-name" type="text" placeholder="Filtra gadget…" style="flex:1;min-width:120px" oninput="renderDeliveries()">
+          <select id="go-f-size" style="width:auto;min-width:96px" onchange="renderDeliveries()"><option value="">Tutte le taglie</option></select>
         </div>
         <div id="go-list"><div class="empty">⏳ Carico…</div></div>
         <div class="sec-lbl" style="margin-top:18px">⏳ Waitlist</div>
@@ -1018,8 +1028,12 @@
       <span id="gqty-n" style="font-size:32px;font-weight:700;min-width:40px;text-align:center">1</span>
       <button class="btn btn-p" style="width:44px;height:44px;font-size:22px;padding:0;border-radius:50%" onclick="gqtyAdj(1)">+</button>
     </div>
-    <div id="gqty-total" style="text-align:center;font-size:15px;color:var(--gold);font-weight:700;margin-bottom:8px"></div>
-    <div style="font-size:11px;color:var(--mut);margin-bottom:20px;text-align:center">Ritira e paga in cassa da Antonella</div>
+    <div id="gqty-total" style="text-align:center;font-size:15px;color:var(--gold);font-weight:700;margin-bottom:12px"></div>
+    <div class="fg" style="margin-bottom:6px">
+      <label>Come intendi pagare?</label>
+      <div id="gqty-pay" class="pm-seg"></div>
+    </div>
+    <div id="gqty-pay-note" style="font-size:11px;color:var(--mut);margin-bottom:16px;text-align:center;line-height:1.45"></div>
     <div style="display:flex;gap:8px">
       <button class="btn btn-q" style="flex:1" onclick="closeGqty()">Annulla</button>
       <button class="btn btn-p" style="flex:1" onclick="confirmGqty()">📌 Prenota</button>
@@ -1080,6 +1094,10 @@
       <label>Quantità</label>
       <input id="gmod-qty" type="number" min="1" max="10" step="1" value="1" oninput="updateGmodDiff()">
     </div>
+    <div class="fg">
+      <label>Metodo pagamento</label>
+      <div id="gmod-pay" class="pm-seg"></div>
+    </div>
     <div id="gmod-diff" style="font-size:12px;color:var(--gold);margin-bottom:12px;min-height:18px"></div>
     <div style="display:flex;gap:8px">
       <button class="btn btn-q" style="flex:1" onclick="closeGmod()">Annulla</button>
@@ -1124,6 +1142,27 @@
   </div>
 </div>
 
+<!-- MODALE CONSEGNA GADGET -->
+<div id="deliv-bg" class="modal-ov">
+  <div class="modal-panel" style="width:min(360px,94vw)">
+    <div id="deliv-title" style="font-weight:700;font-size:17px;margin-bottom:4px"></div>
+    <div id="deliv-gadget" style="font-size:13px;color:var(--mut);margin-bottom:14px"></div>
+    <div class="fg" id="deliv-size-fg" style="display:none">
+      <label>Taglia consegnata</label>
+      <select id="deliv-size" onchange="updateDelivSummary()"></select>
+    </div>
+    <div class="fg">
+      <label>Metodo pagamento</label>
+      <div id="deliv-pay" class="pm-seg"></div>
+    </div>
+    <div id="deliv-summary" style="font-size:13px;line-height:1.6;margin-bottom:14px"></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-q" style="flex:1" onclick="closeDeliv()">Annulla</button>
+      <button class="btn btn-p" style="flex:2" id="deliv-ok" onclick="confirmDeliv()">Consegna</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODALE GUIDA -->
 <div id="guide-bg" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:2000;overflow-y:auto;padding:20px 12px">
   <div style="max-width:520px;margin:0 auto;background:var(--bgc);border-radius:var(--r);padding:24px 20px;position:relative">
@@ -1140,6 +1179,6 @@
 </script>
 <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-<script src="app.js?v=46"></script>
+<script src="app.js?v=47"></script>
 </body>
 </html>

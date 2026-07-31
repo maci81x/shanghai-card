@@ -812,14 +812,15 @@ function renderGadgets(gads) {
   if (!el) return;
   if (!_gadgetsCache.length) { el.innerHTML='<div class="empty">Nessun gadget disponibile</div>'; return; }
   el.innerHTML = `<div style="font-size:13px;color:var(--mut);margin-bottom:10px;padding:10px;background:var(--bg);border-radius:8px">
-    🏪 Prenota qui, ritira e paga in cassa da <strong>Antonella</strong>
+    🏪 Prenota qui e scegli come pagare: <strong>ritiri e paghi allo staff</strong> al momento della consegna
   </div>` +
   _gadgetsCache.map(g => {
     const sizes = _gadgetSizes(g);
     const sel   = _sizeSel[g.id] || '';
     const cur   = sizes.find(s => s.size === sel);
+    const curAvail = cur ? Number(cur.available != null ? cur.available : cur.stock || 0) : 0;
     const needSize = g.has_sizes && !cur;
-    const waitlist = !!(cur && Number(cur.stock || 0) <= 0);
+    const waitlist = !!(cur && curAvail <= 0);
     const btnLabel = needSize ? 'Scegli una taglia' : (waitlist ? 'Prenota (attesa ordine)' : '📌 Prenota');
     return `
     <div class="cat-card">
@@ -827,18 +828,51 @@ function renderGadgets(gads) {
       <div class="cat-title">${_esc(g.name)}</div>
       <div class="cat-sub">${_esc(g.description||'')}</div>
       ${sizes.length ? `<div class="size-pills">${sizes.map(s => `
-        <button class="size-pill ${s.size===sel?'active':''} ${Number(s.stock||0)<=0?'out':''}"
+        <button class="size-pill ${s.size===sel?'active':''} ${Number(s.available != null ? s.available : s.stock || 0)<=0?'out':''}"
           onclick="selectGadgetSize('${g.id}','${_esc(s.size)}')">${_esc(s.size)}</button>`).join('')}</div>` : ''}
       ${waitlist ? `<div class="size-hint">⏳ Taglia esaurita. Al raggiungimento di un numero adeguato verrà effettuato l'ordine e sarai avvisato.</div>` : ''}
       <div class="cat-foot">
         <div class="cat-price">${eur(g.price)}</div>
-        <div class="cat-stock">${g.has_sizes ? (cur ? 'Disp. ' + (cur.stock||0) : 'Taglie disponibili') : 'Stock: ' + g.stock}</div>
+        <div class="cat-stock">${g.has_sizes ? (cur ? 'Disp. ' + curAvail : 'Taglie disponibili') : 'Stock: ' + g.stock}</div>
         <button class="btn-sm p" ${needSize?'disabled style="opacity:.55"':''} onclick="openReserveGadget('${g.id}')">${btnLabel}</button>
       </div>
     </div>`;
   }).join('');
 }
-let _gqtySize = '', _gqtyWait = false;
+// ── METODI DI PAGAMENTO GADGET ───────────────────────────────────────
+const PAY_METHODS = [
+  {v: 'credito',  label: '💳 Credito'},
+  {v: 'contanti', label: '💵 Contanti'},
+  {v: 'sumup',    label: '🔗 SumUp'}
+];
+const _PM_PILL = {
+  credito:  ['💳 Credito',  'pm-credito'],
+  contanti: ['💵 Contanti', 'pm-contanti'],
+  sumup:    ['🔗 SumUp',    'pm-sumup']
+};
+function payMethodPill(method) {
+  const [label, cls] = _PM_PILL[method] || ['—', 'pm-contanti'];
+  return `<span class="pm-pill ${cls}">${label}</span>`;
+}
+function _pmSegHtml(selected, onclickFn) {
+  return PAY_METHODS.map(m =>
+    `<button type="button" class="pm-btn ${m.v === selected ? 'active' : ''}" onclick="${onclickFn}('${m.v}')">${m.label}</button>`).join('');
+}
+let _gqtySize = '', _gqtyWait = false, _gqtyPay = 'credito';
+function setGqtyPay(method) {
+  _gqtyPay = method;
+  document.getElementById('gqty-pay').innerHTML = _pmSegHtml(_gqtyPay, 'setGqtyPay');
+  const note = document.getElementById('gqty-pay-note');
+  const tot = _gqtyPrice * _gqtyN;
+  if (_gqtyPay === 'credito') {
+    note.innerHTML = `Il credito verrà addebitato dallo staff al momento della consegna.` +
+      (_userBalance < tot ? `<br><span style="color:var(--neg)">Saldo attuale ${eur(_userBalance)}: ricarica prima del ritiro.</span>` : `<br>Saldo attuale: ${eur(_userBalance)}`);
+  } else if (_gqtyPay === 'contanti') {
+    note.textContent = 'Pagherai in contanti allo staff al momento del ritiro.';
+  } else {
+    note.textContent = 'Pagherai con SumUp allo staff al momento del ritiro.';
+  }
+}
 function openReserveGadget(id) {
   const g = _gadgetsCache.find(x => x.id === id);
   if (!g) return toast('Gadget non disponibile');
@@ -859,24 +893,26 @@ function openReserveGadget(id) {
   wEl.style.display = _gqtyWait ? '' : 'none';
   document.getElementById('gqty-n').textContent = 1;
   document.getElementById('gqty-total').textContent = 'Totale: ' + eur(g.price);
+  setGqtyPay('credito');
   document.getElementById('gqty-bg').style.display = 'flex';
 }
 function gqtyAdj(delta) {
   _gqtyN = Math.min(10, Math.max(1, _gqtyN + delta));
   document.getElementById('gqty-n').textContent = _gqtyN;
   document.getElementById('gqty-total').textContent = 'Totale: ' + eur(_gqtyPrice * _gqtyN);
+  setGqtyPay(_gqtyPay);
 }
 function closeGqty() { document.getElementById('gqty-bg').style.display = 'none'; }
 async function confirmGqty() {
   closeGqty();
   const {data, error} = await db.rpc('user_reserve_gadget', {
-    p_user_id: currentUser.id, p_gadget_id: _gqtyId, p_quantity: _gqtyN, p_size: _gqtySize || null
+    p_user_id: currentUser.id, p_gadget_id: _gqtyId, p_quantity: _gqtyN,
+    p_size: _gqtySize || null, p_payment_method: _gqtyPay
   });
   if (error || !data || !data.ok) return toast((error&&error.message)||(data&&data.error)||'Errore prenotazione');
-  const fallback = data.waitlist
+  toast(data.waitlist
     ? '⏳ Sei in lista d\'attesa: ti avviseremo quando arriverà l\'ordine.'
-    : '📌 Prenotazione inviata! Ritira e paga in cassa da Antonella.';
-  toast(data.message || fallback, 'ok');
+    : 'Prenotato · da ritirare presso lo staff', 'ok');
   await refreshUser();
   await loadCatalog();
 }
@@ -1154,24 +1190,32 @@ async function loadUserGadgetReservations() {
   }
   const active = list.filter(r => (r.status || '') !== 'annullato');
   if (!active.length) { el.innerHTML = ''; return; }
-  el.innerHTML = `<div class="sec-lbl" style="margin-top:16px">I miei gadget</div>` +
+  el.innerHTML = `<div class="sec-lbl" style="margin-top:16px">Le mie prenotazioni gadget</div>` +
     active.map(r => {
-      const id  = _resId(r);
-      const mod = r.status === 'prenotato' || r.status === 'attesa_ordine';
+      const id   = _resId(r);
+      const mod  = r.status === 'prenotato' || r.status === 'attesa_ordine';
+      const done = r.status === 'consegnato';
+      const tot  = r.payment_amount != null ? r.payment_amount : r.total_price;
       return `<div class="card" style="margin-bottom:8px;padding:12px">
-        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-          <div style="flex:1;min-width:120px">
-            <div style="font-weight:600">${_esc(r.gadget_name)}</div>
-            <div style="font-size:12px;color:var(--mut)">
-              Qtà ${r.quantity}${r.size ? ' · Taglia ' + _esc(r.size) : ''} · ${eur(r.payment_amount != null ? r.payment_amount : r.total_price)}
-              ${r.created_at ? ' · ' + fdt(r.created_at).split(' ')[0] : ''}
+        <div class="dlv-row">
+          <div class="dlv-main">
+            <div style="font-weight:600;font-size:15px">
+              ${_esc(r.gadget_name)}${r.size ? ` · <span class="dlv-size">Taglia ${_esc(r.size)}</span>` : ''}
+              <span style="color:var(--mut);font-weight:500"> · x${r.quantity}</span>
             </div>
+            <div style="font-size:13px;color:var(--gold);font-weight:700;margin-top:2px">${eur(tot)}</div>
           </div>
           ${resBadge(r.status)}
         </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px">
+          ${payMethodPill(r.payment_method)}
+          ${done
+            ? `<span style="font-size:12px;color:var(--grn)">✅ Consegnato il ${r.fulfilled_at ? fdt(r.fulfilled_at).split(' ')[0] : '—'}</span>`
+            : `<span style="font-size:11px;color:var(--mut)">Pagherai allo staff al ritiro</span>`}
+        </div>
         ${mod ? `<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
           <button class="btn-sm" onclick="openGmod('${id}')">✏️ Modifica</button>
-          <button class="btn-sm" style="color:var(--neg)" onclick="cancelGadgetReservation('${id}')">🗑️ Annulla</button>
+          <button class="btn-sm" style="color:var(--neg)" onclick="cancelGadgetReservation('${id}')">🗑 Annulla</button>
         </div>` : ''}
       </div>`;
     }).join('');
@@ -1205,8 +1249,14 @@ async function openGmod(resId) {
     sel.innerHTML = ''; fg.style.display = 'none';
   }
   document.getElementById('gmod-qty').value = r.quantity || 1;
-  updateGmodDiff();
+  setGmodPay(r.payment_method || 'credito');
   document.getElementById('gmod-bg').classList.add('open');
+}
+let _gmodPay = 'credito';
+function setGmodPay(method) {
+  _gmodPay = method;
+  document.getElementById('gmod-pay').innerHTML = _pmSegHtml(_gmodPay, 'setGmodPay');
+  updateGmodDiff();
 }
 function closeGmod() { document.getElementById('gmod-bg').classList.remove('open'); _gmodRes = null; }
 function _gmodDiff() {
@@ -1217,11 +1267,11 @@ function _gmodDiff() {
 function updateGmodDiff() {
   const el = document.getElementById('gmod-diff');
   if (!el || !_gmodRes) return;
-  const diff = _gmodDiff();
-  const credito = _gmodRes.payment_method === 'credito';
-  if (!diff) { el.textContent = ''; return; }
-  if (diff > 0) el.textContent = credito ? `Verranno addebitati altri ${eur(diff)}` : `Differenza da saldare: ${eur(diff)}`;
-  else el.textContent = credito ? `Ti verranno rimborsati ${eur(-diff)}` : `Differenza a tuo favore: ${eur(-diff)}`;
+  const qty = parseInt(document.getElementById('gmod-qty').value) || 0;
+  const tot = _resUnit(_gmodRes) * qty;
+  const label = (_PM_PILL[_gmodPay] || ['—'])[0];
+  el.innerHTML = `Nuovo totale: <strong>${eur(tot)}</strong> — ${label}` +
+    `<div style="color:var(--mut);font-size:11px;margin-top:2px">Nessun addebito ora: paghi allo staff alla consegna.</div>`;
 }
 async function saveGmod() {
   if (!_gmodRes) return;
@@ -1230,12 +1280,15 @@ async function saveGmod() {
   const size = document.getElementById('gmod-size-fg').style.display === 'none'
     ? null : (document.getElementById('gmod-size').value || null);
   if (qty < 1) return toast('Quantità non valida');
-  if (qty === (Number(r.quantity) || 0) && (size || null) === (r.size || null)) { closeGmod(); return; }
-  const diff = _gmodDiff();
-  const credito = r.payment_method === 'credito';
+  const pay = _gmodPay;
+  const unchanged = qty === (Number(r.quantity) || 0)
+    && (size || null) === (r.size || null)
+    && pay === (r.payment_method || 'credito');
+  if (unchanged) { closeGmod(); return; }
   const run = async () => {
     const {data, error} = await db.rpc('user_modify_gadget_reservation', {
-      p_user_id: currentUser.id, p_reservation_id: _resId(r), p_new_size: size, p_new_quantity: qty
+      p_user_id: currentUser.id, p_reservation_id: _resId(r),
+      p_new_size: size, p_new_quantity: qty, p_new_payment_method: pay
     });
     if (error || !data || !data.ok) return toast((error && error.message) || (data && data.error) || 'Errore modifica');
     toast(data.message || '✅ Prenotazione aggiornata', 'ok');
@@ -1243,16 +1296,13 @@ async function saveGmod() {
     await loadCatalog();
   };
   closeGmod();
-  if (diff !== 0 && credito) {
-    const msg = diff > 0
-      ? `Confermi la modifica?\n\nVerranno addebitati altri ${eur(diff)} sul tuo credito.`
-      : `Confermi la modifica?\n\nTi verranno rimborsati ${eur(-diff)} sul tuo credito.`;
-    modalConfirm(msg, run);
-  } else if (diff !== 0) {
-    modalConfirm(`Confermi la modifica?\n\nNuovo totale: ${eur(_resUnit(r) * qty)}${size ? '\nTaglia: ' + size : ''}`, run);
-  } else {
-    modalConfirm(`Confermi il cambio taglia in ${size}?`, run);
-  }
+  const dett = [
+    size ? `Taglia: ${size}` : null,
+    `Quantità: ${qty}`,
+    `Metodo: ${(_PM_PILL[pay] || ['—'])[0]}`,
+    `Totale: ${eur(_resUnit(r) * qty)}`
+  ].filter(Boolean).join('\n');
+  modalConfirm(`Confermi la modifica della prenotazione?\n\n${dett}\n\nPagherai allo staff al momento della consegna.`, run);
 }
 async function cancelGadgetReservation(reservationId) {
   modalConfirm('Sei sicuro di voler annullare?\n\nLa prenotazione verrà cancellata.', async () => {
@@ -1896,46 +1946,45 @@ async function loadStaffPendingEvents(cardId) {
       </div>
     </div>`).join('');
 }
+// ── PRENOTAZIONI GADGET IN CASSA (staff/admin) ───────────────────────
+let _cassaRes = [];
+function _cassaFilterRes(rpcData, userId) {
+  const all = (rpcData && (rpcData.reservations || (Array.isArray(rpcData) ? rpcData : []))) || [];
+  const card = staffTarget && staffTarget.card_id;
+  const list = all.filter(r => (card && r.card_id === card) || (userId && r.user_id === userId));
+  _cassaRes = list;
+  return list;
+}
+function _cassaResHtml(list, from) {
+  return list.map(r => {
+    const tot = _num(r.payment_amount, r.total_price);
+    const sz  = (r.has_sizes && r.size) ? ` · <span class="dlv-size">taglia ${_esc(r.size)}</span>` : '';
+    return `<div class="card" style="margin-bottom:8px;padding:12px">
+      <div class="dlv-row">
+        <div class="dlv-main">
+          <div style="font-weight:600">${_esc(r.gadget_name)}${sz} <span style="color:var(--mut)">· x${r.quantity}</span></div>
+          <div style="font-size:12px;color:var(--mut);margin-top:2px">Prenotato ${r.created_at ? fdt(r.created_at).split(' ')[0] : '—'}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-weight:700;color:var(--gold)">${eur(tot)}</div>
+          <div style="margin-top:3px">${payMethodPill(r.payment_method)}</div>
+        </div>
+      </div>
+      <button class="btn btn-p w100" style="margin-top:10px" onclick="openDeliv('${_resId(r)}','${from}')">📦 Consegna</button>
+    </div>`;
+  }).join('');
+}
 async function loadStaffGadgetReservationsForUser(userId) {
   const wrap = document.getElementById('s-gadget-res-wrap');
   if (!wrap) return;
-  const {data, error} = await db.rpc('staff_list_gadget_reservations', {p_operator_id: currentUser.id});
+  const {data, error} = await db.rpc('staff_list_gadget_reservations', {p_operator_id: currentUser.id, p_status_filter: 'prenotato'});
   if (error) { wrap.style.display='none'; return; }
-  const list = Array.isArray(data) ? data.filter(r => {
-    const u = allAdminUsers.find(u => u.id === userId) || staffTarget;
-    return u && r.card_id === (u.card_id || staffTarget?.card_id);
-  }) : [];
+  const list = _cassaFilterRes(data, userId);
   if (!list.length) { wrap.style.display='none'; return; }
   wrap.style.display = 'block';
-  document.getElementById('s-gadget-res-list').innerHTML = list.map(r => `
-    <div class="card" style="margin-bottom:8px;padding:12px">
-      <div style="font-weight:600">${_esc(r.gadget_name)} x${r.quantity}</div>
-      <div style="font-size:12px;color:var(--mut)">${eur(r.total_price)} · Prenotato ${fdt(r.created_at).split(' ')[0]}</div>
-      <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
-        <button class="btn btn-p" style="flex:1;min-width:80px" onclick="staffFulfillGadget('${r.reservation_id}','credito','${_esc(r.gadget_name)}',${r.total_price})">💳 Credito</button>
-        <button class="btn btn-q" style="flex:1;min-width:80px" onclick="staffFulfillGadget('${r.reservation_id}','contanti','${_esc(r.gadget_name)}',${r.total_price})">💵 Contanti</button>
-        <button class="btn btn-g" style="flex:1;min-width:80px" onclick="staffFulfillGadget('${r.reservation_id}','sumup','${_esc(r.gadget_name)}',${r.total_price})">📱 SumUp</button>
-      </div>
-    </div>`).join('');
+  document.getElementById('s-gadget-res-list').innerHTML = _cassaResHtml(list, 'cassa-staff');
 }
-async function staffFulfillGadget(resId, method, name, total) {
-  const label = {credito:'💳 Credito',contanti:'💵 Contanti',sumup:'📱 SumUp'}[method]||method;
-  let previewLine = '';
-  if (method === 'credito' && staffTarget) {
-    const {data: pv} = await db.rpc('staff_preview_charge', {p_operator_id: currentUser.id, p_card_id: staffTarget.card_id, p_amount: total});
-    if (pv && pv.promo_code) previewLine = `\n\n⚡ Promo [${pv.promo_code}]: -${eur(pv.promo_discount)}\nTotale → ${eur(pv.final_amount)}`;
-  }
-  modalConfirm(`Consegnare "${name}" e incassare (${label})?${previewLine}`, async () => {
-    const {data, error} = await db.rpc('staff_fulfill_gadget_reservation', {p_operator_id: currentUser.id, p_reservation_id: resId, p_payment_method: method});
-    if (error||!data.ok) return toast((error&&error.message)||data.error);
-    const msg = data.promo_code
-      ? `✅ Consegnato! Promo ${data.promo_code}: -${eur(data.discount)} → Addebitato ${eur(data.charged)}`
-      : `✅ Consegnato! ${eur(data.amount)} (${label})`;
-    toast(msg, 'ok');
-    if (staffTarget) { const {data: r} = await db.rpc('staff_lookup', {p_card_id: staffTarget.card_id}); if (r?.ok) { const nu = r.user || r; staffTarget = nu; document.getElementById('s-res-bal').textContent = eur(nu.balance); } }
-    loadStaffGadgetReservationsForUser(staffTarget?.id);
-  });
-}
+
 async function loadStaffRegisterEventDropdown(cardId) {
   const wrap = document.getElementById('s-reg-event-wrap');
   if (!wrap) return;
@@ -2255,40 +2304,14 @@ async function loadAcPendingEvents(cardId) {
 async function loadAcGadgetReservationsForUser(userId) {
   const wrap = document.getElementById('ac-gadget-res-wrap');
   if (!wrap) return;
-  const {data, error} = await db.rpc('staff_list_gadget_reservations', {p_operator_id: currentUser.id});
+  const {data, error} = await db.rpc('staff_list_gadget_reservations', {p_operator_id: currentUser.id, p_status_filter: 'prenotato'});
   if (error) { wrap.style.display='none'; return; }
-  const list = Array.isArray(data) ? data.filter(r => r.card_id === staffTarget?.card_id) : [];
+  const list = _cassaFilterRes(data, userId);
   if (!list.length) { wrap.style.display='none'; return; }
   wrap.style.display = 'block';
-  document.getElementById('ac-gadget-res-list').innerHTML = list.map(r => `
-    <div class="card" style="margin-bottom:8px;padding:12px">
-      <div style="font-weight:600">${_esc(r.gadget_name)} x${r.quantity}</div>
-      <div style="font-size:12px;color:var(--mut)">${eur(r.total_price)} · Prenotato ${fdt(r.created_at).split(' ')[0]}</div>
-      <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
-        <button class="btn btn-p" style="flex:1;min-width:80px" onclick="acFulfillGadget('${r.reservation_id}','credito','${_esc(r.gadget_name)}',${r.total_price})">💳 Credito</button>
-        <button class="btn btn-q" style="flex:1;min-width:80px" onclick="acFulfillGadget('${r.reservation_id}','contanti','${_esc(r.gadget_name)}',${r.total_price})">💵 Contanti</button>
-        <button class="btn btn-g" style="flex:1;min-width:80px" onclick="acFulfillGadget('${r.reservation_id}','sumup','${_esc(r.gadget_name)}',${r.total_price})">📱 SumUp</button>
-      </div>
-    </div>`).join('');
+  document.getElementById('ac-gadget-res-list').innerHTML = _cassaResHtml(list, 'cassa-admin');
 }
-async function acFulfillGadget(resId, method, name, total) {
-  const label = {credito:'💳 Credito',contanti:'💵 Contanti',sumup:'📱 SumUp'}[method]||method;
-  let previewLine = '';
-  if (method === 'credito' && staffTarget) {
-    const {data: pv} = await db.rpc('staff_preview_charge', {p_operator_id: currentUser.id, p_card_id: staffTarget.card_id, p_amount: total});
-    if (pv && pv.promo_code) previewLine = `\n\n⚡ Promo [${pv.promo_code}]: -${eur(pv.promo_discount)}\nTotale → ${eur(pv.final_amount)}`;
-  }
-  modalConfirm(`Consegnare "${name}" e incassare (${label})?${previewLine}`, async () => {
-    const {data, error} = await db.rpc('staff_fulfill_gadget_reservation', {p_operator_id: currentUser.id, p_reservation_id: resId, p_payment_method: method});
-    if (error||!data.ok) return toast((error&&error.message)||data.error);
-    const msg = data.promo_code
-      ? `✅ Consegnato! Promo ${data.promo_code}: -${eur(data.discount)} → ${eur(data.charged)}`
-      : `✅ Consegnato! ${eur(data.amount)} (${label})`;
-    toast(msg, 'ok');
-    if (staffTarget) { const {data: r} = await db.rpc('staff_lookup', {p_card_id: staffTarget.card_id}); if (r?.ok) { const nu = r.user || r; staffTarget = nu; document.getElementById('ac-res-bal').textContent = eur(nu.balance); } }
-    loadAcGadgetReservationsForUser(staffTarget?.id);
-  });
-}
+
 async function loadAcRegisterEventDropdown(cardId) {
   const wrap = document.getElementById('ac-reg-event-wrap');
   if (!wrap) return;
@@ -2456,7 +2479,7 @@ async function loadDash() {
   loadChart(null);
   _tabBadge('a-sumup-tab',  data.pending_sumup_count,  '💳 Pagamenti da confermare');
   _tabBadge('a-refund-tab', data.pending_refund_count, '↩️ Rimborsi');
-  _tabBadge('a-orders-tab', data.waitlist_count,       '📦 Ordini gadget');
+  _tabBadge('a-orders-tab', data.waitlist_count,       '📦 Consegne gadget');
   const soci = data.total_soci != null ? data.total_soci : data.total_users;
   const kpis = [
     {ic:'👥', v:soci, l:'Soci attivi'},
@@ -2664,10 +2687,10 @@ function _renderAdminTx() {
     + '</tbody></table></div>';
 }
 async function loadAGest() {
-  const [{data: evData}, {data: catData}, {data: gadSum}] = await Promise.all([
+  const [{data: evData}, {data: catData}, {data: gadRes}] = await Promise.all([
     db.rpc('admin_list_events'),
     db.rpc('get_catalog'),
-    db.rpc('staff_gadget_reservation_summary')
+    db.rpc('staff_list_gadget_reservations', {p_operator_id: currentUser.id, p_status_filter: 'all'})
   ]);
   // Pre-load SumUp links if tab is active
   const sumupPanel = document.getElementById('gs-sumup');
@@ -2741,30 +2764,25 @@ async function loadAGest() {
   _eventsAdminCache = {}; (evs||[]).forEach(e => _eventsAdminCache[e.id] = e);
   _adminGadgets = gads;
   _adminEvents  = cat.events || evs || [];
-  const gadSummary = (gadSum && gadSum.gadgets) ? gadSum.gadgets : [];
-  const gadSumMap = {};
-  gadSummary.forEach(g => { gadSumMap[g.id] = g; });
+  const resByGadget = _groupReservationsByGadget(gadRes);
   gadList.innerHTML = gads.length
     ? gads.map(g => {
-        const sum = gadSumMap[g.id] || {prenotati: 0, disponibili: g.stock, prenotazioni: []};
-        const pren = sum.prenotati || 0;
-        const disp = sum.disponibili ?? g.stock;
         const gn = g.name.replace(/'/g,"\\'");
+        const nRes = (resByGadget[g.id] || []).length;
         const szLine = g.has_sizes
-          ? `<div style="font-size:11px;color:var(--mut);margin-top:4px">📏 ${(g.sizes||[]).map(s=>`${_esc(s.size)}: ${s.stock}`).join(' · ') || 'nessuna taglia'}</div>`
+          ? `<div style="font-size:11px;color:var(--mut);margin-top:4px">📏 ${(g.sizes||[]).map(s=>`${_esc(s.size)}: ${s.available != null ? s.available : s.stock}`).join(' · ') || 'nessuna taglia'}</div>`
           : '';
         return `<div class="card" style="margin-bottom:8px;padding:12px">
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
             <span style="font-weight:700;flex:1">${_esc(g.name)}</span>
-            <span style="font-size:12px;color:var(--mut)">${g.has_sizes?'Taglie attive':'Stock: '+g.stock}${pren>0?` · <span style="color:var(--grn);font-weight:600">Disp: ${disp}</span>`:''}</span>
+            <span style="font-size:12px;color:var(--mut)">${g.has_sizes?'Taglie attive':'Stock: '+g.stock}</span>
             <span style="font-weight:700;color:var(--gold)">${eur(g.price)}</span>
           </div>
           ${g.description?`<div style="font-size:12px;color:var(--mut);margin-top:3px">${_esc(g.description)}</div>`:''}
           ${szLine}
+          <div style="font-size:12px;margin-top:6px">${_gadgetCounters(g)}</div>
           <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;align-items:center">
-            ${pren>0
-              ? `<button class="btn-sm" style="background:rgba(255,214,10,.15);color:var(--gold)" onclick="toggleGadgetPren('${g.id}',this)">📌 ${pren} prenotat${pren===1?'o':'i'}</button>`
-              : `<span style="font-size:11px;color:var(--mut)">📌 0 prenotati</span>`}
+            ${nRes ? `<button class="btn-sm" onclick="toggleGadgetPren('${g.id}',this)">👥 Vedi prenotazioni (${nRes})</button>` : ''}
             <button class="btn-sm" onclick="openEditGadget('${g.id}')">✏️ Modifica</button>
             <button class="btn-sm" style="color:var(--neg)" onclick="adminDeleteGadget('${g.id}','${gn}')">🗑️ Elimina</button>
           </div>
@@ -2772,10 +2790,9 @@ async function loadAGest() {
         </div>`;
       }).join('')
     : '<div class="empty">Nessun gadget</div>';
-  gadSummary.forEach(g => {
-    const el = document.getElementById('gpren-' + g.id);
-    if (!el) return;
-    el.dataset.pren = JSON.stringify(g.prenotazioni || []);
+  Object.keys(resByGadget).forEach(gid => {
+    const el = document.getElementById('gpren-' + gid);
+    if (el) el.dataset.pren = JSON.stringify(resByGadget[gid]);
   });
   const prs = cat.promos||[];
   _promosAdminCache = {}; prs.forEach(p => _promosAdminCache[p.id] = p);
@@ -2975,22 +2992,45 @@ async function createGadget() {
   loadAGest();
 }
 // ── GADGET ADMIN ─────────────────────────────────────────────────────
+// Contatori reali dal catalogo: prenotati / consegnati / in attesa d'ordine
+function _gadgetCounters(g) {
+  const res  = _num(g.reserved_total);
+  const del  = _num(g.delivered_total);
+  const wait = _num(g.waitlist_total);
+  return `<span style="color:var(--gold)">📌 ${res} prenotat${res === 1 ? 'o' : 'i'}</span>` +
+         ` · <span style="color:var(--grn)">✅ ${del} consegnat${del === 1 ? 'o' : 'i'}</span>` +
+         (wait > 0 ? ` · <span style="color:var(--mut)">⏳ ${wait} in attesa</span>` : '');
+}
+function _groupReservationsByGadget(rpcData) {
+  const list = (rpcData && (rpcData.reservations || (Array.isArray(rpcData) ? rpcData : []))) || [];
+  const map = {};
+  list.forEach(r => {
+    const k = r.gadget_id;
+    if (!k) return;
+    map[k] = (map[k] || []).concat([r]);
+  });
+  return map;
+}
+function _prenTableHtml(list) {
+  if (!list.length) return '<div class="empty" style="font-size:12px">Nessuna prenotazione</div>';
+  return `<div class="tbl-wrap"><table style="font-size:12px"><thead><tr>
+      <th>Tessera</th><th>Nome</th><th>Taglia</th><th>Qtà</th><th>Metodo</th><th>Stato</th>
+    </tr></thead><tbody>`
+    + list.map(r => `<tr>
+        <td class="mono">${_esc(r.card_id || '')}</td>
+        <td>${_esc(r.user_name || r.display_name || '—')}</td>
+        <td>${r.size ? _esc(r.size) : '—'}</td>
+        <td style="text-align:center">${r.quantity}</td>
+        <td>${payMethodPill(r.payment_method)}</td>
+        <td>${resBadge(r.status || 'prenotato')}</td>
+      </tr>`).join('')
+    + '</tbody></table></div>';
+}
 function toggleGadgetPren(gadgetId, btn) {
   const el = document.getElementById('gpren-' + gadgetId);
   if (!el) return;
   if (el.style.display !== 'none') { el.style.display = 'none'; return; }
-  const list = JSON.parse(el.dataset.pren || '[]');
-  if (!list.length) { el.innerHTML = '<div class="empty" style="font-size:12px">Nessuna prenotazione attiva</div>'; }
-  else {
-    el.innerHTML = `<div class="tbl-wrap"><table style="font-size:12px"><thead><tr><th>Tessera</th><th>Nome</th><th>Qtà</th><th>Data</th></tr></thead><tbody>`
-      + list.map(r=>`<tr>
-          <td class="mono">${_esc(r.card_id)}</td>
-          <td>${_esc(r.display_name)}</td>
-          <td style="text-align:center">${r.quantity}</td>
-          <td>${fdt(r.created_at).split(' ')[0]}</td>
-        </tr>`).join('')
-      + '</tbody></table></div>';
-  }
+  el.innerHTML = _prenTableHtml(JSON.parse(el.dataset.pren || '[]'));
   el.style.display = 'block';
 }
 function toggleGadgetSizes() {
@@ -3061,40 +3101,41 @@ async function loadStaffGadgets() {
   const el = document.getElementById('st-gad-list');
   if (!el) return;
   el.innerHTML = '<div class="empty">⏳ Carico…</div>';
-  const {data, error} = await db.rpc('staff_gadget_reservation_summary');
-  if (error || !data || !data.ok) { el.innerHTML='<div class="empty">Errore caricamento</div>'; return; }
-  const gads = data.gadgets || [];
+  const [{data: cat}, {data: res}] = await Promise.all([
+    db.rpc('get_catalog'),
+    db.rpc('staff_list_gadget_reservations', {p_operator_id: currentUser.id, p_status_filter: 'all'})
+  ]);
+  const gads = (cat && cat.gadgets) || [];
   if (!gads.length) { el.innerHTML='<div class="empty">Nessun gadget</div>'; return; }
+  const resByGadget = _groupReservationsByGadget(res);
   el.innerHTML = gads.map(g => {
-    const pren = g.prenotati || 0;
+    const nRes = (resByGadget[g.id] || []).length;
+    const szLine = g.has_sizes
+      ? `<div style="font-size:11px;color:var(--mut);margin-top:4px">📏 ${(g.sizes||[]).map(s=>`${_esc(s.size)}: ${s.available != null ? s.available : s.stock}`).join(' · ') || 'nessuna taglia'}</div>`
+      : '';
     return `<div class="card" style="margin-bottom:8px;padding:12px">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <span style="font-weight:700;flex:1">${_esc(g.name)}</span>
-        <span style="font-size:12px;color:var(--mut)">Stock: ${g.stock}</span>
+        <span style="font-size:12px;color:var(--mut)">${g.has_sizes?'Taglie attive':'Stock: '+g.stock}</span>
         <span style="font-weight:700;color:var(--gold)">${eur(g.price)}</span>
       </div>
       ${g.description?`<div style="font-size:12px;color:var(--mut);margin-top:3px">${_esc(g.description)}</div>`:''}
-      <div style="margin-top:8px">
-        ${pren>0
-          ? `<button class="btn-sm" style="background:rgba(255,214,10,.15);color:var(--gold)" onclick="toggleStaffGadgetPren('${g.id}',this,'${JSON.stringify(g.prenotazioni||[]).replace(/'/g,"\\'").replace(/"/g,'&quot;')}')">📌 ${pren} prenotat${pren===1?'o':'i'} — vedi chi</button>`
-          : `<span style="font-size:11px;color:var(--mut)">📌 0 prenotati</span>`}
-      </div>
+      ${szLine}
+      <div style="font-size:12px;margin-top:6px">${_gadgetCounters(g)}</div>
+      ${nRes ? `<div style="margin-top:8px"><button class="btn-sm" onclick="toggleStaffGadgetPren('${g.id}',this)">👥 Vedi prenotazioni (${nRes})</button></div>` : ''}
       <div id="sgpren-${g.id}" style="display:none;margin-top:8px"></div>
     </div>`;
   }).join('');
+  Object.keys(resByGadget).forEach(gid => {
+    const box = document.getElementById('sgpren-' + gid);
+    if (box) box.dataset.pren = JSON.stringify(resByGadget[gid]);
+  });
 }
-function toggleStaffGadgetPren(gadgetId, btn, prenJson) {
+function toggleStaffGadgetPren(gadgetId, btn) {
   const el = document.getElementById('sgpren-' + gadgetId);
   if (!el) return;
   if (el.style.display !== 'none') { el.style.display = 'none'; return; }
-  try {
-    const list = JSON.parse(prenJson.replace(/&quot;/g, '"'));
-    el.innerHTML = !list.length
-      ? '<div class="empty" style="font-size:12px">Nessuna</div>'
-      : `<div class="tbl-wrap"><table style="font-size:12px"><thead><tr><th>Tessera</th><th>Nome</th><th>Qtà</th><th>Data</th></tr></thead><tbody>`
-        + list.map(r=>`<tr><td class="mono">${_esc(r.card_id)}</td><td>${_esc(r.display_name)}</td><td style="text-align:center">${r.quantity}</td><td>${fdt(r.created_at).split(' ')[0]}</td></tr>`).join('')
-        + '</tbody></table></div>';
-  } catch(e) { el.innerHTML = '—'; }
+  el.innerHTML = _prenTableHtml(JSON.parse(el.dataset.pren || '[]'));
   el.style.display = 'block';
 }
 
@@ -3534,10 +3575,11 @@ const _GUIDE = {
 • Seleziona chi vuoi pagare e usa "Paga col credito" oppure "Paga con SumUp"</p>
 <p><strong>🛍️ GADGET</strong><br>
 • Se il gadget ha le taglie, scegli prima la taglia poi la quantità [−][N][+]<br>
+• Dichiara come intendi pagare: 💳 Credito · 💵 Contanti · 🔗 SumUp<br>
+• <strong>Non paghi nulla al momento della prenotazione</strong>: paghi allo staff quando ritiri il gadget<br>
 • Taglia esaurita? Puoi comunque prenotare: finisci in lista d'attesa e verrai avvisato quando arriva l'ordine<br>
-• In "I miei gadget" puoi ✏️ modificare taglia e quantità o 🗑️ annullare la prenotazione<br>
-• Se avevi pagato col credito, il rimborso è automatico; se avevi pagato con SumUp lo gestisce lo staff<br>
-• Ritira e paga in cassa da Antonella</p>
+• In "Le mie prenotazioni gadget" puoi ✏️ modificare taglia, quantità e metodo di pagamento, oppure 🗑 annullare<br>
+• Alla consegna vedrai la riga con ✅ Consegnato e la taglia effettivamente ritirata</p>
 <p><strong>💳 SUMUP</strong><br>
 • Trovi i link SumUp per ricariche e servizi nella sezione Catalogo → SumUp<br>
 • Dopo il pagamento online, segnala allo staff per l'accredito</p>
@@ -3578,6 +3620,12 @@ const _GUIDE = {
 • ✅ Check-in per socio e per ogni accompagnatore singolarmente<br>
 • 📥 CSV: una riga per persona (soci, accompagnatori, ospiti separati)<br>
 • 🔒/🔓: nascondi o mostra un evento</p>
+<p><strong>📦 CONSEGNE GADGET</strong><br>
+• Elenco delle prenotazioni gadget dei soci, filtrabili per stato<br>
+• 📦 Consegna: scegli la taglia effettiva e il metodo di pagamento, poi conferma<br>
+• Con 💳 Credito il saldo del socio viene addebitato in quel momento (se non basta, l'operazione viene rifiutata)<br>
+• Con 💵 Contanti o 🔗 SumUp incassi tu e la consegna viene registrata senza toccare il credito<br>
+• Lo stock della taglia si scala solo qui, alla consegna</p>
 <p><strong>📱 SUMUP DA CONFERMARE</strong><br>
 • Elenco delle quote che i soci hanno segnato come pagate con SumUp<br>
 • Per ogni riga: evento, persona, tessera, importo e quando è stata segnata<br>
@@ -3616,13 +3664,17 @@ const _GUIDE = {
 <p><strong>🛍️ GADGET</strong><br>
 • Crea e gestisci i gadget del Rione (nome, prezzo, stock, descrizione)<br>
 • ✏️ Modifica → "Ha taglie?": imposta lo stock per XS/S/M/L/XL/XXL<br>
-• Stock 0 su una taglia = esaurita: i soci possono comunque prenotare finendo in lista d'attesa</p>
+• Stock 0 su una taglia = esaurita: i soci possono comunque prenotare finendo in lista d'attesa<br>
+• Su ogni gadget vedi i contatori reali: 📌 prenotati · ✅ consegnati · ⏳ in attesa</p>
 <p><strong>📱 SUMUP DA CONFERMARE</strong><br>
 • Quote segnate dai soci come pagate con SumUp, in attesa di verifica<br>
 • ✅ Conferma o ❌ Rifiuta; il contatore sulla tab mostra quante sono in sospeso</p>
-<p><strong>📦 ORDINI GADGET</strong><br>
-• Tutte le prenotazioni con filtri per gadget, taglia e stato<br>
-• 🚚 Segna consegnato scegliendo il metodo di pagamento (💳 credito · 📱 SumUp · 💵 contanti)<br>
+<p><strong>📦 CONSEGNE GADGET</strong><br>
+• Filtri di stato: Da consegnare · Consegnati · In attesa d'ordine · Annullati · Tutti<br>
+• 📦 Consegna apre il modale: puoi correggere <strong>taglia</strong> e <strong>metodo di pagamento</strong> al momento del ritiro<br>
+• Con 💳 Credito vedi il saldo del socio (in rosso se non basta) e la consegna lo addebita<br>
+• Con 💵 Contanti o 🔗 SumUp incassi tu: nessun addebito sul credito<br>
+• <strong>Stock e credito si scalano solo alla consegna</strong>, mai alla prenotazione<br>
 • Sezione Waitlist: pezzi in attesa raggruppati per gadget e taglia<br>
 • Sezione Statistiche: consegnati per taglia, incassi per gadget e stock residuo</p>
 <p><strong>🎟️ ISCRITTI ESTERNI</strong><br>
@@ -4157,87 +4209,205 @@ async function sumupDecide(ctx, action, targetType, targetId) {
 // ═══════════════════════════════════════════════════════════════════════
 // ORDINI GADGET (admin) — lista + waitlist + statistiche
 // ═══════════════════════════════════════════════════════════════════════
-let _goAll = [], _goSummary = null, _goStats = null;
+let _goAll = [], _goStats = null, _delivCtx = 'admin', _delivStatus = 'prenotato', _delivCatalog = {};
 function _num(...vals) { for (const v of vals) if (v != null && v !== '') return Number(v) || 0; return 0; }
 function _pick(o, ...keys) { for (const k of keys) if (o && o[k] != null && o[k] !== '') return o[k]; return null; }
-async function loadGadgetOrders() {
-  const el = document.getElementById('go-list');
+
+const _DELIV_IDS = {
+  admin: {list: 'go-list', name: 'go-f-name', size: 'go-f-size', filters: 'go-filters'},
+  staff: {list: 'sd-list', name: 'sd-f-name', size: 'sd-f-size', filters: 'sd-filters'}
+};
+const _DELIV_FILTERS = [
+  {v: 'prenotato',     l: 'Da consegnare'},
+  {v: 'consegnato',    l: 'Consegnati'},
+  {v: 'attesa_ordine', l: "In attesa d'ordine"},
+  {v: 'annullato',     l: 'Annullati'},
+  {v: 'all',           l: 'Tutti'}
+];
+function _delivIds() { return _DELIV_IDS[_delivCtx] || _DELIV_IDS.admin; }
+function setDelivFilter(status) {
+  _delivStatus = status;
+  loadDeliveries(_delivCtx, status);
+}
+async function loadDeliveries(ctx, status) {
+  _delivCtx = ctx || _delivCtx;
+  _delivStatus = status || _delivStatus || 'prenotato';
+  const ids = _delivIds();
+  const el = document.getElementById(ids.list);
   if (!el) return;
+  const fEl = document.getElementById(ids.filters);
+  if (fEl) fEl.innerHTML = _DELIV_FILTERS.map(f =>
+    `<button class="fbtn ${f.v === _delivStatus ? 'active' : ''}" onclick="setDelivFilter('${f.v}')">${f.l}</button>`).join('');
   el.innerHTML = '<div class="empty">⏳ Carico…</div>';
-  const [res, sum, stats] = await Promise.all([
-    db.rpc('staff_list_gadget_reservations', {p_operator_id: currentUser.id}),
-    db.rpc('staff_gadget_reservation_summary'),
-    db.rpc('admin_gadget_sales_stats', {p_operator_id: currentUser.id})
-  ]);
-  _goAll = Array.isArray(res.data) ? res.data : ((res.data && res.data.reservations) || []);
-  _goSummary = sum.data || null;
-  _goStats   = stats.data || null;
+  const calls = [
+    db.rpc('staff_list_gadget_reservations', {p_operator_id: currentUser.id, p_status_filter: _delivStatus}),
+    db.rpc('get_catalog')
+  ];
+  if (_delivCtx === 'admin') calls.push(db.rpc('admin_gadget_sales_stats', {p_operator_id: currentUser.id}));
+  const [res, cat, stats] = await Promise.all(calls);
+  if (res.error || (res.data && res.data.ok === false)) {
+    el.innerHTML = `<div class="empty">${_esc((res.error && res.error.message) || (res.data && res.data.error) || 'Errore caricamento')}</div>`;
+    return;
+  }
+  _goAll = (res.data && (res.data.reservations || (Array.isArray(res.data) ? res.data : []))) || [];
+  _delivCatalog = {};
+  ((cat.data && cat.data.gadgets) || []).forEach(g => { _delivCatalog[g.id] = g; });
   const sizes = Array.from(new Set(_goAll.map(r => r.size).filter(Boolean))).sort();
-  const sel = document.getElementById('go-f-size');
-  const cur = sel.value;
-  sel.innerHTML = '<option value="">Tutte le taglie</option>' + sizes.map(s => `<option value="${_esc(s)}">${_esc(s)}</option>`).join('');
-  sel.value = sizes.includes(cur) ? cur : '';
-  renderGadgetOrders();
-  renderWaitlist();
-  renderGadgetStats();
+  const sel = document.getElementById(ids.size);
+  if (sel) {
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">Tutte le taglie</option>' + sizes.map(s => `<option value="${_esc(s)}">${_esc(s)}</option>`).join('');
+    sel.value = sizes.includes(cur) ? cur : '';
+  }
+  renderDeliveries();
+  if (_delivCtx === 'admin') {
+    _goStats = (stats && stats.data) || null;
+    await renderWaitlist();
+    renderGadgetStats();
+  }
 }
-function renderGadgetOrders() {
-  const el = document.getElementById('go-list');
+function renderDeliveries() {
+  const ids = _delivIds();
+  const el = document.getElementById(ids.list);
   if (!el) return;
-  const fName   = (document.getElementById('go-f-name').value || '').toLowerCase().trim();
-  const fSize   = document.getElementById('go-f-size').value;
-  const fStatus = document.getElementById('go-f-status').value;
+  const fName = (document.getElementById(ids.name)?.value || '').toLowerCase().trim();
+  const fSize = document.getElementById(ids.size)?.value || '';
   const list = _goAll.filter(r =>
-    (!fName   || String(r.gadget_name || '').toLowerCase().includes(fName)) &&
-    (!fSize   || r.size === fSize) &&
-    (!fStatus || (r.status || 'prenotato') === fStatus));
-  if (!list.length) { el.innerHTML = '<div class="empty">Nessun ordine</div>'; return; }
-  el.innerHTML = `<div class="tbl-wrap"><table><thead><tr>
-      <th>Socio</th><th>Gadget</th><th>Taglia</th><th>Qtà</th><th>Stato</th><th>Data</th><th>Consegna</th>
-    </tr></thead><tbody>` + list.map(r => {
-      const id = _resId(r);
-      const st = r.status || 'prenotato';
-      return `<tr>
-        <td><div>${_esc(r.display_name || '—')}</div><div class="mono" style="font-size:11px;color:var(--mut)">${_esc(r.card_id || '')}</div></td>
-        <td>${_esc(r.gadget_name || '—')}</td>
-        <td>${r.size ? _esc(r.size) : '—'}</td>
-        <td style="text-align:center">${r.quantity || 1}</td>
-        <td>${resBadge(st)}</td>
-        <td class="dt-cell">${r.created_at ? fdt(r.created_at).split(' ')[0] : '—'}</td>
-        <td>${st === 'prenotato' ? `<div style="display:flex;gap:3px">
-            <button class="btn-sm" style="font-size:10px;padding:2px 6px" title="Consegna e incassa con credito" onclick="goFulfill('${id}','credito')">💳</button>
-            <button class="btn-sm" style="font-size:10px;padding:2px 6px" title="Consegna e incassa con SumUp" onclick="goFulfill('${id}','sumup')">📱</button>
-            <button class="btn-sm" style="font-size:10px;padding:2px 6px" title="Consegna e incassa in contanti" onclick="goFulfill('${id}','contanti')">💵</button>
-          </div>` : '—'}</td>
-      </tr>`;
-    }).join('') + '</tbody></table></div>' +
-    `<div style="font-size:11px;color:var(--mut);margin-top:6px">🚚 Segna consegnato: scegli il metodo di pagamento (💳 credito · 📱 SumUp · 💵 contanti)</div>`;
+    (!fName || String(r.gadget_name || '').toLowerCase().includes(fName)) &&
+    (!fSize || r.size === fSize));
+  if (!list.length) { el.innerHTML = '<div class="empty">Nessuna prenotazione in questo stato</div>'; return; }
+  el.innerHTML = list.map(r => {
+    const id  = _resId(r);
+    const tot = _num(r.payment_amount, r.total_price);
+    const sz  = (r.has_sizes && r.size) ? ` · <span class="dlv-size">taglia ${_esc(r.size)}</span>` : '';
+    return `<div class="card" style="margin-bottom:8px;padding:12px">
+      <div class="dlv-row">
+        <div class="dlv-main">
+          <div style="font-weight:700">${_esc(r.user_name || '—')} <span class="mono" style="font-size:11px;color:var(--mut)">${_esc(r.card_id || '')}</span></div>
+          <div style="font-size:13px;margin-top:2px">${_esc(r.gadget_name || '—')}${sz} <span style="color:var(--mut)">· x${r.quantity}</span></div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-weight:700;color:var(--gold)">${eur(tot)}</div>
+          <div style="margin-top:3px">${payMethodPill(r.payment_method)}</div>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap">
+        ${resBadge(r.status || 'prenotato')}
+        <span style="font-size:11px;color:var(--mut)">
+          ${r.status === 'consegnato' && r.fulfilled_at ? 'Consegnato il ' + fdt(r.fulfilled_at).split(' ')[0] : (r.created_at ? 'Prenotato il ' + fdt(r.created_at).split(' ')[0] : '')}
+        </span>
+        ${r.status === 'prenotato' ? `<button class="btn btn-p" style="margin-left:auto" onclick="openDeliv('${id}')">📦 Consegna</button>` : ''}
+      </div>
+    </div>`;
+  }).join('');
 }
-async function goFulfill(resId, method) {
-  const r = _goAll.find(x => _resId(x) === resId);
+
+// ── MODALE CONSEGNA ──────────────────────────────────────────────────
+let _delivRes = null, _delivPay = 'credito', _delivFrom = 'tab';
+function openDeliv(resId, from) {
+  const r = _goAll.find(x => _resId(x) === resId) || _cassaRes.find(x => _resId(x) === resId);
   if (!r) return toast('Prenotazione non trovata');
-  const label = {credito:'💳 Credito', contanti:'💵 Contanti', sumup:'📱 SumUp'}[method] || method;
-  const tot   = _num(r.total_price, r.payment_amount);
-  modalConfirm(`Consegnare "${r.gadget_name}"${r.size ? ' (taglia ' + r.size + ')' : ''} a ${r.display_name || '—'} e incassare ${eur(tot)} (${label})?`, async () => {
-    const {data, error} = await db.rpc('staff_fulfill_gadget_reservation', {p_operator_id: currentUser.id, p_reservation_id: resId, p_payment_method: method});
-    if (error || !data || !data.ok) return toast((error && error.message) || (data && data.error) || 'Errore');
-    toast(data.promo_code
-      ? `✅ Consegnato! Promo ${data.promo_code}: -${eur(data.discount)} → ${eur(data.charged)}`
-      : `✅ Consegnato! ${eur(data.amount != null ? data.amount : tot)} (${label})`, 'ok');
-    loadGadgetOrders();
+  _delivRes = r;
+  _delivFrom = from || 'tab';
+  document.getElementById('deliv-title').textContent = `Consegna a ${r.user_name || '—'}`;
+  document.getElementById('deliv-gadget').textContent =
+    `${r.gadget_name} · x${r.quantity} · ${eur(_num(r.gadget_price, _resUnit(r)))} cad.`;
+  const g   = _delivCatalog[r.gadget_id];
+  const fg  = document.getElementById('deliv-size-fg');
+  const sel = document.getElementById('deliv-size');
+  if (r.has_sizes) {
+    const opts = _gadgetSizes(g).map(s => s.size);
+    if (!opts.length) opts.push(...PRESET_SIZES);
+    if (r.size && !opts.includes(r.size)) opts.unshift(r.size);
+    sel.innerHTML = opts.map(s => {
+      const info = _gadgetSizes(g).find(x => x.size === s);
+      const av   = info ? _num(info.available != null ? info.available : info.stock) : null;
+      return `<option value="${_esc(s)}"${s === r.size ? ' selected' : ''}>${_esc(s)}${av != null ? ` (disp. ${av})` : ''}</option>`;
+    }).join('');
+    fg.style.display = '';
+  } else {
+    sel.innerHTML = ''; fg.style.display = 'none';
+  }
+  setDelivPay(r.payment_method || 'credito');
+  document.getElementById('deliv-bg').classList.add('open');
+}
+function closeDeliv() { document.getElementById('deliv-bg').classList.remove('open'); _delivRes = null; }
+function setDelivPay(method) {
+  _delivPay = method;
+  document.getElementById('deliv-pay').innerHTML = _pmSegHtml(_delivPay, 'setDelivPay');
+  updateDelivSummary();
+}
+function updateDelivSummary() {
+  const r = _delivRes;
+  if (!r) return;
+  const tot = _num(r.payment_amount, r.total_price);
+  const bal = _num(r.user_balance);
+  const short = _delivPay === 'credito' && bal < tot;
+  document.getElementById('deliv-summary').innerHTML =
+    `Totale: <strong style="color:var(--gold)">${eur(tot)}</strong>` +
+    (_delivPay === 'credito'
+      ? `<div style="color:${short ? 'var(--neg)' : 'var(--mut)'}">Saldo attuale socio: <strong>${eur(bal)}</strong>${short ? ' — insufficiente' : ''}</div>`
+      : `<div style="color:var(--mut)">Incasso ${_delivPay === 'contanti' ? 'in contanti' : 'con SumUp'}: nessun addebito sul credito.</div>`);
+  document.getElementById('deliv-ok').textContent = _delivPay === 'credito' ? 'Consegna e addebita' : 'Consegna';
+}
+async function confirmDeliv() {
+  const r = _delivRes;
+  if (!r) return;
+  const size = document.getElementById('deliv-size-fg').style.display === 'none'
+    ? null : (document.getElementById('deliv-size').value || null);
+  const pay = _delivPay;
+  const tot = _num(r.payment_amount, r.total_price);
+  const label = (_PM_PILL[pay] || ['—'])[0];
+  const ctx = _delivCtx;
+  const from = _delivFrom;
+  const resId = _resId(r);
+  const userId = r.user_id;
+  const nome = r.user_name || '—';
+  const gadget = r.gadget_name || 'gadget';
+  closeDeliv();
+  const dett = [
+    `${gadget}${size ? ' · taglia ' + size : ''} · x${r.quantity}`,
+    `Metodo: ${label}`,
+    `Totale: ${eur(tot)}`,
+    pay === 'credito' ? `Verrà addebitato sul credito di ${nome} (saldo ${eur(_num(r.user_balance))})` : 'Incasso registrato senza toccare il credito'
+  ].join('\n');
+  modalConfirm(`Confermi la consegna a ${nome}?\n\n${dett}`, async () => {
+    const {data, error} = await db.rpc('staff_deliver_gadget', {
+      p_operator_id: currentUser.id, p_reservation_id: resId,
+      p_final_size: size, p_final_payment_method: pay
+    });
+    if (error || !data || !data.ok) {
+      return modalInfo('❌ Consegna non riuscita\n\n' + ((error && error.message) || (data && data.error) || 'Errore sconosciuto'));
+    }
+    toast(data.message || `✅ Consegnato a ${nome}`, 'ok');
+    if (staffTarget && staffTarget.card_id) {
+      const {data: u} = await db.rpc('staff_lookup', {p_card_id: staffTarget.card_id});
+      const nu = u && (u.user || u);
+      if (nu && nu.balance != null) {
+        staffTarget = nu;
+        const b1 = document.getElementById('s-res-bal'); if (b1) b1.textContent = eur(nu.balance);
+        const b2 = document.getElementById('ac-res-bal'); if (b2) b2.textContent = eur(nu.balance);
+      }
+    }
+    if (from === 'cassa-staff')      await loadStaffGadgetReservationsForUser(userId);
+    else if (from === 'cassa-admin') await loadAcGadgetReservationsForUser(userId);
+    else                             await loadDeliveries(ctx);
   });
 }
-function renderWaitlist() {
+async function renderWaitlist() {
   const el = document.getElementById('go-waitlist');
   if (!el) return;
-  const raw = (_goSummary && (_goSummary.waitlist || _goSummary.attesa_ordine)) || [];
-  const items = Array.isArray(raw) ? raw : [];
+  let items = _goAll.filter(r => (r.status || '') === 'attesa_ordine');
+  if (_delivStatus !== 'all' && _delivStatus !== 'attesa_ordine') {
+    const {data} = await db.rpc('staff_list_gadget_reservations', {p_operator_id: currentUser.id, p_status_filter: 'attesa_ordine'});
+    items = (data && (data.reservations || (Array.isArray(data) ? data : []))) || [];
+  }
   if (!items.length) { el.innerHTML = '<div class="empty">Nessuna richiesta in lista d\'attesa</div>'; return; }
   const groups = {};
   items.forEach(i => {
-    const g = _pick(i, 'gadget_name', 'gadget', 'name') || '—';
-    const s = _pick(i, 'size', 'taglia') || '—';
-    const q = _num(i.quantity, i.qty, i.total_quantity, i.pending, 1);
+    const g = i.gadget_name || '—';
+    const s = i.size || '—';
+    const q = _num(i.quantity, 1);
     const k = g + ' | ' + s;
     groups[k] = groups[k] ? {...groups[k], qty: groups[k].qty + q, n: groups[k].n + 1} : {gadget: g, size: s, qty: q, n: 1};
   });
