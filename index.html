@@ -172,6 +172,9 @@
         </div>
       </div>
 
+      <!-- PROMO FEDELTÀ (gruppi cene) -->
+      <div id="u-promo-block"></div>
+
       <!-- QR CARD: sfondo bianco per leggibilità -->
       <div class="card qr-card">
         <div class="qr-label">Tessera <span id="u-card" class="qr-cardid"></span></div>
@@ -978,6 +981,11 @@
     <div class="form-row">
       <div class="fg"><label>Max posti (0=∞)</label><input id="eve-maxp" type="number" min="0"></div>
       <div class="fg"><label>Prezzo €</label><input id="eve-price" type="number" min="0" step="0.50"></div>
+    </div>
+    <div class="fg">
+      <label>Gruppo promo</label>
+      <select id="eve-promo"><option value="__keep__">— Mantieni impostazione attuale —</option></select>
+      <div class="promo-hint">Se selezionato, i soci ricevono un bonus a soglia sulle cene del gruppo (10% alla 2ª, 15% alla 4ª, 20% alla 6ª).</div>
     </div>
     <div class="form-row">
       <div class="fg"><label>Link SumUp</label><input id="eve-sumup" type="url"></div>

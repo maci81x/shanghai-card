@@ -84,6 +84,7 @@ let db, currentUser = null, staffTarget = null, allAdminUsers = [], staffOps = [
 let _gadgetsAdminCache = {}, _promosAdminCache = {}, _eventsAdminCache = {}, _unseenEventsQueue = [];
 let _incompleteUsersMap = {};
 let _adminUsersRole = 'all', _adminUsersSearch = '', _adminUsersSort = {key: 'card_id', dir: 'asc'};
+let _promoGroupsCache = null;
 
 // ── EVENT DELEGATION (bottoni generati da innerHTML) ──────────────────
 document.addEventListener('click', function(e) {
@@ -198,7 +199,7 @@ window.addEventListener('DOMContentLoaded', () => {
 // ── UTILITIES ────────────────────────────────────────────────────────
 const eur = c => '€ ' + Number(c||0).toFixed(2).replace('.',',');
 const fdt = iso => { if(!iso) return '—'; const d=new Date(iso); return d.toLocaleDateString('it-IT',{day:'2-digit',month:'2-digit',year:'2-digit'})+' '+d.toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'}); };
-const txic = t => ({recharge:'🔄',purchase:'🛍️',event_fee:'🎫',refund:'↩️',transfer_out:'💸',transfer_in:'💰'}[t]||'•');
+const txic = t => ({recharge:'🔄',purchase:'🛍️',event_fee:'🎫',refund:'↩️',transfer_out:'💸',transfer_in:'💰',promo_bonus:'🌴'}[t]||'•');
 function _imgWrap16x9(url, alt, radius) {
   if (!url) return '';
   const r = radius || '12px 12px 0 0';
@@ -648,6 +649,7 @@ async function refreshUser() {
   renderMyRegistrations();
   loadUserGadgetReservations();
   if (_eventsCache.length) renderEvents(_eventsCache);
+  await renderPromoStatus();
 }
 function renderBal(c) {
   document.getElementById('u-balance').textContent = eur(c);
@@ -655,6 +657,77 @@ function renderBal(c) {
   if (c >= 10) { b.textContent='● Ottimo'; b.className='badge bg'; }
   else if (c >= 5) { b.textContent='● Basso'; b.className='badge by'; }
   else { b.textContent='● Critico'; b.className='badge br'; }
+}
+
+// ── PROMO FEDELTÀ (gruppi cene) ──────────────────────────────────────
+async function loadPromoGroups(force) {
+  if (_promoGroupsCache && !force) return _promoGroupsCache;
+  const {data, error} = await db.rpc('list_promo_groups');
+  if (error) { console.warn('list_promo_groups:', error.message); return _promoGroupsCache || []; }
+  _promoGroupsCache = Array.isArray(data) ? data : [];
+  return _promoGroupsCache;
+}
+// Popola una <select> di gruppi promo.
+// withKeep=true (modale modifica): aggiunge l'opzione "__keep__" = non toccare il valore attuale,
+// perché admin_list_events non espone events.promo_group e il valore corrente non è leggibile.
+async function _fillPromoSelect(selectId, current, withKeep) {
+  const sel = document.getElementById(selectId);
+  if (!sel) return;
+  const groups = await loadPromoGroups();
+  const opts = [];
+  if (withKeep) opts.push('<option value="__keep__">— Mantieni impostazione attuale —</option>');
+  opts.push(`<option value="">Nessuno${withKeep ? ' (rimuovi dal gruppo promo)' : ''}</option>`);
+  groups.forEach(g => {
+    opts.push(`<option value="${_esc(g.promo_group)}">${_esc(g.label || g.promo_group)}</option>`);
+  });
+  sel.innerHTML = opts.join('');
+  sel.value = (current != null && current !== '') ? current : (withKeep ? '__keep__' : '');
+}
+async function renderPromoStatus() {
+  const el = document.getElementById('u-promo-block');
+  if (!el || !currentUser) return;
+  const groups = await loadPromoGroups();
+  if (!groups.length) { el.innerHTML = ''; return; }
+  const rows = await Promise.all(groups.map(async g => {
+    const {data, error} = await db.rpc('user_promo_status', {p_user_id: currentUser.id, p_promo_group: g.promo_group});
+    if (error || !data) return null;
+    return {g, s: data};
+  }));
+  const attivi = rows.filter(r => r && Number(r.s.completed || 0) > 0);
+  el.innerHTML = attivi.map(r => _promoCardHtml(r.g, r.s)).join('');
+}
+function _promoCardHtml(g, s) {
+  const label     = s.label || g.label || 'Promo';
+  const completed = Number(s.completed || 0);
+  const thresholds = new Set((g.thresholds || []).map(t => Number(t.position)));
+  const maxPos    = Number(s.max_position || 0)
+    || (g.thresholds || []).reduce((m, t) => Math.max(m, Number(t.position) || 0), 0);
+  const nextPos   = s.next_position   != null ? Number(s.next_position)   : null;
+  const nextPct   = s.next_bonus_pct  != null ? Number(s.next_bonus_pct)  : null;
+  const totBonus  = Number(s.total_bonus_received || 0);
+
+  let riga2 = '';
+  if (completed < maxPos && nextPos) {
+    riga2 = `<div class="promo-line">Prossima soglia: <strong>${nextPos}ª cena</strong> → <strong>${nextPct}%</strong> cashback</div>`;
+  } else if (maxPos && completed >= maxPos) {
+    riga2 = `<div class="promo-line">🎉 Ciclo completato! Grazie per aver partecipato.</div>`;
+  }
+
+  let cells = '';
+  for (let i = 1; i <= maxPos; i++) {
+    const done = i <= completed;
+    const star = thresholds.has(i) && (i <= completed || i === nextPos);
+    cells += `<div class="promo-cell${done ? ' on' : ''}">${star ? '<span class="promo-star">★</span>' : ''}</div>`;
+  }
+
+  return `
+    <div class="card promo-card">
+      <div class="promo-hdr"><span class="promo-emoji">🌴</span><span class="promo-ttl">${_esc(String(label).toUpperCase())}</span></div>
+      <div class="promo-line">Cene partecipate: <strong>${completed}</strong> di <strong>${maxPos}</strong></div>
+      ${riga2}
+      <div class="promo-line promo-tot">Bonus totale accreditato: ${eur(totBonus)}</div>
+      ${maxPos ? `<div class="promo-bar" style="grid-template-columns:repeat(${maxPos},1fr)">${cells}</div>` : ''}
+    </div>`;
 }
 function renderTx(txs) {
   const el = document.getElementById('u-txlist');
@@ -1107,6 +1180,7 @@ async function userPaySelected() {
   const count = (self_selected ? 1 : 0) + companion_ids.length;
   const total = count * _compEventPrice;
   modalConfirm(`Pagare ${eur(total)} per ${count} ${count===1?'persona':'persone'} con il credito?`, async () => {
+    const promoBefore = _promoTxKeys();
     const {data, error} = await db.rpc('user_pay_event_people', {
       p_user_id: currentUser.id,
       p_registration_id: _compRegId,
@@ -1115,6 +1189,7 @@ async function userPaySelected() {
     if (error||!data||!data.ok) return toast((error&&error.message)||(data&&data.error)||'Errore pagamento');
     toast(data.message || '✅ Pagamento effettuato!', 'ok');
     await refreshUser();
+    _promoBonusToast(promoBefore);
     if (_eventsCache.length) renderEvents(_eventsCache);
     const reg = Object.values(_myEventRegs).find(r => r.registration_id === _compRegId) || {};
     _compCache = (reg.companions || []).map(c => ({...c}));
@@ -1373,6 +1448,7 @@ function renderPendingEvents(evs) {
 }
 async function userPayEventCredit(regId, eventName, amount) {
   modalConfirm(`Pagare "${eventName}" (${eur(amount)}) con il tuo credito?`, async () => {
+    const promoBefore = _promoTxKeys();
     const {data, error} = await db.rpc('user_pay_event_credit', {p_user_id: currentUser.id, p_registration_id: regId});
     if (error || !data.ok) {
       const msg = (error && error.message) || data.error || 'Errore';
@@ -1384,7 +1460,26 @@ async function userPayEventCredit(regId, eventName, amount) {
     toast(`Pagato! Nuovo saldo: ${eur(data.new_balance)}`, 'ok');
     await refreshUser();
     await loadCatalog();
+    _promoBonusToast(promoBefore);
   });
+}
+// Segnale UI per il bonus promo. Nessun calcolo di soglie o percentuali lato client:
+// si confronta l'elenco delle transazioni 'promo_bonus' prima e dopo il pagamento e
+// si mostra l'importo che il backend ha effettivamente accreditato.
+// _promoTxKeys() va chiamata PRIMA dell'RPC, _promoBonusToast() dopo await refreshUser().
+function _promoTxKey(t) { return t.id != null ? String(t.id) : `${t.created_at}|${t.amount}`; }
+function _promoTxKeys() {
+  return new Set((_allTx || []).filter(t => t.type === 'promo_bonus').map(_promoTxKey));
+}
+function _promoBonusToast(keysBefore) {
+  if (!keysBefore) return;
+  const nuovi = (_allTx || []).filter(t =>
+    t.type === 'promo_bonus' && Number(t.amount) > 0 && !keysBefore.has(_promoTxKey(t)));
+  const bonus = nuovi.reduce((s, t) => s + Number(t.amount || 0), 0);
+  if (!(bonus > 0.01)) return;
+  setTimeout(() => {
+    toast(`🌴 Bonus Promo accreditato! +${eur(bonus)}`, 'ok');
+  }, 1500);
 }
 // ── ISCRIZIONE EVENTO: CHI PARTECIPA + METODI DI PAGAMENTO ───────────
 const _PAY_OPTS = `<option value="">Da decidere</option><option value="credito">Credito socio</option><option value="sumup">SumUp</option><option value="cassa">Cassa</option>`;
@@ -1518,6 +1613,7 @@ async function _execRegEvent(ev, comps, selfPay) {
     if (id) (c.pay === 'credito' ? credIds : sumIds).push(id);
     else unresolved.push(`${c.nome} ${c.cognome}`);
   });
+  const promoBefore = _promoTxKeys();
   if (regId && (selfPay === 'credito' || credIds.length)) {
     const {data, error: e2} = await db.rpc('user_pay_event_people', {
       p_user_id: currentUser.id, p_registration_id: regId,
@@ -1537,6 +1633,7 @@ async function _execRegEvent(ev, comps, selfPay) {
   toast(done.join(' · '), 'ok');
   await refreshUser();
   await loadCatalog();
+  _promoBonusToast(promoBefore);
   if (unresolved.length) {
     modalInfo(`⚠️ Pagamento da completare\n\nNon è stato possibile registrare il pagamento di: ${unresolved.join(', ')}.\nApri "Le mie iscrizioni" e scegli il metodo di pagamento per queste persone.`);
   }
@@ -1712,6 +1809,7 @@ async function myRegPay(regId, method) {
   const rpc = {credito: 'user_pay_event_people', sumup: 'user_pay_event_sumup', cassa: 'user_pay_event_cash'}[method];
   if (!rpc) return toast('Metodo di pagamento non valido');
   modalConfirm(msg, async () => {
+    const promoBefore = _promoTxKeys();
     const {data, error} = await db.rpc(rpc, {p_user_id: currentUser.id, p_registration_id: regId, p_targets: {self, companion_ids}});
     if (error || !data || !data.ok) return toast((error && error.message) || (data && data.error) || 'Errore pagamento');
     if (method === 'sumup') { _openSumup(data.sumup_link); toast('Attende conferma dello staff', 'ok'); }
@@ -1719,6 +1817,7 @@ async function myRegPay(regId, method) {
     else toast('✅ Pagamento effettuato!', 'ok');
     await refreshUser();
     await loadCatalog();
+    _promoBonusToast(promoBefore);
   });
 }
 
@@ -2061,6 +2160,7 @@ function _txIconHtml(t) {
   const type = t.type || '';
   if (type === 'recharge') return '<span style="color:var(--grn);font-weight:700">↑</span>';
   if (type === 'refund')   return '<span style="color:var(--gold);font-weight:700">↩</span>';
+  if (type === 'promo_bonus') return '<span title="Bonus promo">🌴</span>';
   if (type === 'purchase' || type === 'event_fee' || type === 'transfer_out') return '<span style="color:var(--neg);font-weight:700">↓</span>';
   if (type === 'transfer_in') return '<span style="color:var(--grn);font-weight:700">↑</span>';
   return '<span>•</span>';
@@ -2907,6 +3007,11 @@ async function loadAGest() {
           <div class="fg"><label>Max posti (0=∞)</label><input id="fe-maxp" type="number" min="0" placeholder="0"></div>
           <div class="fg"><label>Prezzo €</label><input id="fe-price" type="number" min="0" step="0.50" placeholder="0.00"></div>
         </div>
+        <div class="fg">
+          <label>Gruppo promo</label>
+          <select id="fe-promo"><option value="">Nessuno</option></select>
+          <div class="promo-hint">Se selezionato, i soci ricevono un bonus a soglia sulle cene del gruppo (10% alla 2ª, 15% alla 4ª, 20% alla 6ª).</div>
+        </div>
         <div class="form-row">
           <div class="fg"><label>Link SumUp (opz.)</label><input id="fe-sumup" type="url" placeholder="https://..."></div>
           <div class="fg"><label>Slug (opz.)</label><input id="fe-slug" type="text" placeholder="es. yoga-giugno-2026"></div>
@@ -2920,6 +3025,7 @@ async function loadAGest() {
       </div>
       <div id="gs-ev-list"></div>`;
     mountImageUploader('fe-img-mount', 'fe-img', 'events');
+    _fillPromoSelect('fe-promo', '', false);
   }
   const evList  = document.getElementById('gs-ev-list');
   const gadList = document.getElementById('gs-gad-list');
@@ -3127,6 +3233,7 @@ async function adminCreateEvent() {
     if (pub && !slug) slug = _slugify(title);
 
     const imgUrl = (document.getElementById('fe-img')?.value || '').trim();
+    const promoGroup = (document.getElementById('fe-promo')?.value || '').trim();
 
     const { data, error } = await db.rpc('admin_create_event', {
       p_admin_id:            currentUser.id,
@@ -3138,7 +3245,9 @@ async function adminCreateEvent() {
       p_price:               price,
       p_sumup_link:          sumup || null,
       p_slug:                slug || null,
-      p_public_registration: pub
+      p_public_registration: pub,
+      // sempre presente: risolve l'overload di admin_create_event lato PostgREST
+      p_promo_group:         promoGroup || null
     });
 
     console.log('adminCreateEvent RPC:', { data, error });
@@ -3147,12 +3256,21 @@ async function adminCreateEvent() {
     if (!data || data.ok === false) throw new Error('RPC ko: ' + (data?.error || JSON.stringify(data)));
 
     if (imgUrl && data.event_id) {
-      await db.rpc('admin_update_event', {p_admin_id: currentUser.id, p_event_id: data.event_id, p_image_url: imgUrl});
+      await db.rpc('admin_update_event', {
+        p_admin_id: currentUser.id,
+        p_event_id: data.event_id,
+        p_image_url: imgUrl,
+        // sempre presenti: risolvono l'overload; false+null = lascia il gruppo invariato
+        p_promo_group: null,
+        p_clear_promo_group: false
+      });
     }
 
     // Reset form
     ['fe-title','fe-desc','fe-date','fe-loc','fe-maxp','fe-price','fe-sumup','fe-slug','fe-img']
       .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+    const promoSel = document.getElementById('fe-promo');
+    if (promoSel) promoSel.value = '';
     resetImageUploader('fe-img-mount');
     if (pubEl) pubEl.checked = false;
     const fEl = document.getElementById('fe-form');
@@ -4137,6 +4255,8 @@ function openEditEvent(eventId) {
   const curImg = e.image_url || '';
   document.getElementById('eve-img').value = curImg;
   setImageUploaderPreview('eve-img-mount', curImg);
+  // e.promo_group non è esposto da admin_list_events: si parte da "mantieni attuale"
+  _fillPromoSelect('eve-promo', e.promo_group || '', true);
   document.getElementById('ev-edit-bg').style.display = 'block';
 }
 function closeEditEvent() {
@@ -4160,6 +4280,13 @@ async function saveEditEvent() {
     p_public_registration: document.getElementById('eve-public').checked,
     p_image_url:           document.getElementById('eve-img').value.trim() || null
   };
+  // Gruppo promo: le due chiavi vanno SEMPRE inviate, altrimenti PostgREST non riesce
+  // a scegliere tra i due overload di admin_update_event (errore PGRST203).
+  const promoVal = document.getElementById('eve-promo')?.value ?? '__keep__';
+  if (promoVal === '__keep__')      { payload.p_promo_group = null;     payload.p_clear_promo_group = false; }
+  else if (promoVal === '')         { payload.p_promo_group = null;     payload.p_clear_promo_group = true;  }
+  else                              { payload.p_promo_group = promoVal; payload.p_clear_promo_group = false; }
+
   const { data, error } = await db.rpc('admin_update_event', payload);
   if (error) return toast(error.message);
   if (!data || !data.ok) return toast(data?.error || 'Errore');

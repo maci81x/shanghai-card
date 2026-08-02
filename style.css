@@ -389,3 +389,21 @@ label.pr-row{text-transform:none;letter-spacing:normal;color:var(--txt);font-wei
 /* MOBILE SAFETY */
 img{max-width:100%;height:auto}
 .tx-dsc,.res-name,.res-sub{overflow-wrap:anywhere;word-break:break-word}
+
+/* PROMO FEDELTÀ (gruppi cene) */
+.promo-hint{font-size:11px;color:var(--mut);margin-top:6px;line-height:1.45;text-transform:none;letter-spacing:0}
+.promo-card{margin-bottom:0;padding:18px;border:1px solid rgba(245,158,11,.45);
+  background:linear-gradient(135deg,rgba(245,158,11,.10) 0%,rgba(217,119,6,.05) 55%,transparent 100%),var(--bgc)}
+.promo-card + .promo-card{margin-top:12px}
+.promo-hdr{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.promo-emoji{font-size:20px;line-height:1}
+.promo-ttl{font-size:13px;font-weight:700;letter-spacing:.06em;color:#f59e0b;overflow-wrap:anywhere}
+.promo-line{font-size:14px;line-height:1.6;color:var(--txt)}
+.promo-line strong{color:#f59e0b}
+.promo-tot{margin-top:6px;font-weight:700;color:var(--grn)}
+.promo-tot strong{color:var(--grn)}
+.promo-bar{display:grid;gap:5px;margin-top:26px}
+.promo-cell{position:relative;height:10px;border-radius:5px;background:#e5e7eb}
+.promo-cell.on{background:linear-gradient(90deg,#f59e0b 0%,#d97706 100%)}
+.promo-star{position:absolute;top:-14px;left:50%;transform:translateX(-50%);font-size:11px;line-height:1;color:#f59e0b}
+:root:not(.light) .promo-cell:not(.on){background:#2b2b2b}
