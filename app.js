@@ -84,7 +84,7 @@ let db, currentUser = null, staffTarget = null, allAdminUsers = [], staffOps = [
 let _gadgetsAdminCache = {}, _promosAdminCache = {}, _eventsAdminCache = {}, _unseenEventsQueue = [];
 let _incompleteUsersMap = {};
 let _adminUsersRole = 'all', _adminUsersSearch = '', _adminUsersSort = {key: 'card_id', dir: 'asc'};
-let _promoGroupsCache = null;
+let _promoGroupsCache = null, _evePromoOrig = '';
 
 // ── EVENT DELEGATION (bottoni generati da innerHTML) ──────────────────
 document.addEventListener('click', function(e) {
@@ -667,21 +667,33 @@ async function loadPromoGroups(force) {
   _promoGroupsCache = Array.isArray(data) ? data : [];
   return _promoGroupsCache;
 }
-// Popola una <select> di gruppi promo.
-// withKeep=true (modale modifica): aggiunge l'opzione "__keep__" = non toccare il valore attuale,
-// perché admin_list_events non espone events.promo_group e il valore corrente non è leggibile.
-async function _fillPromoSelect(selectId, current, withKeep) {
+// Popola una <select> di gruppi promo, pre-selezionando `current`
+// (events.promo_group, esposto da admin_list_events). Vuoto/null → "Nessuno".
+async function _fillPromoSelect(selectId, current) {
   const sel = document.getElementById(selectId);
   if (!sel) return;
   const groups = await loadPromoGroups();
-  const opts = [];
-  if (withKeep) opts.push('<option value="__keep__">— Mantieni impostazione attuale —</option>');
-  opts.push(`<option value="">Nessuno${withKeep ? ' (rimuovi dal gruppo promo)' : ''}</option>`);
+  const opts = ['<option value="">Nessuno</option>'];
   groups.forEach(g => {
     opts.push(`<option value="${_esc(g.promo_group)}">${_esc(g.label || g.promo_group)}</option>`);
   });
   sel.innerHTML = opts.join('');
-  sel.value = (current != null && current !== '') ? current : (withKeep ? '__keep__' : '');
+  sel.value = (current != null && current !== '') ? String(current) : '';
+  // se il gruppo salvato non è più in elenco, lo aggiungo per non perderlo al salvataggio
+  if (sel.value === '' && current) {
+    sel.insertAdjacentHTML('beforeend', `<option value="${_esc(current)}">${_esc(current)}</option>`);
+    sel.value = String(current);
+  }
+}
+// Etichetta leggibile di un gruppo promo (fallback: il valore grezzo)
+function _promoLabel(promoGroup) {
+  if (!promoGroup) return '';
+  const g = (_promoGroupsCache || []).find(x => x.promo_group === promoGroup);
+  return (g && g.label) || promoGroup;
+}
+function _promoBadgeHtml(promoGroup) {
+  if (!promoGroup) return '';
+  return `<span class="promo-pill" title="Gruppo promo: ${_esc(_promoLabel(promoGroup))}">🌴 ${_esc(_promoLabel(promoGroup))}</span>`;
 }
 async function renderPromoStatus() {
   const el = document.getElementById('u-promo-block');
@@ -3025,18 +3037,21 @@ async function loadAGest() {
       </div>
       <div id="gs-ev-list"></div>`;
     mountImageUploader('fe-img-mount', 'fe-img', 'events');
-    _fillPromoSelect('fe-promo', '', false);
+    _fillPromoSelect('fe-promo', '');
   }
   const evList  = document.getElementById('gs-ev-list');
   const gadList = document.getElementById('gs-gad-list');
   const proList = document.getElementById('gs-pro-list');
   const evs = evData||[];
+  // etichette dei gruppi promo pronte prima di disegnare la lista
+  if (evs.some(e => e.promo_group)) await loadPromoGroups();
   if (!evs.length) { evList.innerHTML='<div class="empty">Nessun evento</div>'; }
   else {
     evList.innerHTML = evs.map(e=>`
       <div class="card" style="margin-bottom:10px;opacity:${e.visible===false?0.55:1}">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-          <span style="font-weight:700;flex:1">${_esc(e.title)}</span>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">
+          <span style="font-weight:700;flex:1;min-width:120px">${_esc(e.title)}</span>
+          ${_promoBadgeHtml(e.promo_group)}
           <span style="font-size:11px;padding:2px 8px;border-radius:12px;background:${e.visible===false?'rgba(239,68,68,.15)':'rgba(34,197,94,.15)'};color:${e.visible===false?'var(--neg)':'var(--grn)'}">
             ${e.visible===false?'👁‍🗨 Nascosto':'👁 Visibile'}
           </span>
@@ -4255,8 +4270,9 @@ function openEditEvent(eventId) {
   const curImg = e.image_url || '';
   document.getElementById('eve-img').value = curImg;
   setImageUploaderPreview('eve-img-mount', curImg);
-  // e.promo_group non è esposto da admin_list_events: si parte da "mantieni attuale"
-  _fillPromoSelect('eve-promo', e.promo_group || '', true);
+  // valore corrente da admin_list_events; null/undefined → "Nessuno"
+  _evePromoOrig = e.promo_group || '';
+  _fillPromoSelect('eve-promo', _evePromoOrig);
   document.getElementById('ev-edit-bg').style.display = 'block';
 }
 function closeEditEvent() {
@@ -4282,10 +4298,10 @@ async function saveEditEvent() {
   };
   // Gruppo promo: le due chiavi vanno SEMPRE inviate, altrimenti PostgREST non riesce
   // a scegliere tra i due overload di admin_update_event (errore PGRST203).
-  const promoVal = document.getElementById('eve-promo')?.value ?? '__keep__';
-  if (promoVal === '__keep__')      { payload.p_promo_group = null;     payload.p_clear_promo_group = false; }
-  else if (promoVal === '')         { payload.p_promo_group = null;     payload.p_clear_promo_group = true;  }
-  else                              { payload.p_promo_group = promoVal; payload.p_clear_promo_group = false; }
+  // "Nessuno" su un evento che aveva un gruppo → clear; se non l'aveva → nessuna modifica.
+  const promoVal = document.getElementById('eve-promo')?.value || '';
+  if (promoVal) { payload.p_promo_group = promoVal; payload.p_clear_promo_group = false; }
+  else          { payload.p_promo_group = null;     payload.p_clear_promo_group = !!_evePromoOrig; }
 
   const { data, error } = await db.rpc('admin_update_event', payload);
   if (error) return toast(error.message);
