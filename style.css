@@ -425,3 +425,24 @@ img{max-width:100%;height:auto}
 .sumup-ev-grid{display:flex;flex-direction:column;gap:8px}
 .sumup-ev-btn{width:100%;text-align:center}
 .sumup-ev-group{font-size:12px;font-weight:700;color:var(--gold);margin:12px 0 6px;padding-left:2px}
+
+/* FASCE DI PREZZO EVENTO */
+.tier-rows{display:flex;flex-direction:column;gap:8px}
+.tier-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.tier-row input.tier-lbl{flex:1 1 auto;min-width:130px}
+.tier-row input.tier-price{flex:0 0 90px;width:90px}
+.tier-row .tier-del{flex:0 0 auto;min-width:44px;padding:9px 10px;line-height:1}
+.tier-empty{font-size:12px;color:var(--mut);line-height:1.45}
+.tier-add-btn{margin-top:8px;min-height:44px}
+.tier-list{margin-top:12px;padding:12px 14px;background:var(--bg);border:1px solid var(--brd);
+  border-left:3px solid #f59e0b;border-radius:8px}
+.tier-list-lbl{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.07em;font-weight:600;margin-bottom:8px}
+.tier-list-row{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:6px 0;font-size:14px}
+.tier-list-row+.tier-list-row{border-top:1px solid var(--brd)}
+.tier-list-name{color:var(--txt);overflow-wrap:anywhere}
+.tier-list-price{font-weight:700;color:var(--gold);white-space:nowrap}
+:root.light .tier-list-price{color:#0A0A0A}
+@media(max-width:380px){
+  .tier-row input.tier-lbl{flex:1 1 100%;min-width:0}
+  .tier-row input.tier-price{flex:1 1 auto;width:auto}
+}

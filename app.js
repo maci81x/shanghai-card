@@ -785,6 +785,8 @@ async function loadCatalog() {
   if (!data) return;
   _eventsCache = data.events || [];
   _promoCache  = data.promos || [];
+  // una sola query per le fasce di tutti gli eventi visibili, prima di disegnare le card
+  await _loadTiersForEvents(_eventsCache.map(e => e.id));
   renderEvents(_eventsCache);
   renderGadgets(data.gadgets||[]);
   renderPromos(data.promos||[]);
@@ -905,7 +907,7 @@ function renderEvents(evs) {
       <div class="cat-sub">${e.event_date?fdt(e.event_date):'—'}${e.location?' · '+_esc(e.location):''}</div>
       ${e.max_participants?`<div class="cat-sub">Max ${e.max_participants} posti</div>`:''}
       <div class="cat-foot">
-        <div class="cat-price">${isFree?'Gratuito':eur(e.price)}</div>
+        <div class="cat-price">${_eventPriceLabel(e)}</div>
         <button class="btn-sm p" onclick="openRegEvModal('${e.id}')">${isFree?'🎁 Iscriviti gratis':'Iscriviti'}</button>
       </div>
       ${bodyClose}
@@ -3053,6 +3055,12 @@ async function loadAGest() {
           <select id="fe-promo"><option value="">Nessuno</option></select>
           <div class="promo-hint">Se selezionato, i soci ricevono un bonus a soglia sulle cene del gruppo (10% alla 2ª, 15% alla 4ª, 20% alla 6ª).</div>
         </div>
+        <div class="fg">
+          <label>Fasce di prezzo (opz.)</label>
+          <div id="fe-tiers" class="tier-rows"></div>
+          <button type="button" id="fe-tier-add" class="btn-sm tier-add-btn" onclick="tierAddRow('fe')">+ Aggiungi fascia</button>
+          <div class="promo-hint">Se aggiunte, sostituiscono il prezzo unico nella card evento e nel dettaglio. Max ${TIER_MAX}.</div>
+        </div>
         <div class="form-row">
           <div class="fg"><label>Link SumUp (opz.)</label><input id="fe-sumup" type="url" placeholder="https://..."></div>
           <div class="fg"><label>Slug (opz.)</label><input id="fe-slug" type="text" placeholder="es. yoga-giugno-2026"></div>
@@ -3067,6 +3075,7 @@ async function loadAGest() {
       <div id="gs-ev-list"></div>`;
     mountImageUploader('fe-img-mount', 'fe-img', 'events');
     _fillPromoSelect('fe-promo', '');
+    loadTierDraft('fe', null);   // creazione: bozza fasce vuota
   }
   const evList  = document.getElementById('gs-ev-list');
   const gadList = document.getElementById('gs-gad-list');
@@ -3340,6 +3349,201 @@ async function adminDeleteSumupLink(id, label) {
     loadAdminSumupLinks();
   });
 }
+// ── FASCE DI PREZZO EVENTO (event_price_tiers) ───────────────────────
+// events.price resta il prezzo unico di default. Se un evento ha almeno una fascia
+// attiva, le fasce SOSTITUISCONO il prezzo nella vetrina socio (card home + dettaglio).
+// Pagamenti, totali iscrizione e bonus promo restano su events.price (Fase 2).
+const TIER_MAX = 5;
+// Bozza righe in editing nei form admin, per prefisso DOM: 'fe' = crea, 'eve' = modifica.
+// Riga: { id: uuid|null, label, price, sort_order, _dirty, _deleted }
+let _tierDraft = { fe: [], eve: [] };
+// Fasce attive per evento, riempita da _loadTiersForEvents(): { [event_id]: tiers[] }
+let _tiersByEvent = {};
+
+function _tierPriceLabel(price) {
+  const n = Number(price || 0);
+  return n > 0 ? eur(n) : 'Gratuito';
+}
+// _esc non protegge gli apici: serve per i value="" degli input della bozza.
+function _escAttr(s) {
+  return _esc(s == null ? '' : s).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+function _tierSort(rows) {
+  return (rows || []).slice().sort((a, b) =>
+    (Number(a.sort_order || 0) - Number(b.sort_order || 0)) ||
+    String(a.label || '').localeCompare(String(b.label || '')));
+}
+// Fasce attive di un evento. Se la SELECT diretta è negata si ripiega sulla RPC.
+async function _fetchEventTiers(eventId) {
+  if (!eventId) return [];
+  try {
+    const { data, error } = await db.from('event_price_tiers')
+      .select('*').eq('event_id', eventId).eq('active', true)
+      .order('sort_order').order('label');
+    if (!error) return data || [];
+    console.warn('event_price_tiers select:', error);
+    const r = await db.rpc('list_event_tiers', {p_event_id: eventId});
+    if (r.error) { console.warn('list_event_tiers:', r.error); return []; }
+    return Array.isArray(r.data) ? r.data : [];
+  } catch (e) { console.warn('_fetchEventTiers:', e); return []; }
+}
+// Una sola query per tutte le card visibili in home. In caso di errore la mappa
+// resta vuota e le card tornano al prezzo unico (nessuna regressione).
+async function _loadTiersForEvents(eventIds) {
+  const ids = (eventIds || []).filter(Boolean);
+  if (!ids.length) { _tiersByEvent = {}; return _tiersByEvent; }
+  try {
+    const { data, error } = await db.from('event_price_tiers')
+      .select('event_id, label, price, sort_order')
+      .in('event_id', ids).eq('active', true).order('sort_order');
+    if (error) { console.warn('event_price_tiers batch:', error); _tiersByEvent = {}; return _tiersByEvent; }
+    _tiersByEvent = (data || []).reduce((acc, t) =>
+      ({...acc, [t.event_id]: (acc[t.event_id] || []).concat([t])}), {});
+  } catch (e) { console.warn('_loadTiersForEvents:', e); _tiersByEvent = {}; }
+  return _tiersByEvent;
+}
+function _tiersOf(eventId) { return _tiersByEvent[eventId] || []; }
+// Prezzo mostrato nella card home: "da € X" con le fasce, prezzo unico senza.
+function _eventPriceLabel(e) {
+  const tiers = _tiersOf(e.id);
+  if (!tiers.length) return (!e.price || e.price == 0) ? 'Gratuito' : eur(e.price);
+  const min = Math.min(...tiers.map(t => Number(t.price || 0)));
+  return min > 0 ? 'da ' + eur(min) : 'Fasce da Gratuito';
+}
+// Blocco fasce per il dettaglio evento. Stringa vuota se l'evento non ha fasce.
+function _tierListHtml(tiers) {
+  if (!tiers || !tiers.length) return '';
+  return `<div class="tier-list">
+    <div class="tier-list-lbl">💶 Fasce di prezzo</div>
+    ${tiers.map(t => `<div class="tier-list-row">
+      <span class="tier-list-name">${_esc(t.label || '')}</span>
+      <span class="tier-list-price">${_tierPriceLabel(t.price)}</span>
+    </div>`).join('')}
+  </div>`;
+}
+
+// ── EDITOR FASCE NEI FORM ADMIN ──────────────────────────────────────
+function _tierVisible(prefix) { return (_tierDraft[prefix] || []).filter(r => !r._deleted); }
+function _tierSetDraft(prefix, rows) { _tierDraft = {..._tierDraft, [prefix]: rows}; }
+
+function renderTierEditor(prefix) {
+  const list = document.getElementById(prefix + '-tiers');
+  if (!list) return;
+  const rows = _tierDraft[prefix] || [];
+  const visible = rows.map((r, i) => ({r, i})).filter(x => !x.r._deleted);
+  list.innerHTML = visible.length
+    ? visible.map(({r, i}) => `<div class="tier-row">
+        <input type="text" class="tier-lbl" placeholder="Etichetta (es. Adulto)"
+          value="${_escAttr(r.label)}" oninput="tierSetField('${prefix}',${i},'label',this.value)">
+        <input type="number" class="tier-price" min="0" step="0.50" placeholder="€"
+          value="${_escAttr(r.price)}" oninput="tierSetField('${prefix}',${i},'price',this.value)">
+        <button type="button" class="btn-ico tier-del" title="Rimuovi fascia"
+          onclick="tierRemoveRow('${prefix}',${i})">🗑️</button>
+      </div>`).join('')
+    : `<div class="tier-empty">Nessuna fascia: vale il prezzo unico qui sopra.</div>`;
+  const btn = document.getElementById(prefix + '-tier-add');
+  if (btn) {
+    const full = visible.length >= TIER_MAX;
+    btn.disabled = full;
+    btn.style.opacity = full ? '.55' : '';
+    btn.textContent = full ? `Massimo ${TIER_MAX} fasce` : '+ Aggiungi fascia';
+  }
+}
+function tierAddRow(prefix) {
+  const rows = _tierDraft[prefix] || [];
+  if (_tierVisible(prefix).length >= TIER_MAX) return toast(`Massimo ${TIER_MAX} fasce per evento`);
+  _tierSetDraft(prefix, rows.concat([
+    {id: null, label: '', price: '', sort_order: rows.length, _dirty: false, _deleted: false}
+  ]));
+  renderTierEditor(prefix);
+}
+// Nessun re-render sull'input: gli elementi mantengono focus e posizione del cursore.
+function tierSetField(prefix, idx, field, value) {
+  const rows = _tierDraft[prefix] || [];
+  if (!rows[idx]) return;
+  _tierSetDraft(prefix, rows.map((r, i) => i === idx ? {...r, [field]: value, _dirty: true} : r));
+}
+// La riga viene solo nascosta, mai rimossa dall'array: così gli indici restano stabili.
+// Al salvataggio: riga già salvata → DELETE, riga nuova → semplicemente ignorata.
+function tierRemoveRow(prefix, idx) {
+  const rows = _tierDraft[prefix] || [];
+  if (!rows[idx]) return;
+  _tierSetDraft(prefix, rows.map((r, i) => i === idx ? {...r, _deleted: true} : r));
+  renderTierEditor(prefix);
+}
+// Progressivo per prefisso: se si riapre il form su un altro evento mentre la fetch
+// precedente è ancora in volo, il risultato vecchio viene scartato.
+let _tierLoadSeq = { fe: 0, eve: 0 };
+// Precarica la bozza: eventId assente = modalità creazione (lista vuota).
+async function loadTierDraft(prefix, eventId) {
+  const seq = (_tierLoadSeq[prefix] || 0) + 1;
+  _tierLoadSeq = {..._tierLoadSeq, [prefix]: seq};
+  _tierSetDraft(prefix, []);
+  renderTierEditor(prefix);
+  if (!eventId) return;
+  const tiers = await _fetchEventTiers(eventId);
+  if (_tierLoadSeq[prefix] !== seq) return;   // form riaperto altrove: risultato obsoleto
+  _tierSetDraft(prefix, _tierSort(tiers).map(t => ({
+    id:         t.id,
+    label:      t.label || '',
+    price:      t.price != null ? String(t.price) : '',
+    sort_order: Number(t.sort_order || 0),
+    _dirty:     false,
+    _deleted:   false
+  })));
+  renderTierEditor(prefix);
+}
+// Valida la bozza e la traduce in operazioni. { ok:false } = riga incompleta.
+function collectTierDraft(prefix) {
+  const ops = [];
+  let order = 0;
+  for (const r of (_tierDraft[prefix] || [])) {
+    if (r._deleted) { if (r.id) ops.push({op: 'delete', id: r.id}); continue; }
+    const label = String(r.label || '').trim();
+    const raw   = String(r.price == null ? '' : r.price).trim().replace(',', '.');
+    const price = raw === '' ? NaN : Number(raw);
+    if (!label || !isFinite(price) || price < 0) return {ok: false};
+    const sort_order = order++;
+    if (!r.id)         ops.push({op: 'add', label, price, sort_order});
+    else if (r._dirty) ops.push({op: 'update', id: r.id, label, price, sort_order});
+  }
+  return {ok: true, ops};
+}
+// Applica le operazioni DOPO il salvataggio dell'evento: un errore su una fascia
+// viene segnalato ma non annulla il salvataggio dell'evento.
+async function applyTierOps(eventId, ops) {
+  if (!eventId || !ops || !ops.length) return {changed: 0, errors: []};
+  const errors = [];
+  let changed = 0;
+  for (const op of ops) {
+    try {
+      let res;
+      if (op.op === 'delete') {
+        res = await db.rpc('admin_delete_event_tier',
+          {p_admin_id: currentUser.id, p_tier_id: op.id});
+      } else if (op.op === 'add') {
+        res = await db.rpc('admin_add_event_tier',
+          {p_admin_id: currentUser.id, p_event_id: eventId,
+           p_label: op.label, p_price: op.price, p_sort_order: op.sort_order});
+      } else {
+        res = await db.rpc('admin_update_event_tier',
+          {p_admin_id: currentUser.id, p_tier_id: op.id,
+           p_label: op.label, p_price: op.price, p_sort_order: op.sort_order});
+      }
+      if (res.error) errors.push(res.error.message);
+      else if (res.data && res.data.ok === false) errors.push(res.data.error || 'errore fascia');
+      else changed++;
+    } catch (e) { errors.push(e.message || String(e)); }
+  }
+  return {changed, errors};
+}
+function _tierOpsToast(res) {
+  if (!res) return;
+  if (res.errors.length) toast(`Fasce: ${res.errors.length} non salvate — ${res.errors[0]}`);
+  else if (res.changed)  toast(`Fasce di prezzo aggiornate (${res.changed})`, 'ok');
+}
+const TIER_INVALID_MSG = 'Compila etichetta e prezzo di ogni fascia, oppure rimuovi la riga';
+
 async function adminToggleVisibility(eventId, currentVisible) {
   const label = currentVisible ? 'nascondere' : 'rendere visibile';
   modalConfirm(`Vuoi ${label} questo evento nel catalogo?`, async () => {
@@ -3390,6 +3594,9 @@ async function adminCreateEvent() {
     const pub = pubEl.checked;
 
     if (!title) { modalInfo('⚠️ Inserisci il titolo'); return; }
+    // Fasce validate PRIMA di creare l'evento: se una riga è incompleta non si procede.
+    const tiers = collectTierDraft('fe');
+    if (!tiers.ok) { toast(TIER_INVALID_MSG); return; }
     if (pub && !slug) slug = _slugify(title);
 
     const imgUrl = (document.getElementById('fe-img')?.value || '').trim();
@@ -3426,11 +3633,15 @@ async function adminCreateEvent() {
       });
     }
 
+    // Fasce di prezzo: dopo la creazione, sull'event_id restituito dalla RPC
+    if (data.event_id) _tierOpsToast(await applyTierOps(data.event_id, tiers.ops));
+
     // Reset form
     ['fe-title','fe-desc','fe-date','fe-loc','fe-maxp','fe-price','fe-sumup','fe-slug','fe-img']
       .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
     const promoSel = document.getElementById('fe-promo');
     if (promoSel) promoSel.value = '';
+    loadTierDraft('fe', null);
     resetImageUploader('fe-img-mount');
     if (pubEl) pubEl.checked = false;
     const fEl = document.getElementById('fe-form');
@@ -3624,6 +3835,7 @@ async function loadPublicEvent(slug) {
   }
   _publicEvent = data.event;
   await _loadSumupLinks();          // per i link SumUp collegati a questo evento
+  const tiers = await _fetchEventTiers(_publicEvent.id);
   document.getElementById('ev-title').textContent = _publicEvent.title;
   const dateStr = _publicEvent.event_date ? new Date(_publicEvent.event_date).toLocaleString('it-IT',{weekday:'long',day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'}) : '—';
   const spotsHtml = _publicEvent.spots_left !== null
@@ -3635,7 +3847,9 @@ async function loadPublicEvent(slug) {
     ${_publicEvent.description?`<div style="font-size:13px;color:var(--mut);margin-bottom:8px">${_publicEvent.description}</div>`:''}
     <div style="font-size:13px;margin-bottom:3px">📅 ${dateStr}</div>
     ${_publicEvent.location?`<div style="font-size:13px;margin-bottom:3px">📍 ${_publicEvent.location}</div>`:''}
-    <div style="font-size:15px;font-weight:700;color:var(--gold);margin-top:10px">${_publicEvent.price>0?eur(_publicEvent.price):'Evento gratuito'}</div>
+    ${tiers.length
+      ? _tierListHtml(tiers)
+      : `<div style="font-size:15px;font-weight:700;color:var(--gold);margin-top:10px">${_publicEvent.price>0?eur(_publicEvent.price):'Evento gratuito'}</div>`}
     ${spotsHtml}
     ${_sumupEventSectionHtml(_publicEvent.id, _publicEvent.sumup_link)}
   `;
@@ -4418,6 +4632,7 @@ function openEditEvent(eventId) {
   // valore corrente da admin_list_events; null/undefined → "Nessuno"
   _evePromoOrig = e.promo_group || '';
   _fillPromoSelect('eve-promo', _evePromoOrig);
+  loadTierDraft('eve', e.id);   // async: la lista si popola appena arrivano le fasce
   document.getElementById('ev-edit-bg').style.display = 'block';
 }
 function closeEditEvent() {
@@ -4426,6 +4641,9 @@ function closeEditEvent() {
 async function saveEditEvent() {
   const id = document.getElementById('eve-id').value;
   if (!id) return;
+  // Fasce validate PRIMA dell'update: se una riga è incompleta non si procede.
+  const tiers = collectTierDraft('eve');
+  if (!tiers.ok) return toast(TIER_INVALID_MSG);
   const dateVal = document.getElementById('eve-date').value;
   const payload = {
     p_admin_id:            currentUser.id,
@@ -4452,6 +4670,9 @@ async function saveEditEvent() {
   if (error) return toast(error.message);
   if (!data || !data.ok) return toast(data?.error || 'Errore');
   toast('Evento aggiornato', 'ok');
+  // Fasce di prezzo: dopo l'update dell'evento, errori segnalati senza rollback
+  const tierRes = await applyTierOps(id, tiers.ops);
+  if (tierRes.errors.length || tierRes.changed) _tierOpsToast(tierRes);
   closeEditEvent();
   loadAGest();
 }

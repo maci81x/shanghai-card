@@ -14,7 +14,7 @@
 <meta http-equiv="Cache-Control" content="no-cache">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=35">
+<link rel="stylesheet" href="style.css?v=36">
 </head>
 <body>
 
@@ -997,6 +997,12 @@
       <select id="eve-promo"><option value="">Nessuno</option></select>
       <div class="promo-hint">Se selezionato, i soci ricevono un bonus a soglia sulle cene del gruppo (10% alla 2ª, 15% alla 4ª, 20% alla 6ª).</div>
     </div>
+    <div class="fg">
+      <label>Fasce di prezzo (opz.)</label>
+      <div id="eve-tiers" class="tier-rows"></div>
+      <button type="button" id="eve-tier-add" class="btn-sm tier-add-btn" onclick="tierAddRow('eve')">+ Aggiungi fascia</button>
+      <div class="promo-hint">Se aggiunte, sostituiscono il prezzo unico nella card evento e nel dettaglio. Max 5.</div>
+    </div>
     <div class="form-row">
       <div class="fg"><label>Link SumUp</label><input id="eve-sumup" type="url"></div>
       <div class="fg"><label>Slug pubblico</label><input id="eve-slug" type="text"></div>
@@ -1197,6 +1203,6 @@
 </script>
 <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-<script src="app.js?v=48"></script>
+<script src="app.js?v=49"></script>
 </body>
 </html>
