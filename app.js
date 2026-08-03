@@ -691,6 +691,32 @@ function _promoLabel(promoGroup) {
   const g = (_promoGroupsCache || []).find(x => x.promo_group === promoGroup);
   return (g && g.label) || promoGroup;
 }
+// Elenco in sola lettura dei gruppi bonus fedeltà (tab Promo admin).
+// Sistema separato dai codici sconto: qui non si crea/modifica/elimina nulla,
+// la configurazione delle soglie vive nella tabella di config lato DB.
+async function renderPromoGroupsInfo() {
+  const el = document.getElementById('gs-promo-groups');
+  if (!el) return;
+  const groups = await loadPromoGroups();
+  if (!groups.length) { el.innerHTML = ''; return; }   // nessuno stato vuoto: sezione assente
+  el.innerHTML = `
+    <div class="sec-lbl">🌴 Bonus fedeltà attivi</div>
+    ${groups.map(g => {
+      const soglie = (g.thresholds || [])
+        .slice()
+        .sort((a, b) => Number(a.position) - Number(b.position))
+        .map(t => `<span class="pgrp-pill">${Number(t.position)}ª → ${Number(t.bonus_pct)}%</span>`)
+        .join('');
+      return `
+        <div class="card pgrp-card">
+          <div class="pgrp-ttl">🌴 ${_esc(g.label || g.promo_group)}</div>
+          <div class="pgrp-sub">Bonus automatico su cene consecutive del gruppo</div>
+          ${soglie ? `<div class="pgrp-pills">${soglie}</div>` : ''}
+          <div class="pgrp-ro">Solo lettura</div>
+        </div>`;
+    }).join('')}
+    <div class="pgrp-sep"></div>`;
+}
 function _promoBadgeHtml(promoGroup) {
   if (!promoGroup) return '';
   return `<span class="promo-pill" title="Gruppo promo: ${_esc(_promoLabel(promoGroup))}">🌴 ${_esc(_promoLabel(promoGroup))}</span>`;
@@ -3113,6 +3139,7 @@ async function loadAGest() {
   });
   const prs = cat.promos||[];
   _promosAdminCache = {}; prs.forEach(p => _promosAdminCache[p.id] = p);
+  renderPromoGroupsInfo();
   proList.innerHTML = prs.length
     ? prs.map(p => {
         const sconto = p.discount_type==='percent' ? p.discount_value+'%' : eur(p.discount_value);

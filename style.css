@@ -409,3 +409,13 @@ img{max-width:100%;height:auto}
 :root:not(.light) .promo-cell:not(.on){background:#2b2b2b}
 .promo-pill{font-size:11px;padding:2px 8px;border-radius:12px;white-space:nowrap;
   background:rgba(245,158,11,.15);color:#f59e0b;border:1px solid rgba(245,158,11,.35)}
+
+/* BONUS FEDELTÀ — elenco sola lettura nella tab Promo admin */
+.pgrp-card{position:relative;margin-bottom:8px;padding:12px 14px;border-left:3px solid #f59e0b}
+.pgrp-ttl{font-weight:700;font-size:15px}
+.pgrp-sub{font-size:12px;color:var(--mut);margin-top:2px}
+.pgrp-pills{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;padding-right:74px}
+.pgrp-pill{font-size:12px;font-weight:600;padding:3px 10px;border-radius:12px;white-space:nowrap;
+  background:rgba(245,158,11,.12);color:#f59e0b;border:1px solid rgba(245,158,11,.3)}
+.pgrp-ro{position:absolute;right:12px;bottom:10px;font-size:10px;color:var(--mut);letter-spacing:.04em}
+.pgrp-sep{border-top:1px solid var(--brd);margin:16px 0}
