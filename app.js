@@ -3197,27 +3197,11 @@ async function loadAGest() {
 }
 // ── LINK SUMUP COLLEGATI A EVENTI ────────────────────────────────────
 // sumup_links.event_id: NULL = ricarica generica, valorizzato = link di un evento.
-// Le RPC admin_add/update_sumup_link accettano p_event_id solo se il backend è
-// aggiornato: _sumupEventParam tiene traccia dell'esito del primo tentativo
-// (null = da verificare, true/false = esito noto) per non ripetere il probe.
-let _sumupEventParam = null;
 let _sumupLinksCache = [], _sumupEventsCache = [];
 
-function _isMissingParamError(error) {
-  if (!error) return false;
-  return error.code === 'PGRST202' || /PGRST202|Could not find the function/i.test(error.message || '');
-}
-// Chiama l'RPC con p_event_id; se il backend non conosce ancora il parametro,
-// ripiega sulla vecchia firma (il link viene creato/aggiornato senza evento).
+// admin_add/update_sumup_link accettano p_event_id dal 03/08/2026: si passa sempre.
 async function _rpcSumupLink(fn, args, eventId) {
-  if (_sumupEventParam !== false) {
-    const r = await db.rpc(fn, {...args, p_event_id: eventId || null});
-    if (!_isMissingParamError(r.error)) { _sumupEventParam = true; return r; }
-    _sumupEventParam = false;
-  }
-  const r = await db.rpc(fn, args);
-  r.eventIdIgnorato = !!eventId;
-  return r;
+  return db.rpc(fn, {...args, p_event_id: eventId || null});
 }
 function _sumupEventLabel(ev) {
   if (!ev) return 'Evento';
@@ -3331,8 +3315,7 @@ async function adminAddSumupLink() {
     {p_admin_id: currentUser.id, p_label: label, p_url: url, p_amount: amount}, evId);
   const {data, error} = res;
   if (error||!data.ok) return toast((error&&error.message)||data.error);
-  if (res.eventIdIgnorato) modalInfo('⚠️ Link creato, ma senza collegamento all\'evento\n\nLa RPC admin_add_sumup_link non accetta ancora il parametro p_event_id: va aggiornata lato database.');
-  else toast('Link aggiunto!', 'ok');
+  toast('Link aggiunto!', 'ok');
   ['sl-label','sl-url','sl-amount'].forEach(id => document.getElementById(id).value='');
   const sel = document.getElementById('sl-event'); if (sel) sel.value = '';
   loadAdminSumupLinks();
@@ -3359,8 +3342,7 @@ async function saveEditSumupLink() {
     {p_admin_id: currentUser.id, p_link_id: id, p_label: label, p_url: url, p_amount: amount}, evId);
   const {data, error} = res;
   if (error||!data.ok) return toast((error&&error.message)||data.error);
-  if (res.eventIdIgnorato) modalInfo('⚠️ Link aggiornato, ma senza collegamento all\'evento\n\nLa RPC admin_update_sumup_link non accetta ancora il parametro p_event_id: va aggiornata lato database.');
-  else toast('Link aggiornato!', 'ok');
+  toast('Link aggiornato!', 'ok');
   closeEditSumupLink();
   loadAdminSumupLinks();
 }
@@ -4110,6 +4092,9 @@ async function toggleEventGuests(eventId, eventTitle, btn) {
 }
 function _buildGuestHtml(data, eventId, context) {
   const soci = data.soci || [], ospiti = data.ospiti || [], total = data.total || 0;
+  // L'annullamento iscrizione passa da admin_cancel_registration, che accetta solo
+  // admin: lo staff non vede il pulsante (la RPC risponderebbe "Accesso negato").
+  const isAdmin = context === 'admin';
   const statusColor = s => s==='saldato_credito'||s==='saldato_sumup'||s==='saldato_contanti' ? 'var(--grn)' : s==='da_saldare' ? 'var(--gold)' : 'var(--mut)';
   const statusLabel = s => ({da_saldare:'Da saldare',saldato_credito:'Credito',saldato_sumup:'SumUp',saldato_contanti:'Contanti',annullato:'Annullato',gratuito:'Gratuito'}[s]||s);
   const payBtns = (regId, name, amt) => `<div style="display:flex;gap:3px;margin-top:4px">
@@ -4128,7 +4113,7 @@ function _buildGuestHtml(data, eventId, context) {
   let html = `<div style="font-size:12px;color:var(--mut);margin-bottom:8px">${totalPersons} persone totali (${soci.length+ospiti.length} iscrizioni)</div>`;
   if (soci.length) {
     html += `<div class="sec-lbl" style="margin-bottom:6px">Soci (${soci.length})</div>`;
-    html += `<div class="tbl-wrap"><table><thead><tr><th>Tessera</th><th>Nome</th><th>€</th><th>Stato</th><th>Gruppo</th><th>Check-in</th></tr></thead><tbody>`
+    html += `<div class="tbl-wrap"><table><thead><tr><th>Tessera</th><th>Nome</th><th>€</th><th>Stato</th><th>Gruppo</th><th>Check-in</th>${isAdmin?'<th></th>':''}</tr></thead><tbody>`
       + soci.map(r => {
           const dn  = _esc(r.display_name||'').replace(/'/g,"\\'");
           const pSz = r.party_size || 1;
@@ -4152,6 +4137,7 @@ function _buildGuestHtml(data, eventId, context) {
               <td>${c.checked_in
                 ? `<span style="color:var(--grn);font-weight:700">✅</span>`
                 : `<button class="btn-sm" style="font-size:11px" onclick="checkinCompanion('${c.id}','${eventId}','${context}',this)">Check-in</button>`}</td>
+              ${isAdmin?'<td></td>':''}
             </tr>`;
           }).join('');
           return `<tr>
@@ -4169,6 +4155,10 @@ function _buildGuestHtml(data, eventId, context) {
             <td>${r.checked_in
               ? `<span style="color:var(--grn);font-weight:700">✅</span>`
               : `<button class="btn-sm" onclick="adminCheckinReg('${r.registration_id}',this)">Check-in</button>`}</td>
+            ${isAdmin ? `<td style="white-space:nowrap">
+              <button class="btn-sm" style="font-size:10px;padding:2px 6px;color:var(--neg)" title="Annulla iscrizione"
+                onclick="adminCancelRegistration('${r.registration_id}','${dn}','${_esc(String(r.card_id||'')).replace(/'/g,"\\'")}',${companions.length},'${eventId}')">🗑️</button>
+            </td>` : ''}
           </tr>${compRows}`;
         }).join('')
       + `</tbody></table></div>`;
@@ -4195,6 +4185,46 @@ function _buildGuestHtml(data, eventId, context) {
   }
   if (!soci.length && !ospiti.length) html += '<div class="empty">Nessun iscritto</div>';
   return html;
+}
+// Somma rimborsata restituita da admin_cancel_registration. La forma di `refunds`
+// non è garantita (numero, array di righe o oggetto con totale): si prova a leggerla
+// in modo difensivo e, se non si capisce, si tace invece di mostrare un importo falso.
+function _refundTotal(refunds) {
+  if (refunds == null) return 0;
+  if (typeof refunds === 'number') return refunds;
+  if (Array.isArray(refunds)) {
+    return refunds.reduce((s, x) => s + Number(
+      (x && (x.amount ?? x.importo ?? x.refunded ?? x.total)) || 0), 0);
+  }
+  if (typeof refunds === 'object') return Number(refunds.total ?? refunds.amount ?? 0) || 0;
+  return 0;
+}
+// Annulla l'iscrizione di un socio: rimborsi (credito/contanti/SumUp), annullamento
+// degli accompagnatori attivi e ritiro del bonus promo sono gestiti lato RPC.
+async function adminCancelRegistration(regId, displayName, cardId, companionCount, eventId) {
+  const comps = Number(companionCount || 0);
+  const extra = comps > 0 ? `\nAccompagnatori attivi coinvolti: ${comps}.` : '';
+  modalConfirm(
+    `Annullare l'iscrizione?\n\n` +
+    `Verrà annullata l'iscrizione di ${displayName} (${cardId}) all'evento.${extra}\n` +
+    `Se il pagamento era stato saldato, il credito verrà rimborsato al socio.\n` +
+    `Eventuali accompagnatori attivi vengono anch'essi annullati e rimborsati.\n` +
+    `Il bonus promo, se applicato, viene ritirato.\n` +
+    `L'azione non è reversibile.`,
+    async () => {
+      const {data, error} = await db.rpc('admin_cancel_registration', {
+        p_admin_id: currentUser.id,
+        p_registration_id: regId
+      });
+      if (error || !data || data.ok === false) {
+        return toast((error && error.message) || (data && data.error) || 'Errore');
+      }
+      const tot = _refundTotal(data.refunds);
+      toast('Iscrizione annullata' + (tot > 0 ? ` · rimborsati ${eur(tot)}` : ''), 'ok');
+      await _reloadAdminEventGuests(eventId);
+    }
+  );
+  document.getElementById('modal-ok').textContent = 'Sì, annulla iscrizione';
 }
 async function payRegFromList(regId, method, displayName, amount, eventId, context) {
   const label = {credito:'credito',contanti:'contanti',sumup:'SumUp'}[method]||method;
