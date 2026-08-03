@@ -3847,9 +3847,10 @@ async function loadPublicEvent(slug) {
     ${_publicEvent.description?`<div style="font-size:13px;color:var(--mut);margin-bottom:8px">${_publicEvent.description}</div>`:''}
     <div style="font-size:13px;margin-bottom:3px">📅 ${dateStr}</div>
     ${_publicEvent.location?`<div style="font-size:13px;margin-bottom:3px">📍 ${_publicEvent.location}</div>`:''}
-    ${tiers.length
-      ? _tierListHtml(tiers)
-      : `<div style="font-size:15px;font-weight:700;color:var(--gold);margin-top:10px">${_publicEvent.price>0?eur(_publicEvent.price):'Evento gratuito'}</div>`}
+    ${_tierListHtml(tiers)}
+    ${!tiers.length && !(_publicEvent.price > 0)
+      ? `<div style="font-size:15px;font-weight:700;color:var(--gold);margin-top:10px">Evento gratuito</div>`
+      : ''}
     ${spotsHtml}
     ${_sumupEventSectionHtml(_publicEvent.id, _publicEvent.sumup_link)}
   `;
