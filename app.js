@@ -1441,7 +1441,10 @@ function renderPromos(prs) {
     </div>`).join('');
 }
 function renderSumUp(links) {
-  document.getElementById('u-sumup').innerHTML = links.map(l=>`<a href="${l.url}" target="_blank" rel="noopener" class="sumup-btn">${l.label}</a>`).join('');
+  _sumupLinksCache = links || [];
+  // solo ricariche generiche: i link con event_id vivono nella pagina del loro evento
+  const generici = _sumupLinksCache.filter(l => !l.event_id);
+  document.getElementById('u-sumup').innerHTML = generici.map(l=>`<a href="${l.url}" target="_blank" rel="noopener" class="sumup-btn">${l.label}</a>`).join('');
 }
 async function buyGadget(id, name, price) {
   const promo = _calcPromo(price);
@@ -3160,14 +3163,119 @@ async function loadAGest() {
       }).join('')
     : '<div class="empty">Nessuna promo</div>';
 }
+// ── LINK SUMUP COLLEGATI A EVENTI ────────────────────────────────────
+// sumup_links.event_id: NULL = ricarica generica, valorizzato = link di un evento.
+// Le RPC admin_add/update_sumup_link accettano p_event_id solo se il backend è
+// aggiornato: _sumupEventParam tiene traccia dell'esito del primo tentativo
+// (null = da verificare, true/false = esito noto) per non ripetere il probe.
+let _sumupEventParam = null;
+let _sumupLinksCache = [], _sumupEventsCache = [];
+
+function _isMissingParamError(error) {
+  if (!error) return false;
+  return error.code === 'PGRST202' || /PGRST202|Could not find the function/i.test(error.message || '');
+}
+// Chiama l'RPC con p_event_id; se il backend non conosce ancora il parametro,
+// ripiega sulla vecchia firma (il link viene creato/aggiornato senza evento).
+async function _rpcSumupLink(fn, args, eventId) {
+  if (_sumupEventParam !== false) {
+    const r = await db.rpc(fn, {...args, p_event_id: eventId || null});
+    if (!_isMissingParamError(r.error)) { _sumupEventParam = true; return r; }
+    _sumupEventParam = false;
+  }
+  const r = await db.rpc(fn, args);
+  r.eventIdIgnorato = !!eventId;
+  return r;
+}
+function _sumupEventLabel(ev) {
+  if (!ev) return 'Evento';
+  const d = ev.event_date
+    ? new Date(ev.event_date).toLocaleDateString('it-IT', {day:'numeric', month:'short', year:'numeric'})
+    : null;
+  return ev.title + (d ? ` — ${d}` : '');
+}
+async function _loadSumupEvents() {
+  const {data} = await db.rpc('admin_list_events');
+  _sumupEventsCache = (data || []).slice().sort((a, b) =>
+    new Date(b.event_date || 0) - new Date(a.event_date || 0));   // più recenti in alto
+  return _sumupEventsCache;
+}
+async function _fillSumupEventSelect(selectId, current) {
+  const sel = document.getElementById(selectId);
+  if (!sel) return;
+  const evs = _sumupEventsCache.length ? _sumupEventsCache : await _loadSumupEvents();
+  sel.innerHTML = ['<option value="">— Nessuno (ricarica generica) —</option>']
+    .concat(evs.map(e => `<option value="${e.id}">${_esc(_sumupEventLabel(e))}</option>`))
+    .join('');
+  sel.value = current || '';
+}
+// Link SumUp attivi di un evento, ordinati per sort_order.
+// Finché get_catalog non espone event_id l'array resta vuoto e vale il fallback.
+function _sumupLinksForEvent(eventId) {
+  if (!eventId) return [];
+  return (_sumupLinksCache || [])
+    .filter(l => l.event_id === eventId && l.active !== false)
+    .sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0));
+}
+async function _loadSumupLinks(force) {
+  if (_sumupLinksCache.length && !force) return _sumupLinksCache;
+  const {data: cat} = await db.rpc('get_catalog');
+  _sumupLinksCache = cat?.sumup_links || [];
+  return _sumupLinksCache;
+}
+// Sezione "Paga con SumUp" per la pagina evento (vetrina pubblica).
+// Fallback retrocompatibile su events.sumup_link se l'evento non ha link dedicati.
+function _sumupEventSectionHtml(eventId, legacyLink) {
+  const links = _sumupLinksForEvent(eventId);
+  let bottoni = '';
+  if (links.length) {
+    bottoni = links.map(l =>
+      `<button class="btn btn-g sumup-ev-btn" onclick="window.open('${_esc(l.url)}','_blank','noopener')">💳 ${_esc(l.label)}${l.amount!=null?` — ${eur(l.amount)}`:''}</button>`
+    ).join('');
+  } else if (legacyLink) {
+    bottoni = `<button class="btn btn-g sumup-ev-btn" onclick="window.open('${_esc(legacyLink)}','_blank','noopener')">💳 Paga con SumUp</button>`;
+  } else {
+    return '';
+  }
+  return `<div class="sumup-ev-sec">
+    <div class="sec-lbl" style="margin-bottom:8px">💳 Paga con SumUp</div>
+    <div class="sumup-ev-grid">${bottoni}</div>
+  </div>`;
+}
+
 async function loadAdminSumupLinks() {
   const el = document.getElementById('gs-sumup-list');
   if (!el) return;
   el.innerHTML = '<div class="empty">⏳ Carico…</div>';
-  const {data: cat} = await db.rpc('get_catalog');
-  const links = cat?.sumup_links || [];
+  const [links] = await Promise.all([_loadSumupLinks(true), _loadSumupEvents()]);
+  _fillSumupEventSelect('sl-event', '');
   if (!links.length) { el.innerHTML='<div class="empty">Nessun link SumUp</div>'; return; }
-  el.innerHTML = links.map(l => `
+
+  const generici = links.filter(l => !l.event_id);
+  const perEvento = links.filter(l => l.event_id);
+  let html = '';
+
+  html += `<div class="sec-lbl" style="margin-bottom:8px">🔁 Link ricariche</div>`;
+  html += generici.length ? generici.map(_sumupLinkCardHtml).join('')
+                          : '<div class="empty">Nessun link di ricarica</div>';
+
+  if (perEvento.length) {
+    // raggruppati per evento, eventi più recenti in alto
+    const perId = {};
+    perEvento.forEach(l => { (perId[l.event_id] = perId[l.event_id] || []).push(l); });
+    const ordinati = _sumupEventsCache.filter(e => perId[e.id]);
+    Object.keys(perId).forEach(id => {           // link di eventi non più in elenco
+      if (!ordinati.some(e => e.id === id)) ordinati.push({id, title: 'Evento non trovato', event_date: null});
+    });
+    html += `<div class="sec-lbl" style="margin:18px 0 8px">🎫 Link per eventi</div>`;
+    html += ordinati.map(e => `
+      <div class="sumup-ev-group">${_esc(_sumupEventLabel(e))}</div>
+      ${perId[e.id].map(_sumupLinkCardHtml).join('')}`).join('');
+  }
+  el.innerHTML = html;
+}
+function _sumupLinkCardHtml(l) {
+  return `
     <div class="card" style="margin-bottom:8px;padding:12px">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <span style="font-weight:600;flex:1">${_esc(l.label)}</span>
@@ -3176,27 +3284,33 @@ async function loadAdminSumupLinks() {
       <div style="font-size:11px;color:var(--mut);word-break:break-all;margin:4px 0">${_esc(l.url)}</div>
       <div style="display:flex;gap:6px;margin-top:8px">
         <a href="${l.url}" target="_blank" rel="noopener" class="btn-sm" style="text-decoration:none">🔗 Apri</a>
-        <button class="btn-sm" onclick="openEditSumupLink('${l.id}','${_esc(l.label.replace(/'/g,"\\'"))}','${_esc(l.url.replace(/'/g,"\\'"))}',${l.amount!=null?l.amount:'null'})">✏️ Modifica</button>
+        <button class="btn-sm" onclick="openEditSumupLink('${l.id}','${_esc(l.label.replace(/'/g,"\\'"))}','${_esc(l.url.replace(/'/g,"\\'"))}',${l.amount!=null?l.amount:'null'},'${l.event_id||''}')">✏️ Modifica</button>
         <button class="btn-sm" style="color:var(--neg)" onclick="adminDeleteSumupLink('${l.id}','${_esc(l.label)}')">🗑️ Elimina</button>
       </div>
-    </div>`).join('');
+    </div>`;
 }
 async function adminAddSumupLink() {
   const label  = document.getElementById('sl-label').value.trim();
   const url    = document.getElementById('sl-url').value.trim();
   const amount = parseFloat(document.getElementById('sl-amount').value) || null;
+  const evId   = document.getElementById('sl-event')?.value || '';
   if (!label || !url) return toast('Etichetta e URL obbligatori');
-  const {data, error} = await db.rpc('admin_add_sumup_link', {p_admin_id: currentUser.id, p_label: label, p_url: url, p_amount: amount});
+  const res = await _rpcSumupLink('admin_add_sumup_link',
+    {p_admin_id: currentUser.id, p_label: label, p_url: url, p_amount: amount}, evId);
+  const {data, error} = res;
   if (error||!data.ok) return toast((error&&error.message)||data.error);
-  toast('Link aggiunto!', 'ok');
+  if (res.eventIdIgnorato) modalInfo('⚠️ Link creato, ma senza collegamento all\'evento\n\nLa RPC admin_add_sumup_link non accetta ancora il parametro p_event_id: va aggiornata lato database.');
+  else toast('Link aggiunto!', 'ok');
   ['sl-label','sl-url','sl-amount'].forEach(id => document.getElementById(id).value='');
+  const sel = document.getElementById('sl-event'); if (sel) sel.value = '';
   loadAdminSumupLinks();
 }
-function openEditSumupLink(id, label, url, amount) {
+function openEditSumupLink(id, label, url, amount, eventId) {
   document.getElementById('sle-id').value     = id;
   document.getElementById('sle-label').value  = label;
   document.getElementById('sle-url').value    = url;
   document.getElementById('sle-amount').value = (amount != null && amount !== 'null') ? amount : '';
+  _fillSumupEventSelect('sle-event', eventId || '');
   document.getElementById('sle-bg').style.display = 'block';
 }
 function closeEditSumupLink() {
@@ -3207,10 +3321,14 @@ async function saveEditSumupLink() {
   const label  = document.getElementById('sle-label').value.trim();
   const url    = document.getElementById('sle-url').value.trim();
   const amount = parseFloat(document.getElementById('sle-amount').value) || null;
+  const evId   = document.getElementById('sle-event')?.value || '';
   if (!label || !url) return toast('Etichetta e URL obbligatori');
-  const {data, error} = await db.rpc('admin_update_sumup_link', {p_admin_id: currentUser.id, p_link_id: id, p_label: label, p_url: url, p_amount: amount});
+  const res = await _rpcSumupLink('admin_update_sumup_link',
+    {p_admin_id: currentUser.id, p_link_id: id, p_label: label, p_url: url, p_amount: amount}, evId);
+  const {data, error} = res;
   if (error||!data.ok) return toast((error&&error.message)||data.error);
-  toast('Link aggiornato!', 'ok');
+  if (res.eventIdIgnorato) modalInfo('⚠️ Link aggiornato, ma senza collegamento all\'evento\n\nLa RPC admin_update_sumup_link non accetta ancora il parametro p_event_id: va aggiornata lato database.');
+  else toast('Link aggiornato!', 'ok');
   closeEditSumupLink();
   loadAdminSumupLinks();
 }
@@ -3505,6 +3623,7 @@ async function loadPublicEvent(slug) {
     return;
   }
   _publicEvent = data.event;
+  await _loadSumupLinks();          // per i link SumUp collegati a questo evento
   document.getElementById('ev-title').textContent = _publicEvent.title;
   const dateStr = _publicEvent.event_date ? new Date(_publicEvent.event_date).toLocaleString('it-IT',{weekday:'long',day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'}) : '—';
   const spotsHtml = _publicEvent.spots_left !== null
@@ -3518,6 +3637,7 @@ async function loadPublicEvent(slug) {
     ${_publicEvent.location?`<div style="font-size:13px;margin-bottom:3px">📍 ${_publicEvent.location}</div>`:''}
     <div style="font-size:15px;font-weight:700;color:var(--gold);margin-top:10px">${_publicEvent.price>0?eur(_publicEvent.price):'Evento gratuito'}</div>
     ${spotsHtml}
+    ${_sumupEventSectionHtml(_publicEvent.id, _publicEvent.sumup_link)}
   `;
   if (_publicEvent.spots_left === null || _publicEvent.spots_left > 0) {
     document.getElementById('ev-reg-area').style.display = 'block';
@@ -3551,10 +3671,8 @@ function updateEvTotal() {
   const n = document.getElementById('ev-guests-list').children.length;
   const el = document.getElementById('ev-total');
   if (_publicEvent && _publicEvent.price > 0) {
+    // il link SumUp è già nella sezione "💳 Paga con SumUp" sopra: qui solo il totale
     el.innerHTML = `Totale per ${n} ${n===1?'persona':'persone'}: <strong style="color:var(--gold)">${eur(_publicEvent.price * n)}</strong>`;
-    if (_publicEvent.sumup_link) {
-      el.innerHTML += ` <a href="${_publicEvent.sumup_link}" target="_blank" rel="noopener" class="reg-link" style="display:block;margin-top:6px">💳 Paga ora con SumUp</a>`;
-    }
   } else {
     el.textContent = `${n} ${n===1?'partecipante':'partecipanti'}`;
   }

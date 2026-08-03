@@ -419,3 +419,9 @@ img{max-width:100%;height:auto}
   background:rgba(245,158,11,.12);color:#f59e0b;border:1px solid rgba(245,158,11,.3)}
 .pgrp-ro{position:absolute;right:12px;bottom:10px;font-size:10px;color:var(--mut);letter-spacing:.04em}
 .pgrp-sep{border-top:1px solid var(--brd);margin:16px 0}
+
+/* LINK SUMUP COLLEGATI A EVENTI */
+.sumup-ev-sec{margin-top:14px;padding-top:14px;border-top:1px solid var(--brd)}
+.sumup-ev-grid{display:flex;flex-direction:column;gap:8px}
+.sumup-ev-btn{width:100%;text-align:center}
+.sumup-ev-group{font-size:12px;font-weight:700;color:var(--gold);margin:12px 0 6px;padding-left:2px}

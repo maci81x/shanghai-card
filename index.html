@@ -666,9 +666,13 @@
               <div class="fg"><label>Etichetta (es. "Ricarica €30")</label><input id="sl-label" type="text" placeholder="Ricarica €30"></div>
               <div class="fg"><label>URL SumUp</label><input id="sl-url" type="url" placeholder="https://pay.sumup.com/..."></div>
               <div class="fg"><label>Importo € (opzionale)</label><input id="sl-amount" type="number" min="0" step="0.50" placeholder="es. 30"></div>
+              <div class="fg">
+                <label>Collega a evento</label>
+                <select id="sl-event"><option value="">— Nessuno (ricarica generica) —</option></select>
+                <div class="promo-hint">Se collegato, il link compare nella pagina dell'evento invece che tra le ricariche.</div>
+              </div>
               <button class="btn btn-p w100" onclick="adminAddSumupLink()">+ Aggiungi</button>
             </div>
-            <div class="sec-lbl" style="margin-bottom:8px">Link attivi</div>
             <div id="gs-sumup-list"><div class="empty">⏳ Carico…</div></div>
           </div>
           <div id="gs-pro" class="sub-panel">
@@ -866,6 +870,10 @@
     <div class="fg"><label>Etichetta</label><input id="sle-label" type="text" placeholder="Ricarica €30"></div>
     <div class="fg"><label>URL SumUp</label><input id="sle-url" type="url" placeholder="https://pay.sumup.com/..."></div>
     <div class="fg"><label>Importo € (opzionale)</label><input id="sle-amount" type="number" min="0" step="0.50" placeholder="es. 30"></div>
+    <div class="fg">
+      <label>Collega a evento</label>
+      <select id="sle-event"><option value="">— Nessuno (ricarica generica) —</option></select>
+    </div>
     <div style="display:flex;gap:8px;margin-top:12px">
       <button class="btn btn-q" style="flex:1" onclick="closeEditSumupLink()">Annulla</button>
       <button class="btn btn-p" style="flex:2" onclick="saveEditSumupLink()">Salva</button>
