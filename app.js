@@ -200,6 +200,26 @@ window.addEventListener('DOMContentLoaded', () => {
 const eur = c => '€ ' + Number(c||0).toFixed(2).replace('.',',');
 const fdt = iso => { if(!iso) return '—'; const d=new Date(iso); return d.toLocaleDateString('it-IT',{day:'2-digit',month:'2-digit',year:'2-digit'})+' '+d.toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'}); };
 const txic = t => ({recharge:'🔄',purchase:'🛍️',event_fee:'🎫',refund:'↩️',transfer_out:'💸',transfer_in:'💰',promo_bonus:'🌴'}[t]||'•');
+// ── DATE E ORA PER <input type="datetime-local"> ─────────────────────
+// L'input datetime-local NON fa conversioni: mostra la stringa così com'è e
+// restituisce "YYYY-MM-DDTHH:mm" in ora LOCALE. Il DB usa timestamptz (UTC).
+// Serve quindi convertire nei due sensi, altrimenti ogni salvataggio sposta
+// l'orario dell'offset locale (in CEST: -2h a ogni giro).
+//   UTC → input:  '2026-08-09T17:30:00Z'     → '2026-08-09T19:30'
+//   input → UTC:  '2026-08-09T19:30'         → '2026-08-09T17:30:00.000Z'
+// Round-trip a deriva zero: _localInputToIso(_isoToLocalInput(iso)) === iso.
+function _isoToLocalInput(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const tzMs = d.getTimezoneOffset() * 60000;   // positivo a ovest di UTC
+  return new Date(d.getTime() - tzMs).toISOString().slice(0, 16);
+}
+function _localInputToIso(local) {
+  if (!local) return null;
+  const d = new Date(local);                    // interpretata come ora locale
+  return isNaN(d.getTime()) ? null : d.toISOString();
+}
 function _imgWrap16x9(url, alt, radius) {
   if (!url) return '';
   const r = radius || '12px 12px 0 0';
@@ -3083,6 +3103,8 @@ async function loadAGest() {
   const evs = evData||[];
   // etichette dei gruppi promo pronte prima di disegnare la lista
   if (evs.some(e => e.promo_group)) await loadPromoGroups();
+  // fasce di tutti gli eventi admin (anche nascosti) in una sola query
+  await _loadAdminTiers(evs.map(e => e.id));
   if (!evs.length) { evList.innerHTML='<div class="empty">Nessun evento</div>'; }
   else {
     evList.innerHTML = evs.map(e=>`
@@ -3094,7 +3116,8 @@ async function loadAGest() {
             ${e.visible===false?'👁‍🗨 Nascosto':'👁 Visibile'}
           </span>
         </div>
-        <div style="font-size:12px;color:var(--mut)">${e.event_date?fdt(e.event_date):'—'} · ${_esc(e.location||'—')} · ${e.price>0?eur(e.price):'Gratuito'} · ${e.max_participants||'∞'} posti</div>
+        <div style="font-size:12px;color:var(--mut)">${e.event_date?fdt(e.event_date):'—'} · ${_esc(e.location||'—')}${_adminTiersOf(e.id).length?'':' · '+(e.price>0?eur(e.price):'Gratuito')} · ${e.max_participants||'∞'} posti</div>
+        ${_adminTierLineHtml(_adminTiersOf(e.id))}
         ${e.slug&&e.public_registration?`<div style="display:flex;align-items:center;gap:6px;margin-top:6px;flex-wrap:wrap">
           <a href="?event=${e.slug}" target="_blank" rel="noopener" class="reg-link" style="font-size:11px">🔗 ?event=${_esc(e.slug)}</a>
           <button class="btn-sm" style="font-size:11px;padding:2px 8px" onclick="copyPublicLink('${_esc(e.slug)}')">📋 Copia link</button>
@@ -3359,6 +3382,8 @@ const TIER_MAX = 5;
 let _tierDraft = { fe: [], eve: [] };
 // Fasce attive per evento, riempita da _loadTiersForEvents(): { [event_id]: tiers[] }
 let _tiersByEvent = {};
+// Idem per la lista admin, che vede anche gli eventi nascosti.
+let _adminTiersByEvent = {};
 
 function _tierPriceLabel(price) {
   const n = Number(price || 0);
@@ -3387,22 +3412,39 @@ async function _fetchEventTiers(eventId) {
     return Array.isArray(r.data) ? r.data : [];
   } catch (e) { console.warn('_fetchEventTiers:', e); return []; }
 }
-// Una sola query per tutte le card visibili in home. In caso di errore la mappa
-// resta vuota e le card tornano al prezzo unico (nessuna regressione).
-async function _loadTiersForEvents(eventIds) {
+// Fasce di più eventi in UNA sola query → { [event_id]: tiers[] }. In caso di errore
+// ritorna {} e i chiamanti tornano al prezzo unico (nessuna regressione).
+async function _fetchTiersMap(eventIds) {
   const ids = (eventIds || []).filter(Boolean);
-  if (!ids.length) { _tiersByEvent = {}; return _tiersByEvent; }
+  if (!ids.length) return {};
   try {
     const { data, error } = await db.from('event_price_tiers')
       .select('event_id, label, price, sort_order')
       .in('event_id', ids).eq('active', true).order('sort_order');
-    if (error) { console.warn('event_price_tiers batch:', error); _tiersByEvent = {}; return _tiersByEvent; }
-    _tiersByEvent = (data || []).reduce((acc, t) =>
+    if (error) { console.warn('event_price_tiers batch:', error); return {}; }
+    return (data || []).reduce((acc, t) =>
       ({...acc, [t.event_id]: (acc[t.event_id] || []).concat([t])}), {});
-  } catch (e) { console.warn('_loadTiersForEvents:', e); _tiersByEvent = {}; }
+  } catch (e) { console.warn('_fetchTiersMap:', e); return {}; }
+}
+// Vetrina socio: solo eventi visibili in catalogo.
+async function _loadTiersForEvents(eventIds) {
+  _tiersByEvent = await _fetchTiersMap(eventIds);
   return _tiersByEvent;
 }
+// Lista admin: cache separata, perché include anche gli eventi nascosti e non deve
+// essere sovrascritta dal ricarico del catalogo socio.
+async function _loadAdminTiers(eventIds) {
+  _adminTiersByEvent = await _fetchTiersMap(eventIds);
+  return _adminTiersByEvent;
+}
 function _tiersOf(eventId) { return _tiersByEvent[eventId] || []; }
+function _adminTiersOf(eventId) { return _adminTiersByEvent[eventId] || []; }
+// Riga fasce compatta per la card admin: sostituisce il prezzo unico quando presenti.
+function _adminTierLineHtml(tiers) {
+  if (!tiers || !tiers.length) return '';
+  const parts = tiers.map(t => `${_esc(t.label || '')} ${_tierPriceLabel(t.price)}`);
+  return `<div style="font-size:12px;color:var(--mut);margin-top:2px">💶 ${parts.join(' · ')}</div>`;
+}
 // Prezzo mostrato nella card home: "da € X" con le fasce, prezzo unico senza.
 function _eventPriceLabel(e) {
   const tiers = _tiersOf(e.id);
@@ -3606,7 +3648,7 @@ async function adminCreateEvent() {
       p_admin_id:            currentUser.id,
       p_title:               title,
       p_description:         desc || null,
-      p_event_date:          date ? new Date(date).toISOString() : null,
+      p_event_date:          _localInputToIso(date),
       p_location:            loc || null,
       p_max_participants:    maxp,
       p_price:               price,
@@ -4619,8 +4661,8 @@ function openEditEvent(eventId) {
   document.getElementById('eve-id').value    = e.id;
   document.getElementById('eve-title').value = e.title || '';
   document.getElementById('eve-desc').value  = e.description || '';
-  // datetime-local vuole "YYYY-MM-DDTHH:MM"
-  document.getElementById('eve-date').value  = e.event_date ? new Date(e.event_date).toISOString().slice(0,16) : '';
+  // datetime-local vuole "YYYY-MM-DDTHH:MM" in ora LOCALE, non UTC
+  document.getElementById('eve-date').value  = _isoToLocalInput(e.event_date);
   document.getElementById('eve-loc').value   = e.location || '';
   document.getElementById('eve-maxp').value  = e.max_participants || 0;
   document.getElementById('eve-price').value = e.price || 0;
@@ -4651,7 +4693,7 @@ async function saveEditEvent() {
     p_event_id:            id,
     p_title:               document.getElementById('eve-title').value.trim() || null,
     p_description:         document.getElementById('eve-desc').value.trim() || null,
-    p_event_date:          dateVal ? new Date(dateVal).toISOString() : null,
+    p_event_date:          _localInputToIso(dateVal),
     p_location:            document.getElementById('eve-loc').value.trim() || null,
     p_max_participants:    parseInt(document.getElementById('eve-maxp').value) || 0,
     p_price:               parseFloat(document.getElementById('eve-price').value) || 0,
