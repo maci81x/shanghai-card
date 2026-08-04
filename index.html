@@ -14,7 +14,7 @@
 <meta http-equiv="Cache-Control" content="no-cache">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=37">
+<link rel="stylesheet" href="style.css?v=38">
 </head>
 <body>
 
@@ -56,7 +56,7 @@
     <div class="card login-card">
       <div class="fg">
         <label>Codice Tessera</label>
-        <input id="l-card" type="text" placeholder="SH-001" autocomplete="off" oninput="this.value=this.value.toUpperCase()">
+        <input id="l-card" type="text" value="SH-" placeholder="SH-001" autocomplete="off" autofocus inputmode="text" oninput="this.value=this.value.toUpperCase()">
       </div>
       <div class="fg">
         <label>PIN</label>
@@ -983,7 +983,10 @@
     <div class="sec-lbl" style="margin-bottom:14px">✏️ Modifica Evento</div>
     <input type="hidden" id="eve-id">
     <div class="fg"><label>Titolo</label><input id="eve-title" type="text"></div>
-    <div class="fg"><label>Descrizione</label><input id="eve-desc" type="text"></div>
+    <div class="fg"><label>Descrizione</label>
+      <textarea id="eve-desc" rows="6"></textarea>
+      <div class="promo-hint">A capo e **grassetto** supportati; link, email e numeri di telefono diventano cliccabili.</div>
+    </div>
     <div class="form-row">
       <div class="fg"><label>Data e ora</label><input id="eve-date" type="datetime-local"></div>
       <div class="fg"><label>Luogo</label><input id="eve-loc" type="text"></div>
@@ -1002,6 +1005,11 @@
       <div id="eve-tiers" class="tier-rows"></div>
       <button type="button" id="eve-tier-add" class="btn-sm tier-add-btn" onclick="tierAddRow('eve')">+ Aggiungi fascia</button>
       <div class="promo-hint">Se aggiunte, sostituiscono il prezzo unico nella card evento e nel dettaglio. Max 5.</div>
+    </div>
+    <div class="fg">
+      <label>Menù (opz.)</label>
+      <div id="eve-menu" class="menu-groups"></div>
+      <div class="promo-hint">Le sezioni "comuni" valgono per tutte le fasce; quelle sotto una fascia si vedono solo a chi sceglie quella fascia. Salvate insieme all'evento.</div>
     </div>
     <div class="form-row">
       <div class="fg"><label>Link SumUp</label><input id="eve-sumup" type="url"></div>
@@ -1188,6 +1196,11 @@
   </div>
 </div>
 
+<datalist id="menu-sec-suggest">
+  <option value="Antipasto"><option value="Primo"><option value="Secondo"><option value="Contorno">
+  <option value="Dolce"><option value="Frutta"><option value="Bevute"><option value="Pane e coperto">
+</datalist>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
 <script>
@@ -1196,6 +1209,6 @@
 </script>
 <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-<script src="app.js?v=53"></script>
+<script src="app.js?v=54"></script>
 </body>
 </html>

@@ -194,6 +194,7 @@ window.addEventListener('DOMContentLoaded', () => {
   const saved = sessionStorage.getItem('sh_u');
   const role  = sessionStorage.getItem('sh_r');
   if (saved && role) { currentUser = JSON.parse(saved); route(role); }
+  else prefillCardInput();
 });
 
 // ── UTILITIES ────────────────────────────────────────────────────────
@@ -250,6 +251,25 @@ function toast(msg, type='err') {
   clearTimeout(_tt); _tt = setTimeout(() => el.className='', 3200);
 }
 function _esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+// ── TESTO RICCO (descrizioni evento) ─────────────────────────────────
+// Ordine obbligato: 1) escape HTML, 2) autolink su testo ancora senza tag,
+// 3) **grassetto**, 4) a capo → <br>. Mai innerHTML del testo grezzo.
+const _RX_LINK = /(https?:\/\/[^\s<]+[^\s<.,;:!?)\]}'"])|([\w.+-]+@[\w-]+\.[\w.-]{2,})|((?:\+39[ .]?)?3\d{2}[ .]?\d{3}[ .]?\d{3,4}|\+39[ .]?0\d{1,3}[ .]?\d{5,8})/g;
+function _telHref(raw) {
+  const d = String(raw).replace(/[ .]/g, '');
+  return d.startsWith('+') ? d : '+39' + d;
+}
+function _richText(s) {
+  if (s == null || s === '') return '';
+  let h = _esc(String(s));
+  h = h.replace(_RX_LINK, (m, url, mail, tel) => {
+    if (url)  return `<a href="${url.replace(/&amp;/g, '&')}" target="_blank" rel="noopener noreferrer">${url}</a>`;
+    if (mail) return `<a href="mailto:${mail}">${mail}</a>`;
+    return `<a href="tel:${_telHref(tel)}">${tel}</a>`;
+  });
+  h = h.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+  return h.replace(/\r\n|\r|\n/g, '<br>');
+}
 function modalConfirm(msg, cb) {
   const parts = msg.split('\n\n');
   document.getElementById('modal-title').textContent = parts[0];
@@ -332,8 +352,10 @@ function logout() {
   staffOps = []; localStorage.removeItem('s_ops');
   sessionStorage.removeItem('sh_u'); sessionStorage.removeItem('sh_r');
   document.getElementById('l-pin').value = '';
+  document.getElementById('l-card').value = '';
   hideNav();
   showScreen('screen-login');
+  prefillCardInput();
 }
 
 // ── MOVIMENTI FILTRI ─────────────────────────────────────────────────
@@ -808,7 +830,7 @@ async function loadCatalog() {
   await loadUserEvents();
   renderGadgets(data.gadgets||[]);
   renderPromos(data.promos||[]);
-  renderSumUp(data.sumup_links||[]);
+  await renderSumUp(data.sumup_links||[]);
 }
 function _calcPromo(amount) {
   const now = new Date();
@@ -940,10 +962,11 @@ function closeEventDetail() {
 async function _evdLoad(evArg) {
   const ev = evArg || (_evd && _evd.ev);
   if (!ev) return;
-  const [t, r, s] = await Promise.all([
+  const [t, r, s, menu] = await Promise.all([
     db.rpc('list_event_tiers',            {p_event_id: ev.id}),
     db.rpc('user_get_event_registration', {p_user_id: currentUser.id, p_event_id: ev.id}),
-    db.rpc('list_event_sumup_links',      {p_event_id: ev.id})
+    db.rpc('list_event_sumup_links',      {p_event_id: ev.id}),
+    _fetchEventMenu(ev.id)                // una sola volta: riusato da iscrizione e quote
   ]);
   if (t.error) console.warn('list_event_tiers:', t.error.message);
   if (s.error) console.warn('list_event_sumup_links:', s.error.message);
@@ -955,7 +978,8 @@ async function _evdLoad(evArg) {
     ev:    _evList.find(e => e.id === ev.id) || ev,
     tiers: Array.isArray(t.data) ? t.data : [],
     reg:   r.data,
-    sumup: Array.isArray(s.data) ? s.data : []
+    sumup: Array.isArray(s.data) ? s.data : [],
+    menu:  menu || {common: [], by_tier: []}
   };
   _evdSel = {};             // la selezione riparte dalla verità del server
   _evdSumupOpen = false;
@@ -978,6 +1002,7 @@ function _evdUnits() {
   if (r.self_included !== false) units.push({
     key: 'self', type: 'self',
     name: (currentUser && currentUser.display_name) || 'Tu',
+    tier_id: r.tier_id || null,
     tier_label: r.tier_label || '', amount: Number(r.amount || 0),
     status: r.payment_status || 'da_saldare'
   });
@@ -986,6 +1011,7 @@ function _evdUnits() {
     .forEach(c => units.push({
       key: String(c.id), type: 'companion', id: c.id,
       name: `${c.nome || ''} ${c.cognome || ''}`.trim() || 'Accompagnatore',
+      tier_id: c.tier_id || null,
       tier_label: c.tier_label || '', amount: Number(c.amount || 0),
       status: c.payment_status || 'da_saldare'
     }));
@@ -1021,7 +1047,8 @@ function renderEventDetail() {
     ${e.image_url ? _imgWrap16x9(e.image_url, e.title, '12px') : ''}
     <div class="evd-ttl">${_esc(e.title || 'Evento')}</div>
     <div class="evd-meta">${meta.map(_esc).join(' · ')}</div>
-    ${e.description ? `<div class="evd-desc">${_esc(e.description)}</div>` : ''}
+    ${e.description ? `<div class="evd-desc">${_richText(e.description)}</div>` : ''}
+    ${_evdMenuHtml()}
     ${_evdTiersHtml()}`;
   let body;
   if (_evdMode === 'compose')    body = _evdComposeHtml();
@@ -1031,6 +1058,41 @@ function renderEventDetail() {
   else body = `<button class="btn btn-p w100" style="margin-top:16px" onclick="evdStartCompose()">Iscriviti</button>`;
   el.innerHTML = head + body;
   if (_evdMode !== 'view') _evdUpdateTotal();
+}
+// ── MENÙ DELL'EVENTO (socio) ─────────────────────────────────────────
+// Le sezioni comuni valgono per tutti; quelle di una fascia si vedono solo a chi
+// ha (o sta scegliendo) quella fascia. Menù vuoto → nessuna sezione mostrata.
+function _evdMenu() { return (_evd && _evd.menu) || {common: [], by_tier: []}; }
+function _menuItemsFor(tierId) {
+  const m = _evdMenu();
+  const t = tierId ? (m.by_tier || []).find(x => String(x.tier_id) === String(tierId)) : null;
+  return (m.common || []).concat(t ? (t.items || []) : []);
+}
+function _menuRigheHtml(items) {
+  return items.map(it => `<div class="menu-line">
+    <span class="menu-line-t">${_esc(it.section_label || '')}</span>
+    ${it.item_detail ? `<span class="menu-line-d">${_esc(it.item_detail)}</span>` : ''}
+  </div>`).join('');
+}
+function _evdMenuHtml() {
+  const m = _evdMenu();
+  if (!_menuHasItems(m)) return '';
+  const perFascia = (m.by_tier || []).filter(t => (t.items || []).length);
+  return `<div class="menu-card">
+    <div class="tier-list-lbl">🍽️ Menù</div>
+    ${(m.common || []).length ? _menuRigheHtml(m.common) : ''}
+    ${perFascia.map(t => `<div class="menu-sub">
+      <div class="menu-sub-t">Menù — ${_esc(t.tier_label || 'fascia')}</div>
+      ${_menuRigheHtml(t.items)}
+    </div>`).join('')}
+  </div>`;
+}
+// Anteprima compatta: "Antipasto — Bruschette • Primo — Gnocchi al pesto"
+function _menuPreviewHtml(tierId) {
+  const items = _menuItemsFor(tierId);
+  if (!items.length) return '';
+  return `<div class="menu-prev">🍽️ ${items.map(it =>
+    _esc(it.section_label || '') + (it.item_detail ? ' — ' + _esc(it.item_detail) : '')).join(' • ')}</div>`;
 }
 function _evdTiersHtml() {
   if (!_evdHasTiers()) return '';
@@ -1054,9 +1116,18 @@ function evdRowField(key, field, value) {
   const r = _evdRows.find(x => x.key === key);
   if (!r) return;
   r[field] = value;
-  if (field === 'tier_id') _evdUpdateTotal();
+  if (field === 'tier_id') { _evdUpdateTotal(); _evdUpdatePreview(key, value); }
 }
-function evdSetSelfTier(value) { _evdSelfTier = value; _evdUpdateTotal(); }
+function evdSetSelfTier(value) {
+  _evdSelfTier = value;
+  _evdUpdateTotal();
+  _evdUpdatePreview('self', value);
+}
+// Il menù è già in memoria (_evd.menu): l'anteprima si aggiorna senza altre query.
+function _evdUpdatePreview(key, tierId) {
+  const el = document.getElementById('mp-' + key);
+  if (el) el.innerHTML = _menuPreviewHtml(tierId);
+}
 function _evdTierPrice(tierId) {
   const t = (_evd ? _evd.tiers : []).find(x => String(x.id) === String(tierId));
   return t ? Number(t.price || 0) : 0;
@@ -1093,6 +1164,7 @@ function _evdRowsHtml() {
       <button class="btn-sm evd-person-x" title="Rimuovi" onclick="evdRemoveRow('${r.key}')">✕</button>
     </div>
     ${_evdHasTiers() ? `<div class="fg" style="margin:8px 0 0"><label>Fascia</label>${_evdTierSelectHtml(r.tier_id, `evdRowField('${r.key}','tier_id',this.value)`)}</div>` : ''}
+    <div id="mp-${r.key}">${_menuPreviewHtml(_evdHasTiers() ? r.tier_id : null)}</div>
   </div>`).join('');
 }
 function _evdRenderRows() {
@@ -1110,6 +1182,7 @@ function _evdComposeHtml() {
     <div class="card evd-person">
       <div class="evd-person-name">${_esc((currentUser && currentUser.display_name) || 'Tu')} <span class="evd-you">(tu)</span></div>
       ${selfTier}
+      <div id="mp-self">${_menuPreviewHtml(_evdHasTiers() ? _evdSelfTier : null)}</div>
     </div>
     <div id="evd-rows">${_evdRowsHtml()}</div>
     <button class="btn btn-q w100" style="margin-top:8px" onclick="evdAddRow()">➕ Aggiungi persona</button>
@@ -1206,6 +1279,7 @@ function _evdUnitRowHtml(u) {
     <span class="evd-unit-main">
       <span class="evd-unit-name">${_esc(u.name)}${u.type === 'self' ? ' <span class="evd-you">(tu)</span>' : ''}</span>
       <span class="evd-unit-sub">${u.tier_label ? _esc(u.tier_label) + ' · ' : ''}${quota}</span>
+      ${_menuPreviewHtml(u.tier_id)}
     </span>
     ${right}
     ${st === 'da_saldare' && u.type === 'companion' && _evdCanEdit()
@@ -1327,16 +1401,20 @@ async function evdCancelAll() {
   if (!regId) return toast('Iscrizione non trovata');
   const units = _evdUnits();
   const righe = units.map(u => `• ${u.name}: ${_refundRoute(u.status).txt}`).join('\n');
-  modalConfirm(`Annullare tutta l'iscrizione a "${_evd.ev.title}"?\n\n${units.length === 1 ? '1 persona verrà rimossa' : units.length + ' persone verranno rimosse'}:\n${righe}`, async () => {
+  const msg = `Vuoi davvero annullare TUTTA l'iscrizione?\n\n` +
+    `Le persone già pagate verranno rimborsate.\n` +
+    `${units.length === 1 ? '1 persona verrà rimossa' : units.length + ' persone verranno rimosse'} da "${_evd.ev.title}":\n${righe}`;
+  modalConfirm(msg, async () => {
     const {data, error} = await db.rpc('user_cancel_event_registration', {
       p_user_id: currentUser.id, p_registration_id: regId
     });
     if (error || !data || !data.ok) return toast((error && error.message) || (data && data.error) || 'Annullamento non riuscito');
     const refunds = Array.isArray(data.refunds) ? data.refunds : [];
     const parti = refunds.map(_refundToast).filter(Boolean);
-    toast(`Iscrizione annullata${parti.length ? ' · ' + parti.join(' · ') : ''}`, 'ok');
+    toast(`${data.message || 'Iscrizione annullata'}${parti.length ? ' · ' + parti.join(' · ') : ''}`, 'ok');
     closeEventDetail();
-    await refreshUser();
+    navGo('home');
+    await refreshUser();      // saldo (eventuali rimborsi) + lista eventi
   });
 }
 function _gadgetSizes(g) { return (g && g.has_sizes && Array.isArray(g.sizes)) ? g.sizes : []; }
@@ -1867,10 +1945,11 @@ function renderPromos(prs) {
       <div class="promo-detail">${p.discount_type==='percent'?p.discount_value+'%':eur(p.discount_value)} di sconto${p.valid_until?' · fino al '+fdt(p.valid_until).split(' ')[0]:''}</div>
     </div>`).join('');
 }
-// "Ricarica tessera": SOLO ricariche del saldo. I link con event_id sono quote
-// evento e vivono esclusivamente nel dettaglio dell'evento (openEventDetail).
-function renderSumUp(links) {
-  _sumupLinksCache = links || [];
+// "Ricarica tessera": SOLO ricariche del saldo (event_id NULL, attivi, per
+// sort_order). I link legati a un evento sono quote di partecipazione e vivono
+// esclusivamente nella schermata SumUp del dettaglio evento.
+async function renderSumUp(links) {
+  _sumupLinksCache = await _sumupWithEventIds(links || []);
   const generici = _sumupLinksCache
     .filter(l => !l.event_id && l.active !== false)
     .sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0));
@@ -3315,7 +3394,7 @@ async function loadAGest() {
       <button class="btn-sm p" style="margin-bottom:10px" onclick="toggleEl('fe-form')">+ Nuovo Evento</button>
       <div id="fe-form" class="card" style="display:none;margin-bottom:10px">
         <div class="fg"><label>Titolo</label><input id="fe-title" type="text" placeholder="Nome evento"></div>
-        <div class="fg"><label>Descrizione</label><input id="fe-desc" type="text" placeholder="Descrizione"></div>
+        <div class="fg"><label>Descrizione</label><textarea id="fe-desc" rows="5" placeholder="Descrizione&#10;A capo e **grassetto** supportati; link, email e numeri di telefono diventano cliccabili"></textarea></div>
         <div class="form-row">
           <div class="fg"><label>Data e ora</label><input id="fe-date" type="datetime-local"></div>
           <div class="fg"><label>Luogo</label><input id="fe-loc" type="text" placeholder="Luogo"></div>
@@ -3335,6 +3414,11 @@ async function loadAGest() {
           <button type="button" id="fe-tier-add" class="btn-sm tier-add-btn" onclick="tierAddRow('fe')">+ Aggiungi fascia</button>
           <div class="promo-hint">Se aggiunte, sostituiscono il prezzo unico nella card evento e nel dettaglio. Max ${TIER_MAX}.</div>
         </div>
+        <div class="fg">
+          <label>Menù (opz.)</label>
+          <div id="fe-menu" class="menu-groups"></div>
+          <div class="promo-hint">Le sezioni "comuni" valgono per tutte le fasce; quelle sotto una fascia si vedono solo a chi sceglie quella fascia. Salvate insieme all'evento.</div>
+        </div>
         <div class="form-row">
           <div class="fg"><label>Link SumUp (opz.)</label><input id="fe-sumup" type="url" placeholder="https://..."></div>
           <div class="fg"><label>Slug (opz.)</label><input id="fe-slug" type="text" placeholder="es. yoga-giugno-2026"></div>
@@ -3350,6 +3434,7 @@ async function loadAGest() {
     mountImageUploader('fe-img-mount', 'fe-img', 'events');
     _fillPromoSelect('fe-promo', '');
     loadTierDraft('fe', null);   // creazione: bozza fasce vuota
+    loadMenuDraft('fe', null);   // creazione: bozza menù vuota
   }
   const evList  = document.getElementById('gs-ev-list');
   const gadList = document.getElementById('gs-gad-list');
@@ -3489,9 +3574,47 @@ function _sumupLinksForEvent(eventId) {
 }
 async function _loadSumupLinks(force) {
   if (_sumupLinksCache.length && !force) return _sumupLinksCache;
+  if (force) _sumupOwner = null;      // l'admin può aver cambiato l'evento di un link
   const {data: cat} = await db.rpc('get_catalog');
-  _sumupLinksCache = cat?.sumup_links || [];
+  _sumupLinksCache = await _sumupWithEventIds(cat?.sumup_links || []);
   return _sumupLinksCache;
+}
+// get_catalog proietta solo (id,label,amount,url,sort_order): SENZA event_id i link
+// di un evento sembrano generici e finiscono in "Ricarica tessera". Qui l'event_id
+// viene ricostruito: prima dalla tabella (unica fonte completa), altrimenti
+// chiedendo a list_event_sumup_links i link di ogni evento noto.
+let _sumupOwner = null;   // { [link_id]: event_id|null } risolto una volta per sessione
+async function _sumupWithEventIds(links) {
+  const list = (links || []).map(l => ({...l}));
+  if (!list.length) return list;
+  if (!_sumupOwner || list.some(l => !(l.id in _sumupOwner))) _sumupOwner = await _resolveSumupOwners(list);
+  return list.map(l => ({...l, event_id: l.event_id || _sumupOwner[l.id] || null}));
+}
+// → { [link_id]: event_id|null }. Ogni id della lista compare sempre nella mappa,
+// anche con valore null: così la cache non viene ricalcolata a ogni catalogo.
+async function _resolveSumupOwners(list) {
+  const owner = {};
+  list.forEach(l => { owner[l.id] = l.event_id || null; });
+  try {
+    const {data, error} = await db.from('sumup_links').select('id,event_id');
+    if (!error && Array.isArray(data) && data.length) {
+      data.forEach(r => { owner[r.id] = r.event_id || null; });
+      return owner;
+    }
+  } catch (e) { console.warn('sumup_links select:', e.message || e); }
+  // RLS chiusa sulla tabella: si risale ai link di evento chiedendoli evento per evento
+  const ids = _sumupKnownEventIds();
+  if (!ids.length) return owner;
+  const res = await Promise.all(ids.map(id => db.rpc('list_event_sumup_links', {p_event_id: id})));
+  res.forEach((r, i) => (Array.isArray(r.data) ? r.data : []).forEach(l => { owner[l.id] = ids[i]; }));
+  return owner;
+}
+function _sumupKnownEventIds() {
+  const ids = new Set();
+  (_evList || []).forEach(e => e.id && ids.add(e.id));
+  (_sumupEventsCache || []).forEach(e => e.id && ids.add(e.id));
+  Object.keys(_eventsAdminCache || {}).forEach(id => ids.add(id));
+  return [...ids];
 }
 // Sezione "Paga con SumUp" per la pagina evento (vetrina pubblica).
 // Fallback retrocompatibile su events.sumup_link se l'evento non ha link dedicati.
@@ -3726,6 +3849,7 @@ function renderTierEditor(prefix) {
     btn.style.opacity = full ? '.55' : '';
     btn.textContent = full ? `Massimo ${TIER_MAX} fasce` : '+ Aggiungi fascia';
   }
+  renderMenuEditor(prefix);   // i gruppi del menù seguono le fasce
 }
 function tierAddRow(prefix) {
   const rows = _tierDraft[prefix] || [];
@@ -3822,6 +3946,243 @@ function _tierOpsToast(res) {
 }
 const TIER_INVALID_MSG = 'Compila etichetta e prezzo di ogni fascia, oppure rimuovi la riga';
 
+// ── EDITOR MENÙ NEI FORM ADMIN ───────────────────────────────────────
+// Stessa impostazione delle fasce: bozza locale applicata al salvataggio
+// dell'evento. In creazione né l'evento né le fasce hanno ancora un id, quindi
+// le scritture non possono partire prima del salvataggio.
+// Riga: {uid, id|null, group, label, detail, _dirty, _deleted}
+// group: 'common' | 't:<tier_id>' (fascia già salvata) | 'd:<indice bozza fascia>'
+// I suggerimenti di sezione stanno nel <datalist id="menu-sec-suggest"> di index.html:
+// l'input resta libero, l'admin può scrivere qualsiasi titolo.
+let _menuDraft = { fe: [], eve: [] };
+let _menuUid = 0;
+let _menuLoadSeq = { fe: 0, eve: 0 };
+
+// Le RPC del menù sono recenti: se PostgREST non trova la firma con i parametri
+// p_*, si riprova con i nomi senza prefisso invece di fallire in silenzio.
+function _isMissingFn(err) {
+  const s = `${(err && err.code) || ''} ${(err && err.message) || ''} ${(err && err.hint) || ''}`;
+  return /PGRST202|Could not find the function|schema cache/i.test(s);
+}
+async function _menuRpc(fn, args) {
+  const pref = {};
+  Object.keys(args).forEach(k => { pref['p_' + k] = args[k]; });
+  const res = await db.rpc(fn, pref);
+  if (res.error && _isMissingFn(res.error)) {
+    const alt = await db.rpc(fn, args);
+    if (!alt.error || !_isMissingFn(alt.error)) return alt;
+  }
+  return res;
+}
+function _menuSort(items) {
+  return (items || []).slice().sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0));
+}
+async function _fetchEventMenu(eventId) {
+  const vuoto = {common: [], by_tier: []};
+  if (!eventId) return vuoto;
+  const {data, error} = await _menuRpc('list_event_menu', {event_id: eventId});
+  if (error) { console.warn('list_event_menu:', error.message); return vuoto; }
+  const m = data || {};
+  return {
+    common:  _menuSort(Array.isArray(m.common) ? m.common : []),
+    by_tier: (Array.isArray(m.by_tier) ? m.by_tier : [])
+      .slice().sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0))
+      .map(t => ({...t, items: _menuSort(t.items)}))
+  };
+}
+function _menuHasItems(menu) {
+  if (!menu) return false;
+  return (menu.common || []).length > 0 || (menu.by_tier || []).some(t => (t.items || []).length > 0);
+}
+// Gruppi mostrati nell'editor: comune + una fascia per ogni riga viva della bozza fasce.
+function _menuGroups(prefix) {
+  const groups = [{key: 'common', label: 'Comune a tutte le fasce'}];
+  (_tierDraft[prefix] || []).forEach((t, i) => {
+    if (t._deleted) return;
+    groups.push({
+      key:   t.id ? 't:' + t.id : 'd:' + i,
+      label: String(t.label || '').trim() || `Fascia ${i + 1}`
+    });
+  });
+  return groups;
+}
+function _menuRows(prefix, key) {
+  return (_menuDraft[prefix] || []).filter(r => !r._deleted && r.group === key);
+}
+function _menuSetDraft(prefix, rows) { _menuDraft = {..._menuDraft, [prefix]: rows}; }
+function renderMenuEditor(prefix) {
+  const host = document.getElementById(prefix + '-menu');
+  if (!host) return;
+  const groups = _menuGroups(prefix);
+  host.innerHTML = groups.map((g, gi) => {
+    const rows = _menuRows(prefix, g.key);
+    return `<div class="menu-grp">
+      <div class="menu-grp-t">${_esc(g.label)}</div>
+      ${rows.length
+        ? rows.map((r, i) => _menuRowHtml(prefix, r, i, rows.length, groups)).join('')
+        : '<div class="tier-empty">Nessuna sezione.</div>'}
+      <div class="menu-add">
+        <input type="text" id="${prefix}-menu-new-${gi}" list="menu-sec-suggest" placeholder="Titolo sezione (es. Antipasto)">
+        <button type="button" class="btn-sm" onclick="menuAddRow('${prefix}','${g.key}','${prefix}-menu-new-${gi}')">+ Aggiungi</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+function _menuRowHtml(prefix, r, i, n, groups) {
+  const opts = groups.map(g =>
+    `<option value="${g.key}"${g.key === r.group ? ' selected' : ''}>${_esc(g.label)}</option>`).join('');
+  return `<div class="menu-row">
+    <div class="menu-row-top">
+      <input type="text" class="menu-lbl" list="menu-sec-suggest" placeholder="Titolo sezione"
+        value="${_escAttr(r.label)}" oninput="menuSetField('${prefix}','${r.uid}','label',this.value)">
+      <button type="button" class="btn-ico menu-act" title="Sposta su" ${i === 0 ? 'disabled' : ''}
+        onclick="menuMove('${prefix}','${r.uid}',-1)">↑</button>
+      <button type="button" class="btn-ico menu-act" title="Sposta giù" ${i === n - 1 ? 'disabled' : ''}
+        onclick="menuMove('${prefix}','${r.uid}',1)">↓</button>
+      <button type="button" class="btn-ico menu-act" title="Elimina sezione"
+        onclick="menuRemoveRow('${prefix}','${r.uid}')">🗑️</button>
+    </div>
+    <textarea class="menu-det" rows="2" placeholder="Dettaglio (es. Bruschette al pomodoro, taglieri…)"
+      oninput="menuSetField('${prefix}','${r.uid}','detail',this.value)">${_esc(r.detail || '')}</textarea>
+    <div class="menu-move-row">
+      <span class="menu-move-lbl">Sposta in</span>
+      <select onchange="menuSetGroup('${prefix}','${r.uid}',this.value)">${opts}</select>
+    </div>
+  </div>`;
+}
+function menuAddRow(prefix, group, inputId) {
+  const el = document.getElementById(inputId);
+  const label = el ? el.value.trim() : '';
+  if (!label) return toast('Scrivi il titolo della sezione (es. Antipasto)');
+  _menuSetDraft(prefix, (_menuDraft[prefix] || []).concat([{
+    uid: 'm' + (++_menuUid), id: null, group, label, detail: '', _dirty: true, _deleted: false
+  }]));
+  if (el) el.value = '';
+  renderMenuEditor(prefix);
+}
+// Nessun re-render sull'input: il campo mantiene focus e cursore.
+function menuSetField(prefix, uid, field, value) {
+  _menuSetDraft(prefix, (_menuDraft[prefix] || [])
+    .map(r => r.uid === uid ? {...r, [field]: value, _dirty: true} : r));
+}
+function menuRemoveRow(prefix, uid) {
+  _menuSetDraft(prefix, (_menuDraft[prefix] || [])
+    .map(r => r.uid === uid ? {...r, _deleted: true, _dirty: true} : r));
+  renderMenuEditor(prefix);
+}
+function menuSetGroup(prefix, uid, group) {
+  _menuSetDraft(prefix, (_menuDraft[prefix] || [])
+    .map(r => r.uid === uid ? {...r, group, _dirty: true} : r));
+  renderMenuEditor(prefix);
+}
+// Sposta la riga rispetto alle altre dello stesso gruppo (l'ordine è quello dell'array).
+function menuMove(prefix, uid, delta) {
+  const rows = (_menuDraft[prefix] || []).slice();
+  const r = rows.find(x => x.uid === uid);
+  if (!r) return;
+  const gruppo = rows.filter(x => !x._deleted && x.group === r.group);
+  const target = gruppo[gruppo.indexOf(r) + delta];
+  if (!target) return;
+  const i = rows.indexOf(r), j = rows.indexOf(target);
+  rows[i] = target; rows[j] = r;
+  _menuSetDraft(prefix, rows);
+  renderMenuEditor(prefix);
+}
+async function loadMenuDraft(prefix, eventId) {
+  const seq = (_menuLoadSeq[prefix] || 0) + 1;
+  _menuLoadSeq = {..._menuLoadSeq, [prefix]: seq};
+  _menuSetDraft(prefix, []);
+  renderMenuEditor(prefix);
+  if (!eventId) return;
+  const menu = await _fetchEventMenu(eventId);
+  if (_menuLoadSeq[prefix] !== seq) return;   // form riaperto altrove
+  const rows = [];
+  const push = (it, group) => rows.push({
+    uid: 'm' + (++_menuUid), id: it.id, group,
+    label: it.section_label || '', detail: it.item_detail || '',
+    _dirty: false, _deleted: false
+  });
+  menu.common.forEach(it => push(it, 'common'));
+  menu.by_tier.forEach(t => (t.items || []).forEach(it => push(it, 't:' + t.tier_id)));
+  _menuSetDraft(prefix, rows);
+  renderMenuEditor(prefix);
+}
+// Applica la bozza DOPO il salvataggio dell'evento e delle fasce: solo qui i
+// tier_id esistono davvero. Le fasce nuove si risolvono per etichetta.
+async function applyMenuOps(prefix, eventId) {
+  const rows = _menuDraft[prefix] || [];
+  if (!eventId || !rows.length) return {changed: 0, errors: []};
+  const errors = [];
+  let changed = 0;
+  const tiers = await _fetchEventTiers(eventId);
+  const ids = new Set(tiers.map(t => String(t.id)));
+  const perLabel = {};
+  tiers.forEach(t => { perLabel[String(t.label || '').trim().toLowerCase()] = t.id; });
+  const resolve = (group) => {
+    if (!group || group === 'common') return {ok: true, tier_id: null};
+    if (group.indexOf('t:') === 0) {
+      const id = group.slice(2);
+      return ids.has(String(id)) ? {ok: true, tier_id: id} : {ok: false};
+    }
+    const t = (_tierDraft[prefix] || [])[Number(group.slice(2))];
+    const id = t ? perLabel[String(t.label || '').trim().toLowerCase()] : null;
+    return id ? {ok: true, tier_id: id} : {ok: false};
+  };
+  const del = async (id) => {
+    const res = await _menuRpc('admin_delete_event_menu_item', {admin_id: currentUser.id, item_id: id});
+    if (res.error) errors.push(res.error.message);
+    else if (res.data && res.data.ok === false) errors.push(res.data.error || 'errore menù');
+    else changed++;
+  };
+  const ordine = {};      // tier_id ('' = comune) → ids nell'ordine finale
+  for (const r of rows) {
+    const g = resolve(r.group);
+    // riga cancellata, o fascia sparita dalla bozza: la sezione non esiste più
+    if (r._deleted || !g.ok) { if (r.id) await del(r.id); continue; }
+    const label  = String(r.label || '').trim();
+    const detail = String(r.detail || '').trim();
+    if (!label) { errors.push('Titolo sezione obbligatorio'); continue; }
+    const key = g.tier_id || '';
+    ordine[key] = ordine[key] || [];
+    const sort_order = (ordine[key].length + 1) * 10;
+    if (!r.id) {
+      const res = await _menuRpc('admin_add_event_menu_item', {
+        admin_id: currentUser.id, event_id: eventId, tier_id: g.tier_id,
+        section_label: label, item_detail: detail || null, sort_order
+      });
+      if (res.error) { errors.push(res.error.message); continue; }
+      if (res.data && res.data.ok === false) { errors.push(res.data.error || 'errore menù'); continue; }
+      r.id = (res.data && res.data.id) || null;
+      r._dirty = false;
+      changed++;
+    } else if (r._dirty) {
+      const res = await _menuRpc('admin_update_event_menu_item', {
+        admin_id: currentUser.id, item_id: r.id,
+        section_label: label, item_detail: detail || null, sort_order, active: null,
+        tier_id: g.tier_id, clear_tier: !g.tier_id
+      });
+      if (res.error) { errors.push(res.error.message); continue; }
+      if (res.data && res.data.ok === false) { errors.push(res.data.error || 'errore menù'); continue; }
+      r._dirty = false;
+      changed++;
+    }
+    if (r.id) ordine[key].push(r.id);
+  }
+  // ordine definitivo di ogni gruppo
+  for (const key of Object.keys(ordine)) {
+    if (ordine[key].length < 2) continue;
+    const res = await _menuRpc('admin_reorder_event_menu', {admin_id: currentUser.id, ordered_ids: ordine[key]});
+    if (res.error) errors.push(res.error.message);
+    else if (res.data && res.data.ok === false) errors.push(res.data.error || 'errore ordinamento menù');
+  }
+  return {changed, errors};
+}
+function _menuOpsToast(res) {
+  if (!res) return;
+  if (res.errors.length) toast(`Menù: ${res.errors.length} modifiche non salvate — ${res.errors[0]}`);
+  else if (res.changed)  toast(`Menù aggiornato (${res.changed})`, 'ok');
+}
+
 async function adminToggleVisibility(eventId, currentVisible) {
   const label = currentVisible ? 'nascondere' : 'rendere visibile';
   modalConfirm(`Vuoi ${label} questo evento nel catalogo?`, async () => {
@@ -3912,7 +4273,11 @@ async function adminCreateEvent() {
     }
 
     // Fasce di prezzo: dopo la creazione, sull'event_id restituito dalla RPC
-    if (data.event_id) _tierOpsToast(await applyTierOps(data.event_id, tiers.ops));
+    if (data.event_id) {
+      _tierOpsToast(await applyTierOps(data.event_id, tiers.ops));
+      // il menù dopo le fasce: i tier_id esistono solo ora
+      _menuOpsToast(await applyMenuOps('fe', data.event_id));
+    }
 
     // Reset form
     ['fe-title','fe-desc','fe-date','fe-loc','fe-maxp','fe-price','fe-sumup','fe-slug','fe-img']
@@ -3920,6 +4285,7 @@ async function adminCreateEvent() {
     const promoSel = document.getElementById('fe-promo');
     if (promoSel) promoSel.value = '';
     loadTierDraft('fe', null);
+    loadMenuDraft('fe', null);
     resetImageUploader('fe-img-mount');
     if (pubEl) pubEl.checked = false;
     const fEl = document.getElementById('fe-form');
@@ -4122,7 +4488,7 @@ async function loadPublicEvent(slug) {
   document.getElementById('ev-info').innerHTML = `
     ${_publicEvent.image_url ? `<div style="margin-bottom:12px">${_imgWrap16x9(_publicEvent.image_url, _publicEvent.title, '12px')}</div>` : ''}
     <div style="font-size:15px;font-weight:700;margin-bottom:6px">${_publicEvent.title}</div>
-    ${_publicEvent.description?`<div style="font-size:13px;color:var(--mut);margin-bottom:8px">${_publicEvent.description}</div>`:''}
+    ${_publicEvent.description?`<div class="evd-desc" style="font-size:13px;color:var(--mut);margin-bottom:8px">${_richText(_publicEvent.description)}</div>`:''}
     <div style="font-size:13px;margin-bottom:3px">📅 ${dateStr}</div>
     ${_publicEvent.location?`<div style="font-size:13px;margin-bottom:3px">📍 ${_publicEvent.location}</div>`:''}
     ${_tierListHtml(tiers)}
@@ -4202,6 +4568,18 @@ function showRegister() {
 function showLogin() {
   document.getElementById('register-view').style.display = 'none';
   document.getElementById('login-view').style.display = '';
+  prefillCardInput();
+}
+// Il campo tessera parte da "SH-" con il cursore subito dopo il trattino: il socio
+// digita solo le cifre. Se lo svuota resta vuoto, non lo riscriviamo.
+function prefillCardInput(focus) {
+  const el = document.getElementById('l-card');
+  if (!el) return;
+  if (!el.value.trim()) el.value = 'SH-';
+  if (focus === false) return;
+  setTimeout(() => {
+    try { el.focus(); const n = el.value.length; el.setSelectionRange(n, n); } catch (e) {}
+  }, 60);
 }
 function _toggleClaimMode(isClaim) {
   document.getElementById('r-card-wrap').style.display = isClaim ? 'block' : 'none';
@@ -4577,6 +4955,10 @@ const _GUIDE = {
 • "Iscriviti" apre la composizione del gruppo: scegli la <strong>fascia</strong> per te e aggiungi le persone che vengono con te (nome, cognome e fascia di ognuna)<br>
 • Le fasce sono i prezzi per età decisi dal Rione (es. Adulto, Ragazz*, 0-3 gratuito): chi rientra in una fascia gratuita non paga nulla<br>
 • Il totale si aggiorna mentre scegli le fasce</p>
+<p><strong>🍽️ MENÙ</strong><br>
+• Se l'evento ha un menù lo trovi nel dettaglio, sopra le fasce di prezzo<br>
+• Le portate "comuni" valgono per tutti; ogni fascia può avere le sue<br>
+• Durante l'iscrizione, sotto la fascia di ogni persona vedi il menù che le tocca</p>
 <p><strong>🎟️ PAGARE LE QUOTE (una persona alla volta)</strong><br>
 • Dentro l'evento vedi la quota di ogni persona con il suo stato: 🟡 Da saldare · 🟠 In attesa conferma staff · 🟢 Saldato / Gratuito<br>
 • Spunta chi vuoi pagare tu (o "Pago io per tutti") e scegli il metodo:<br>
@@ -4668,6 +5050,9 @@ const _GUIDE = {
 • 📥 Esporta in CSV per Excel</p>
 <p><strong>🎪 EVENTI (Gestione)</strong><br>
 • Crea nuovo evento: titolo, data, luogo, prezzo, posti, link SumUp, slug<br>
+• <strong>Descrizione</strong>: puoi andare a capo, usare **grassetto** e incollare link/email/telefoni — nel dettaglio evento diventano cliccabili<br>
+• <strong>Fasce di prezzo</strong>: i prezzi per età (es. Adulto € 15 · Ragazz* € 10 · 0-3 gratis)<br>
+• <strong>Menù</strong>: sotto le fasce. Le sezioni in "Comune a tutte le fasce" le vedono tutti; quelle sotto una fascia solo chi sceglie quella fascia. ↑↓ per l'ordine, "Sposta in" per cambiare gruppo. Si salva insieme all'evento<br>
 • 🌐 "Apri iscrizioni esterne": genera link pubblico (?event=slug) con copia<br>
 • Il link appare anche in lista per condivisione rapida<br>
 • Cruscotto: 👥 Persone totali (SUM party_size) / 💰 Paganti / ✅ Presenti (inclusi accompagnatori)<br>
@@ -4956,6 +5341,7 @@ function openEditEvent(eventId) {
   _evePromoOrig = e.promo_group || '';
   _fillPromoSelect('eve-promo', _evePromoOrig);
   loadTierDraft('eve', e.id);   // async: la lista si popola appena arrivano le fasce
+  loadMenuDraft('eve', e.id);   // idem per il menù (gruppi = fasce)
   document.getElementById('ev-edit-bg').style.display = 'block';
 }
 function closeEditEvent() {
@@ -4996,6 +5382,8 @@ async function saveEditEvent() {
   // Fasce di prezzo: dopo l'update dell'evento, errori segnalati senza rollback
   const tierRes = await applyTierOps(id, tiers.ops);
   if (tierRes.errors.length || tierRes.changed) _tierOpsToast(tierRes);
+  const menuRes = await applyMenuOps('eve', id);
+  if (menuRes.errors.length || menuRes.changed) _menuOpsToast(menuRes);
   closeEditEvent();
   loadAGest();
 }
@@ -5051,7 +5439,7 @@ function openEventPopup(ev, total) {
   if (ev.price > 0)  meta.push('💶 ' + eur(ev.price));
   else if (ev.price === 0) meta.push('🎁 Gratuito');
   document.getElementById('evp-meta').textContent = meta.join(' · ');
-  document.getElementById('evp-desc').textContent = ev.description || '';
+  document.getElementById('evp-desc').innerHTML = _richText(ev.description || '');
   const more = document.getElementById('evp-more');
   if (total > 1) { more.textContent = `E altri ${total - 1} nuovi eventi in bacheca.`; more.style.display = ''; }
   else { more.style.display = 'none'; }
