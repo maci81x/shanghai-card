@@ -14,7 +14,7 @@
 <meta http-equiv="Cache-Control" content="no-cache">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=36">
+<link rel="stylesheet" href="style.css?v=37">
 </head>
 <body>
 
@@ -1089,20 +1089,13 @@
   </div>
 </div>
 
-<!-- MODALE ISCRIZIONE EVENTO (chi partecipa + metodi di pagamento) -->
-<div id="regev-bg" class="modal-ov">
-  <div class="modal-panel">
-    <div style="font-weight:700;font-size:17px;margin-bottom:4px">👥 Chi partecipa?</div>
-    <div id="regev-sub" style="font-size:12px;color:var(--mut);margin-bottom:14px"></div>
-    <div id="regev-self" style="margin-bottom:10px"></div>
-    <div id="regev-list"></div>
-    <button class="btn btn-q w100" style="margin:4px 0 12px" onclick="regevAddRow()">➕ Aggiungi persona</button>
-    <div id="regev-total" style="font-size:13px;text-align:center;margin-bottom:12px;color:var(--gold);font-weight:600"></div>
-    <div style="display:flex;gap:8px">
-      <button class="btn btn-q" style="flex:1" onclick="closeRegEvModal()">Annulla</button>
-      <button class="btn btn-p" style="flex:2" id="regev-confirm" onclick="confirmRegEvent()">Conferma iscrizione</button>
-    </div>
+<!-- DETTAGLIO EVENTO (socio): poster, fasce, iscrizione e pagamento per persona -->
+<div id="evd-bg" class="evd-bg">
+  <div class="evd-hdr">
+    <button class="btn-ico" onclick="closeEventDetail()">← Indietro</button>
+    <div class="evd-hdr-t" id="evd-title">Evento</div>
   </div>
+  <div class="evd-body" id="evd-body"></div>
 </div>
 
 <!-- MODALE MODIFICA PRENOTAZIONE GADGET -->
@@ -1203,6 +1196,6 @@
 </script>
 <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-<script src="app.js?v=52"></script>
+<script src="app.js?v=53"></script>
 </body>
 </html>

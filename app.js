@@ -666,9 +666,8 @@ async function refreshUser() {
   _myGadgetRes   = Array.isArray(data.gadget_reservations) ? data.gadget_reservations : null;
   renderTx(_allTx.slice(0, 5));
   renderPendingEvents(_pendingEvents);
-  renderMyRegistrations();
   loadUserGadgetReservations();
-  if (_eventsCache.length) renderEvents(_eventsCache);
+  await loadUserEvents();
   await renderPromoStatus();
 }
 function renderBal(c) {
@@ -805,9 +804,8 @@ async function loadCatalog() {
   if (!data) return;
   _eventsCache = data.events || [];
   _promoCache  = data.promos || [];
-  // una sola query per le fasce di tutti gli eventi visibili, prima di disegnare le card
-  await _loadTiersForEvents(_eventsCache.map(e => e.id));
-  renderEvents(_eventsCache);
+  // gli eventi del socio arrivano da user_list_events (fasce + mia iscrizione incluse)
+  await loadUserEvents();
   renderGadgets(data.gadgets||[]);
   renderPromos(data.promos||[]);
   renderSumUp(data.sumup_links||[]);
@@ -826,113 +824,520 @@ function _calcPromo(amount) {
   const charged = +(amount - discount).toFixed(2);
   return {code: active.code, discount, charged, original: amount};
 }
-function _userRegRoster(reg) {
-  if (!reg || !reg.registration_id) return '';
-  const u = currentUser || {};
-  const selfName = u.display_name || 'Tu';
-  const selfPaid = reg.payment_status && reg.payment_status !== 'da_saldare';
-  const isFree = !reg.event_price || Number(reg.event_price) === 0;
-  const rows = [];
-  rows.push({ label: `${_esc(selfName)} (tu)`, paid: selfPaid || isFree, ci: !!reg.checked_in });
-  (reg.companions || []).forEach(c => {
-    const p = c.payment_status && c.payment_status !== 'da_saldare';
-    const name = `${_esc(c.nome || '')} ${_esc(c.cognome || '')}`.trim() || 'Accompagnatore';
-    rows.push({ label: name, paid: p || isFree, ci: !!c.checked_in });
+// ── EVENTI SOCIO: LISTA COMPATTA ─────────────────────────────────────
+// Fonte unica della vetrina eventi lato socio: user_list_events porta in un
+// colpo solo l'evento, la mia iscrizione e il prezzo minimo delle fasce.
+// Qui niente poster e niente pagamenti: la lista resta un indice cronologico,
+// tutto il resto vive nel dettaglio evento (openEventDetail).
+let _evList = [];
+
+function _evShortDate(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('it-IT', {weekday: 'short', day: 'numeric', month: 'short'});
+}
+function _evLongDate(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('it-IT', {weekday: 'long', day: 'numeric', month: 'long'}) +
+    ' · ' + d.toLocaleTimeString('it-IT', {hour: '2-digit', minute: '2-digit'});
+}
+// min_price è il minimo delle fasce a pagamento: 0 solo se l'evento è davvero gratis.
+function _evPriceHint(e) {
+  if (e.has_tiers) {
+    const min = Number(e.min_price || 0);
+    return min > 0 ? 'da ' + eur(min) : 'Gratis';
+  }
+  const p = Number(e.price || 0);
+  return p > 0 ? eur(p) : 'Gratis';
+}
+async function loadUserEvents() {
+  if (!currentUser) return [];
+  const {data, error} = await db.rpc('user_list_events', {p_user_id: currentUser.id});
+  if (error) { console.warn('user_list_events:', error.message); return _evList; }
+  _evList = Array.isArray(data) ? data : [];
+  renderUserEvents();
+  return _evList;
+}
+function _evByDate(a, b) { return new Date(a.event_date || 0) - new Date(b.event_date || 0); }
+function _evRowHtml(e, right) {
+  return `<button class="ev-row" id="ev-item-${e.id}" data-event-id="${e.id}" onclick="openEventDetail('${e.id}')">
+    <span class="ev-row-date">${_evShortDate(e.event_date)}</span>
+    <span class="ev-row-main">
+      <span class="ev-row-ttl">${_esc(e.title || 'Evento')}</span>
+      ${e.location ? `<span class="ev-row-sub">${_esc(e.location)}</span>` : ''}
+    </span>
+    ${right}
+    <span class="ev-row-chev">›</span>
+  </button>`;
+}
+function renderUserEvents() {
+  const old = document.getElementById('u-my-regs');
+  if (old) old.innerHTML = '';            // le iscrizioni ora stanno nella lista qui sotto
+  const el = document.getElementById('u-ev-list');
+  if (!el) return;
+  const mine  = _evList.filter(e => e.my_registration).sort(_evByDate);
+  const altri = _evList.filter(e => !e.my_registration).sort(_evByDate);
+  if (!mine.length && !altri.length) { el.innerHTML = '<div class="empty">Nessun evento in programma</div>'; return; }
+  const blocchi = [];
+  if (mine.length) {
+    blocchi.push(`<div class="sec-title" style="margin:2px 0 8px">Le mie iscrizioni</div>` +
+      mine.map(e => _evRowHtml(e, e.my_registration.fully_paid
+        ? '<span class="pb pb-ok">Saldato</span>'
+        : '<span class="pb pb-wait">Da saldare</span>')).join(''));
+  }
+  if (altri.length) {
+    blocchi.push(`<div class="sec-title" style="margin:${mine.length ? '18px' : '2px'} 0 8px">Prossimi eventi</div>` +
+      altri.map(e => _evRowHtml(e, `<span class="ev-row-price">${_evPriceHint(e)}</span>`)).join(''));
+  }
+  el.innerHTML = blocchi.join('');
+}
+
+// ── DETTAGLIO EVENTO: ISCRIZIONE E PAGAMENTO PER PERSONA ─────────────
+// Ogni persona (io + accompagnatori) ha la sua fascia e la sua quota: il
+// pagamento è per-persona, non per-iscrizione. Chi non viene saldato ora
+// resta "da saldare" e potrà pagare per conto suo più avanti.
+// _evd = { ev, tiers, reg, sumup }: fotografia server-side dell'evento aperto.
+let _evd = null;
+let _evdMode = 'view';     // 'view' | 'compose' (nuova iscrizione) | 'add' (aggiungi persone)
+let _evdRows = [];         // righe persona in composizione: {key, nome, cognome, tier_id}
+let _evdRowSeq = 0;
+let _evdSelfTier = '';     // fascia scelta per me in fase di iscrizione
+let _evdSel = {};          // { [unitKey]: true } → persone selezionate da saldare
+let _evdSumupOpen = false; // pannello link SumUp aperto
+
+// Fallback per un evento non più in vetrina (es. passato) di cui però ho una
+// quota aperta: i dati minimi arrivano da get_user_state.
+function _evFallback(eventId) {
+  const p = (_pendingEvents || []).find(x => x.event_id === eventId);
+  if (p) return {id: eventId, title: p.evento || 'Evento', event_date: p.event_date};
+  const r = _myEventRegs[eventId];
+  if (r) return {id: eventId, title: r.event_title || 'Evento', event_date: r.event_date, location: r.event_location};
+  return null;
+}
+async function openEventDetail(eventId) {
+  if (!eventId) return;
+  let ev = _evList.find(e => e.id === eventId);
+  if (!ev) { await loadUserEvents(); ev = _evList.find(e => e.id === eventId); }
+  if (!ev) ev = _evFallback(eventId);
+  if (!ev) return toast('Evento non disponibile');
+  _evdMode = 'view'; _evdRows = []; _evdSelfTier = ''; _evdSel = {}; _evdSumupOpen = false;
+  document.getElementById('evd-title').textContent = ev.title || 'Evento';
+  document.getElementById('evd-body').innerHTML = '<div class="empty">⏳ Carico l\'evento…</div>';
+  document.getElementById('evd-bg').classList.add('open');
+  document.body.style.overflow = 'hidden';
+  await _evdLoad(ev);
+}
+function closeEventDetail() {
+  document.getElementById('evd-bg').classList.remove('open');
+  document.body.style.overflow = '';
+  _evd = null; _evdMode = 'view'; _evdRows = []; _evdSel = {}; _evdSumupOpen = false;
+}
+// Fasce, iscrizione e link SumUp in parallelo. Si ricarica dal server dopo ogni
+// scrittura: gli stati di pagamento non si indovinano lato client.
+async function _evdLoad(evArg) {
+  const ev = evArg || (_evd && _evd.ev);
+  if (!ev) return;
+  const [t, r, s] = await Promise.all([
+    db.rpc('list_event_tiers',            {p_event_id: ev.id}),
+    db.rpc('user_get_event_registration', {p_user_id: currentUser.id, p_event_id: ev.id}),
+    db.rpc('list_event_sumup_links',      {p_event_id: ev.id})
+  ]);
+  if (t.error) console.warn('list_event_tiers:', t.error.message);
+  if (s.error) console.warn('list_event_sumup_links:', s.error.message);
+  if (r.error || !r.data || r.data.ok === false) {
+    document.getElementById('evd-body').innerHTML = '<div class="empty">Impossibile caricare l\'iscrizione</div>';
+    return toast((r.error && r.error.message) || (r.data && r.data.error) || 'Errore iscrizione');
+  }
+  _evd = {
+    ev:    _evList.find(e => e.id === ev.id) || ev,
+    tiers: Array.isArray(t.data) ? t.data : [],
+    reg:   r.data,
+    sumup: Array.isArray(s.data) ? s.data : []
+  };
+  _evdSel = {};             // la selezione riparte dalla verità del server
+  _evdSumupOpen = false;
+  renderEventDetail();
+}
+function _evdHasTiers()   { return !!(_evd && _evd.tiers.length); }
+function _evdRegistered() { return !!(_evd && _evd.reg && _evd.reg.registered); }
+function _evdRegId()      { return (_evd && _evd.reg && _evd.reg.registration) ? _evd.reg.registration.id : null; }
+// Modifiche consentite solo prima della data evento (come per le iscrizioni staff)
+function _evdCanEdit() {
+  const d = _evd && _evd.ev && _evd.ev.event_date;
+  return d ? new Date(d) > new Date() : true;
+}
+
+// Le "unità" pagabili: io (se ancora incluso) + ogni accompagnatore attivo.
+function _evdUnits() {
+  if (!_evdRegistered()) return [];
+  const r = _evd.reg.registration || {};
+  const units = [];
+  if (r.self_included !== false) units.push({
+    key: 'self', type: 'self',
+    name: (currentUser && currentUser.display_name) || 'Tu',
+    tier_label: r.tier_label || '', amount: Number(r.amount || 0),
+    status: r.payment_status || 'da_saldare'
   });
-  const pSz = 1 + (reg.companions || []).length;
-  return `<div style="margin-top:10px;padding:10px;background:var(--bg);border-radius:8px;border:1px solid var(--brd)">
-    <div style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Iscritti: ${pSz}</div>
-    ${rows.map(r => `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--brd);min-height:36px">
-      <span style="flex-shrink:0">👤</span>
-      <div style="flex:1;min-width:0;font-size:14px;overflow-wrap:anywhere;word-break:break-word">${r.label}</div>
-      ${r.ci ? '<span style="font-size:11px;color:var(--grn);flex-shrink:0">✅ Check-in</span>' : ''}
-      <span class="badge ${r.paid?'bg':'by'}" style="flex-shrink:0">${r.paid?'✓ Pagato':'⏳ Da pagare'}</span>
+  (_evd.reg.companions || [])
+    .filter(c => (c.status || 'attivo') === 'attivo')
+    .forEach(c => units.push({
+      key: String(c.id), type: 'companion', id: c.id,
+      name: `${c.nome || ''} ${c.cognome || ''}`.trim() || 'Accompagnatore',
+      tier_label: c.tier_label || '', amount: Number(c.amount || 0),
+      status: c.payment_status || 'da_saldare'
+    }));
+  return units;
+}
+// 'saldato' | 'gratuito' | 'attesa' | 'da_saldare'. Solo 'da_saldare' è
+// selezionabile: una quota in fascia €0 non si paga mai.
+function _evdUnitState(u) {
+  const s = String(u.status || 'da_saldare');
+  if (s === 'gratuito') return 'gratuito';
+  if (s.indexOf('saldato') === 0) return 'saldato';
+  if (s.endsWith('_in_attesa')) return 'attesa';
+  if (Number(u.amount || 0) <= 0) return 'gratuito';
+  return 'da_saldare';
+}
+function _evdPayable()  { return _evdUnits().filter(u => _evdUnitState(u) === 'da_saldare'); }
+function _evdSelected() { return _evdPayable().filter(u => _evdSel[u.key]); }
+function _evdSelTotal() { return _evdSelected().reduce((s, u) => s + Number(u.amount || 0), 0); }
+function _evdTargets() {
+  const sel = _evdSelected();
+  return {
+    self: sel.some(u => u.type === 'self'),
+    companion_ids: sel.filter(u => u.type === 'companion').map(u => u.id)
+  };
+}
+
+function renderEventDetail() {
+  const el = document.getElementById('evd-body');
+  if (!el || !_evd) return;
+  const e = _evd.ev;
+  const meta = [_evLongDate(e.event_date), e.location].filter(Boolean);
+  const head = `
+    ${e.image_url ? _imgWrap16x9(e.image_url, e.title, '12px') : ''}
+    <div class="evd-ttl">${_esc(e.title || 'Evento')}</div>
+    <div class="evd-meta">${meta.map(_esc).join(' · ')}</div>
+    ${e.description ? `<div class="evd-desc">${_esc(e.description)}</div>` : ''}
+    ${_evdTiersHtml()}`;
+  let body;
+  if (_evdMode === 'compose')    body = _evdComposeHtml();
+  else if (_evdMode === 'add')   body = _evdAddPeopleHtml();
+  else if (_evdRegistered())     body = _evdPaymentHtml();
+  else if (!_evdCanEdit())       body = `<div class="evd-hint" style="margin-top:16px">Evento passato: iscrizioni chiuse.</div>`;
+  else body = `<button class="btn btn-p w100" style="margin-top:16px" onclick="evdStartCompose()">Iscriviti</button>`;
+  el.innerHTML = head + body;
+  if (_evdMode !== 'view') _evdUpdateTotal();
+}
+function _evdTiersHtml() {
+  if (!_evdHasTiers()) return '';
+  return `<div class="tier-list">
+    <div class="tier-list-lbl">Fasce di prezzo</div>
+    ${_evd.tiers.map(t => `<div class="tier-list-row">
+      <span class="tier-list-name">${_esc(t.label || '')}</span>
+      <span class="tier-list-price">${_tierPriceLabel(t.price)}</span>
     </div>`).join('')}
   </div>`;
 }
-function renderEvents(evs) {
-  _eventsCache = evs;
-  renderMyRegistrations();
-  const el = document.getElementById('u-ev-list');
-  if (!evs.length) { el.innerHTML='<div class="empty">Nessun evento attivo</div>'; return; }
-  el.innerHTML = evs.map(e => {
-    const isFree = !e.price || e.price == 0;
-    const pend = _pendingEvents.find(p => p.event_id === e.id);
-    const isRegistered = _myEventIds.has(e.id);
-    const t = _esc(e.title);
-    const tj = e.title.replace(/'/g,"\\'");
-    const hasImg = !!e.image_url;
-    const img = hasImg ? _imgWrap16x9(e.image_url, e.title, '12px 12px 0 0') : '';
-    const cardCls = ['cat-card'];
-    if (hasImg) cardCls.push('has-img');
-    const bodyOpen  = hasImg ? '<div class="cat-body">' : '';
-    const bodyClose = hasImg ? '</div>' : '';
-    if (pend) {
-      cardCls.push('ev-card-pending');
-      const canPayCredit = _userBalance >= Number(pend.amount || 0);
-      const hasSumup = !!pend.sumup_link;
-      const reg = _myEventRegs[e.id] || {};
-      const roster = _userRegRoster(reg);
-      const regId = reg.registration_id || pend.registration_id;
-      return `<div class="${cardCls.join(' ')}">
-        ${img}
-        ${bodyOpen}
-        <div class="ev-status ev-pending">⏳ Da saldare · <strong>${eur(pend.amount)}</strong></div>
-        <div class="cat-title">${t}</div>
-        <div class="cat-sub">${e.event_date?fdt(e.event_date):'—'}${e.location?' · '+_esc(e.location):''}</div>
-        ${roster}
-        <div class="ev-pay-grid" style="margin-top:10px">
-          ${canPayCredit
-            ? `<button class="btn btn-p" onclick="userPayEventCredit('${pend.registration_id}','${tj}',${pend.amount})">💳 Paga con credito</button>`
-            : ''}
-          ${hasSumup
-            ? `<a href="${pend.sumup_link}" target="_blank" rel="noopener" class="btn btn-g">📱 Paga con SumUp</a>`
-            : ''}
-          <button class="btn btn-q" onclick="toast('Recati in cassa con il tuo QR per saldare','ok')">🏠 In cassa</button>
-        </div>
-        ${regId ? `<button class="btn-sm w100" style="margin-top:8px" onclick="openCompanionsModal('${regId}')">👥 Gestisci iscrizione (aggiungi persone o paga singolarmente)</button>` : ''}
-        ${hasSumup ? `<div class="sumup-note" style="text-align:left;padding:6px 2px 0">Dopo il pagamento, la cassa confermerà l'iscrizione</div>` : ''}
-        ${!canPayCredit ? `<div class="sumup-note" style="text-align:left;padding:4px 2px 0;color:var(--mut)">Saldo insufficiente per pagare con credito (${eur(_userBalance)} disponibili)</div>` : ''}
-        ${bodyClose}
-      </div>`;
-    }
-    if (isRegistered) {
-      cardCls.push('ev-card-paid');
-      const reg = _myEventRegs[e.id] || {};
-      const pSz = 1 + (reg.companions || []).length;
-      const regId = reg.registration_id || '';
-      const unpaidCount = Number(reg.unpaid_count || 0);
-      const roster = _userRegRoster(reg);
-      const statusHtml = unpaidCount === 0
-        ? `<div class="ev-status ev-paid">✓ Tutti pagati${pSz>1?' · 👥 '+pSz+' persone':''}</div>`
-        : `<div class="ev-status ev-pending">⏳ ${unpaidCount} da pagare · 👥 ${pSz} ${pSz===1?'persona':'persone'}</div>`;
-      return `<div class="${cardCls.join(' ')}">
-        ${img}
-        ${bodyOpen}
-        ${statusHtml}
-        <div class="cat-title">${t}</div>
-        <div class="cat-sub">${e.event_date?fdt(e.event_date):'—'}${e.location?' · '+_esc(e.location):''}</div>
-        ${roster}
-        <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
-          ${regId ? `<button class="btn-sm" style="flex:1;min-width:140px;min-height:44px" onclick="openCompanionsModal('${regId}')">➕ Aggiungi persone</button>` : ''}
-          ${regId && unpaidCount > 0 ? `<button class="btn-sm p" style="flex:1;min-width:140px;min-height:44px" onclick="openCompanionsModal('${regId}')">💰 Paga persone (${unpaidCount})</button>` : ''}
-        </div>
-        ${bodyClose}
-      </div>`;
-    }
-    return `<div class="${cardCls.join(' ')}">
-      ${img}
-      ${bodyOpen}
-      <div class="cat-title">${t}</div>
-      <div class="cat-sub">${e.event_date?fdt(e.event_date):'—'}${e.location?' · '+_esc(e.location):''}</div>
-      ${e.max_participants?`<div class="cat-sub">Max ${e.max_participants} posti</div>`:''}
-      <div class="cat-foot">
-        <div class="cat-price">${_eventPriceLabel(e)}</div>
-        <button class="btn-sm p" onclick="openRegEvModal('${e.id}')">${isFree?'🎁 Iscriviti gratis':'Iscriviti'}</button>
-      </div>
-      ${bodyClose}
-    </div>`;
-  }).join('');
+
+// ── COMPOSIZIONE GRUPPO (iscrizione e aggiunta persone) ──────────────
+function evdStartCompose()   { _evdMode = 'compose'; _evdRows = []; _evdSelfTier = ''; renderEventDetail(); }
+function evdStartAddPeople() { _evdMode = 'add'; _evdRows = [_evdNewRow()]; renderEventDetail(); }
+function evdCancelCompose()  { _evdMode = 'view'; _evdRows = []; renderEventDetail(); }
+function _evdNewRow() { return {key: 'p' + (++_evdRowSeq), nome: '', cognome: '', tier_id: ''}; }
+function evdAddRow()  { _evdRows = _evdRows.concat([_evdNewRow()]); _evdRenderRows(); }
+function evdRemoveRow(key) { _evdRows = _evdRows.filter(r => r.key !== key); _evdRenderRows(); }
+function evdRowField(key, field, value) {
+  const r = _evdRows.find(x => x.key === key);
+  if (!r) return;
+  r[field] = value;
+  if (field === 'tier_id') _evdUpdateTotal();
+}
+function evdSetSelfTier(value) { _evdSelfTier = value; _evdUpdateTotal(); }
+function _evdTierPrice(tierId) {
+  const t = (_evd ? _evd.tiers : []).find(x => String(x.id) === String(tierId));
+  return t ? Number(t.price || 0) : 0;
+}
+// Totale live: somma delle fasce scelte (le fasce a €0 valgono 0).
+function _evdComposeTotal(includeSelf) {
+  const hasTiers = _evdHasTiers();
+  const flat = Number((_evd && _evd.ev.price) || 0);
+  const quota = r => hasTiers ? _evdTierPrice(r.tier_id) : flat;
+  const base = includeSelf ? (hasTiers ? _evdTierPrice(_evdSelfTier) : flat) : 0;
+  return _evdRows.reduce((s, r) => s + quota(r), base);
+}
+function _evdUpdateTotal() {
+  const el = document.getElementById('evd-total');
+  if (!el || !_evd) return;
+  const includeSelf = _evdMode === 'compose';
+  const n = _evdRows.length + (includeSelf ? 1 : 0);
+  el.innerHTML = `${n} ${n === 1 ? 'persona' : 'persone'} · Totale <strong>${eur(_evdComposeTotal(includeSelf))}</strong>`;
+}
+function _evdTierSelectHtml(selected, onchange) {
+  const opts = ['<option value="">Scegli la fascia…</option>'].concat(
+    _evd.tiers.map(t =>
+      `<option value="${t.id}"${String(t.id) === String(selected) ? ' selected' : ''}>${_esc(t.label || '')} — ${_tierPriceLabel(t.price)}</option>`));
+  return `<select onchange="${onchange}">${opts.join('')}</select>`;
+}
+function _evdRowsHtml() {
+  if (!_evdRows.length) {
+    return `<div class="evd-hint">${_evdMode === 'compose' ? 'Nessun accompagnatore: ti iscrivi solo tu.' : 'Aggiungi almeno una persona.'}</div>`;
+  }
+  return _evdRows.map(r => `<div class="card evd-person">
+    <div class="evd-person-top">
+      <input type="text" placeholder="Nome" value="${_escAttr(r.nome)}" oninput="evdRowField('${r.key}','nome',this.value)">
+      <input type="text" placeholder="Cognome" value="${_escAttr(r.cognome)}" oninput="evdRowField('${r.key}','cognome',this.value)">
+      <button class="btn-sm evd-person-x" title="Rimuovi" onclick="evdRemoveRow('${r.key}')">✕</button>
+    </div>
+    ${_evdHasTiers() ? `<div class="fg" style="margin:8px 0 0"><label>Fascia</label>${_evdTierSelectHtml(r.tier_id, `evdRowField('${r.key}','tier_id',this.value)`)}</div>` : ''}
+  </div>`).join('');
+}
+function _evdRenderRows() {
+  const el = document.getElementById('evd-rows');
+  if (!el) return renderEventDetail();
+  el.innerHTML = _evdRowsHtml();
+  _evdUpdateTotal();
+}
+function _evdComposeHtml() {
+  const selfTier = _evdHasTiers()
+    ? `<div class="fg" style="margin:8px 0 0"><label>La tua fascia</label>${_evdTierSelectHtml(_evdSelfTier, 'evdSetSelfTier(this.value)')}</div>`
+    : '';
+  return `<div class="evd-sec">
+    <div class="sec-title" style="margin-bottom:8px">Chi partecipa</div>
+    <div class="card evd-person">
+      <div class="evd-person-name">${_esc((currentUser && currentUser.display_name) || 'Tu')} <span class="evd-you">(tu)</span></div>
+      ${selfTier}
+    </div>
+    <div id="evd-rows">${_evdRowsHtml()}</div>
+    <button class="btn btn-q w100" style="margin-top:8px" onclick="evdAddRow()">➕ Aggiungi persona</button>
+    <div id="evd-total" class="evd-total"></div>
+    <div class="evd-actions">
+      <button class="btn btn-q" onclick="evdCancelCompose()">Annulla</button>
+      <button class="btn btn-p" style="flex:2" onclick="evdSubmitRegister()">Conferma iscrizione</button>
+    </div>
+  </div>`;
+}
+function _evdAddPeopleHtml() {
+  return `<div class="evd-sec">
+    <div class="sec-title" style="margin-bottom:8px">Aggiungi persone</div>
+    <div id="evd-rows">${_evdRowsHtml()}</div>
+    <button class="btn btn-q w100" style="margin-top:8px" onclick="evdAddRow()">➕ Aggiungi persona</button>
+    <div id="evd-total" class="evd-total"></div>
+    <div class="evd-actions">
+      <button class="btn btn-q" onclick="evdCancelCompose()">Annulla</button>
+      <button class="btn btn-p" style="flex:2" onclick="evdSubmitAddPeople()">Conferma</button>
+    </div>
+  </div>`;
+}
+// Validazione lato client speculare a quella del backend (stessi messaggi).
+function _evdCollectCompanions() {
+  const hasTiers = _evdHasTiers();
+  const rows = _evdRows.map(r => ({nome: (r.nome || '').trim(), cognome: (r.cognome || '').trim(), tier_id: r.tier_id}));
+  if (rows.some(r => !r.nome || !r.cognome)) { toast('Nome e cognome obbligatori per ogni persona'); return null; }
+  if (hasTiers && rows.some(r => !r.tier_id)) { toast('Seleziona una fascia per ogni persona'); return null; }
+  return rows.map(r => hasTiers
+    ? {nome: r.nome, cognome: r.cognome, tier_id: r.tier_id}
+    : {nome: r.nome, cognome: r.cognome});
+}
+async function evdSubmitRegister() {
+  if (!_evd) return;
+  const hasTiers = _evdHasTiers();
+  if (hasTiers && !_evdSelfTier) return toast('Seleziona una fascia per te');
+  const comps = _evdCollectCompanions();
+  if (!comps) return;
+  const {data, error} = await db.rpc('user_register_event_tiered', {
+    p_user_id: currentUser.id,
+    p_event_id: _evd.ev.id,
+    p_self_tier_id: hasTiers ? _evdSelfTier : null,
+    p_companions: comps,
+    p_party_notes: null
+  });
+  if (error || !data || !data.ok) return toast((error && error.message) || (data && data.error) || 'Errore iscrizione');
+  toast('✅ Iscrizione confermata', 'ok');
+  _evdMode = 'view'; _evdRows = []; _evdSelfTier = '';
+  await _evdLoad();       // → schermata di pagamento con le quote appena create
+  await refreshUser();
+}
+async function evdSubmitAddPeople() {
+  const regId = _evdRegId();
+  if (!regId) return toast('Iscrizione non trovata');
+  if (!_evdRows.length) return toast('Aggiungi almeno una persona');
+  const comps = _evdCollectCompanions();
+  if (!comps) return;
+  const {data, error} = await db.rpc('user_add_companions_tiered', {
+    p_user_id: currentUser.id, p_registration_id: regId, p_companions: comps
+  });
+  if (error || !data || !data.ok) return toast((error && error.message) || (data && data.error) || 'Errore');
+  toast('✅ Persone aggiunte', 'ok');
+  _evdMode = 'view'; _evdRows = [];
+  await _evdLoad();
+  await refreshUser();
+}
+
+// ── PAGAMENTO PER PERSONA ────────────────────────────────────────────
+function evdToggleUnit(key, checked) { _evdSel = {..._evdSel, [key]: !!checked}; _evdRenderPay(); }
+function evdToggleAll(checked) {
+  const next = {..._evdSel};
+  _evdPayable().forEach(u => { next[u.key] = !!checked; });
+  _evdSel = next;
+  _evdRenderPay();
+}
+function _evdPaymentHtml() { return `<div id="evd-pay">${_evdPayInner()}</div>`; }
+function _evdRenderPay() {
+  const el = document.getElementById('evd-pay');
+  if (!el) return renderEventDetail();
+  el.innerHTML = _evdPayInner();
+}
+function _evdUnitRowHtml(u) {
+  const st = _evdUnitState(u);
+  const right = {
+    saldato:  '<span class="pb pb-ok">Saldato</span>',
+    gratuito: '<span class="pb pb-ok">Gratuito ✓</span>',
+    attesa:   '<span class="pb pb-cash">In attesa conferma staff</span>'
+  }[st] || '<span class="evd-unit-lbl">Pago io</span>';
+  const quota = Number(u.amount || 0) > 0 ? eur(u.amount) : 'Gratuito';
+  return `<div class="evd-unit">
+    ${st === 'da_saldare'
+      ? `<input type="checkbox" ${_evdSel[u.key] ? 'checked' : ''} onchange="evdToggleUnit('${u.key}',this.checked)">`
+      : '<span class="evd-unit-nochk"></span>'}
+    <span class="evd-unit-main">
+      <span class="evd-unit-name">${_esc(u.name)}${u.type === 'self' ? ' <span class="evd-you">(tu)</span>' : ''}</span>
+      <span class="evd-unit-sub">${u.tier_label ? _esc(u.tier_label) + ' · ' : ''}${quota}</span>
+    </span>
+    ${right}
+    ${st === 'da_saldare' && u.type === 'companion' && _evdCanEdit()
+      ? `<button class="row-act danger" title="Rimuovi dall'iscrizione" onclick="evdRemoveUnit('${u.key}')">🗑</button>` : ''}
+  </div>`;
+}
+function _evdPayInner() {
+  const units   = _evdUnits();
+  const payable = _evdPayable();
+  const sel     = _evdSelected();
+  const tot     = _evdSelTotal();
+  const allSel  = payable.length > 0 && payable.every(u => _evdSel[u.key]);
+  const attesa  = units.filter(u => _evdUnitState(u) === 'attesa').length;
+  const nulla   = sel.length === 0;
+  const dis     = nulla ? 'disabled' : '';
+  const master  = payable.length > 1
+    ? `<label class="evd-master"><input type="checkbox" ${allSel ? 'checked' : ''} onchange="evdToggleAll(this.checked)"><span>Pago io per tutti</span></label>`
+    : '';
+  const metodi = payable.length ? `
+    <div class="evd-tot">${nulla
+      ? 'Seleziona chi vuoi saldare'
+      : `${sel.length} ${sel.length === 1 ? 'persona' : 'persone'} · <strong>${eur(tot)}</strong>`}</div>
+    <div class="evd-methods">
+      <button class="btn btn-p" ${dis} onclick="evdPay('credito')">💳 Credito</button>
+      <button class="btn btn-q" ${dis} onclick="evdPay('cassa')">💵 Cassa</button>
+      ${_evd.sumup.length ? `<button class="btn btn-g" ${dis} onclick="evdPay('sumup')">📱 SumUp</button>` : ''}
+    </div>
+    <div class="evd-hint">Saldo disponibile: ${eur(_userBalance)}. Chi non selezioni resta da saldare e potrà pagare per conto suo.</div>
+    ${_evdSumupOpen ? _evdSumupHtml() : ''}`
+    : `<div class="evd-hint">${attesa ? 'Quote in attesa di conferma dello staff.' : '✓ Tutte le quote sono saldate.'}</div>`;
+  return `<div class="evd-sec">
+    <div class="sec-title" style="margin-bottom:4px">La tua iscrizione</div>
+    ${master}
+    <div class="evd-units">${units.map(_evdUnitRowHtml).join('')}</div>
+    ${metodi}
+    ${_evdCanEdit() ? `<button class="btn btn-q w100" style="margin-top:14px" onclick="evdStartAddPeople()">➕ Aggiungi persone</button>
+      <div style="margin-top:12px;text-align:right"><a href="#" class="link-danger" onclick="evdCancelAll();return false">🗑 Annulla tutta l'iscrizione</a></div>`
+      : '<div class="past-note">Evento passato — modifiche non disponibili</div>'}
+  </div>`;
+}
+function _evdSumupHtml() {
+  return `<div class="evd-sumup">
+    <div class="sec-title" style="margin-bottom:6px">Paga con SumUp</div>
+    <div class="evd-hint" style="margin:0 0 8px">Apri il link dell'importo giusto per ogni persona, poi conferma qui sotto: lo staff verificherà l'incasso.</div>
+    ${_evd.sumup.map((l, i) => `<div class="evd-sumup-row">
+      <span class="evd-sumup-lbl">${_esc(l.label || 'Link')}${l.amount != null ? ' · ' + eur(l.amount) : ''}</span>
+      <button class="btn-sm p" onclick="evdOpenSumup(${i})">Apri</button>
+    </div>`).join('')}
+    <button class="btn btn-p w100" style="margin-top:10px" onclick="evdConfirmSumup()">Ho pagato — segnala allo staff</button>
+  </div>`;
+}
+function evdOpenSumup(i) {
+  const l = _evd && _evd.sumup[i];
+  if (l && l.url) _openSumup(l.url);
+}
+async function evdPay(method) {
+  const regId = _evdRegId();
+  if (!regId) return toast('Iscrizione non trovata');
+  const sel = _evdSelected();
+  if (!sel.length) return toast('Nessuna persona da saldare selezionata');
+  if (method === 'sumup') { _evdSumupOpen = true; _evdRenderPay(); return; }
+  const targets = _evdTargets();
+  if (method === 'cassa') {
+    const {data, error} = await db.rpc('user_pay_event_cash', {
+      p_user_id: currentUser.id, p_registration_id: regId, p_targets: targets
+    });
+    if (error || !data || !data.ok) return toast((error && error.message) || (data && data.error) || 'Errore');
+    toast(data.message || 'Segnalato alla cassa: attende conferma dello staff', 'ok');
+    await _evdLoad();
+    await refreshUser();
+    return;
+  }
+  // Credito: addebito immediato → conferma esplicita prima di toccare il saldo
+  const n = sel.length;
+  const tot = _evdSelTotal();
+  modalConfirm(`Pagare ${n} ${n === 1 ? 'persona' : 'persone'} con il tuo credito?\n\nTotale addebitato: ${eur(tot)}\nSaldo attuale: ${eur(_userBalance)}`, async () => {
+    const promoBefore = _promoTxKeys();
+    const {data, error} = await db.rpc('user_pay_event_people', {
+      p_user_id: currentUser.id, p_registration_id: regId, p_targets: targets
+    });
+    if (error || !data || !data.ok) return toast((error && error.message) || (data && data.error) || 'Errore pagamento');
+    toast(data.message || '✅ Pagamento effettuato', 'ok');
+    await _evdLoad();
+    await refreshUser();           // saldo aggiornato in home
+    _promoBonusToast(promoBefore);
+  });
+}
+async function evdConfirmSumup() {
+  const regId = _evdRegId();
+  if (!regId) return toast('Iscrizione non trovata');
+  if (!_evdSelected().length) return toast('Nessuna persona da saldare selezionata');
+  const {data, error} = await db.rpc('user_pay_event_sumup_tiered', {
+    p_user_id: currentUser.id, p_registration_id: regId, p_targets: _evdTargets()
+  });
+  if (error || !data || !data.ok) return toast((error && error.message) || (data && data.error) || 'Errore SumUp');
+  toast(data.message || 'Segnalato allo staff: attende conferma', 'ok');
+  await _evdLoad();
+  await refreshUser();
+}
+// Rimozione di una quota non ancora saldata (correzione di un errore di inserimento)
+async function evdRemoveUnit(key) {
+  const regId = _evdRegId();
+  const u = _evdUnits().find(x => x.key === key);
+  if (!regId || !u || u.type !== 'companion') return;
+  modalConfirm(`Rimuovere ${u.name} dall'iscrizione?`, async () => {
+    const {data, error} = await db.rpc('user_remove_companion_from_event', {
+      p_user_id: currentUser.id, p_registration_id: regId, p_companion_id: u.id
+    });
+    if (error || !data || !data.ok) return toast((error && error.message) || (data && data.error) || 'Rimozione non riuscita');
+    toast(`${u.name} non partecipa più`, 'ok');
+    const action = data.action || '';
+    if (action === 'cancelled_full' || action === 'cancelled_after_removal') { closeEventDetail(); await refreshUser(); return; }
+    await _evdLoad();
+    await refreshUser();
+  });
+}
+async function evdCancelAll() {
+  const regId = _evdRegId();
+  if (!regId) return toast('Iscrizione non trovata');
+  const units = _evdUnits();
+  const righe = units.map(u => `• ${u.name}: ${_refundRoute(u.status).txt}`).join('\n');
+  modalConfirm(`Annullare tutta l'iscrizione a "${_evd.ev.title}"?\n\n${units.length === 1 ? '1 persona verrà rimossa' : units.length + ' persone verranno rimosse'}:\n${righe}`, async () => {
+    const {data, error} = await db.rpc('user_cancel_event_registration', {
+      p_user_id: currentUser.id, p_registration_id: regId
+    });
+    if (error || !data || !data.ok) return toast((error && error.message) || (data && data.error) || 'Annullamento non riuscito');
+    const refunds = Array.isArray(data.refunds) ? data.refunds : [];
+    const parti = refunds.map(_refundToast).filter(Boolean);
+    toast(`Iscrizione annullata${parti.length ? ' · ' + parti.join(' · ') : ''}`, 'ok');
+    closeEventDetail();
+    await refreshUser();
+  });
 }
 function _gadgetSizes(g) { return (g && g.has_sizes && Array.isArray(g.sizes)) ? g.sizes : []; }
 function selectGadgetSize(gadgetId, size) {
@@ -1205,7 +1610,7 @@ async function addCompanion() {
     document.getElementById('comp-cognome').value = '';
     toast('Accompagnatore aggiunto!', 'ok');
     await refreshUser();
-    if (_eventsCache.length) renderEvents(_eventsCache);
+    await loadUserEvents();
   }
 }
 async function removeCompanion(compId) {
@@ -1228,7 +1633,7 @@ async function removeCompanion(compId) {
     _renderCompModal('user');
     toast('Rimosso', 'ok');
     await refreshUser();
-    if (_eventsCache.length) renderEvents(_eventsCache);
+    await loadUserEvents();
   }
 }
 async function userPaySelected() {
@@ -1250,7 +1655,7 @@ async function userPaySelected() {
     toast(data.message || '✅ Pagamento effettuato!', 'ok');
     await refreshUser();
     _promoBonusToast(promoBefore);
-    if (_eventsCache.length) renderEvents(_eventsCache);
+    await loadUserEvents();
     const reg = Object.values(_myEventRegs).find(r => r.registration_id === _compRegId) || {};
     _compCache = (reg.companions || []).map(c => ({...c}));
     _compSelfStatus = reg.payment_status || 'da_saldare';
@@ -1462,11 +1867,18 @@ function renderPromos(prs) {
       <div class="promo-detail">${p.discount_type==='percent'?p.discount_value+'%':eur(p.discount_value)} di sconto${p.valid_until?' · fino al '+fdt(p.valid_until).split(' ')[0]:''}</div>
     </div>`).join('');
 }
+// "Ricarica tessera": SOLO ricariche del saldo. I link con event_id sono quote
+// evento e vivono esclusivamente nel dettaglio dell'evento (openEventDetail).
 function renderSumUp(links) {
   _sumupLinksCache = links || [];
-  // solo ricariche generiche: i link con event_id vivono nella pagina del loro evento
-  const generici = _sumupLinksCache.filter(l => !l.event_id);
-  document.getElementById('u-sumup').innerHTML = generici.map(l=>`<a href="${l.url}" target="_blank" rel="noopener" class="sumup-btn">${l.label}</a>`).join('');
+  const generici = _sumupLinksCache
+    .filter(l => !l.event_id && l.active !== false)
+    .sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0));
+  const el = document.getElementById('u-sumup');
+  if (!el) return;
+  el.innerHTML = generici.length
+    ? generici.map(l => `<a href="${l.url}" target="_blank" rel="noopener" class="sumup-btn">${_esc(l.label)}</a>`).join('')
+    : '<div class="empty" style="grid-column:1/-1">Nessun importo di ricarica disponibile</div>';
 }
 async function buyGadget(id, name, price) {
   const promo = _calcPromo(price);
@@ -1484,30 +1896,21 @@ async function buyGadget(id, name, price) {
     await refreshUser(); await loadCatalog();
   });
 }
+// Blocco "Da saldare" in home: solo un promemoria che porta al dettaglio evento,
+// dove vivono tutti i pagamenti (uno per persona).
 function renderPendingEvents(evs) {
   const el = document.getElementById('u-pending-events');
   if (!evs || !evs.length) { el.innerHTML = ''; return; }
   el.innerHTML = `<div class="sec-title" style="margin-bottom:8px">Da saldare</div>` +
-    evs.map(e => {
-      const canPayCredit = _userBalance >= Number(e.amount || 0);
-      const hasSumup = !!e.sumup_link;
-      return `
-    <div class="card ev-card-pending" style="margin-bottom:8px">
-      <div class="ev-status ev-pending">⏳ Da saldare · <strong>${eur(e.amount)}</strong></div>
-      <div style="font-weight:700;margin:8px 0 2px">${_esc(e.evento)}</div>
-      <div style="font-size:12px;color:var(--mut);margin-bottom:12px">${e.event_date?fdt(e.event_date):'—'}</div>
-      <div class="ev-pay-grid">
-        ${canPayCredit
-          ? `<button class="btn btn-p" onclick="userPayEventCredit('${e.registration_id}','${e.evento.replace(/'/g,"\\'")}',${e.amount})">💳 Paga con credito</button>`
-          : ''}
-        ${hasSumup
-          ? `<a href="${e.sumup_link}" target="_blank" rel="noopener" class="btn btn-g">📱 Paga con SumUp</a>`
-          : ''}
-        <button class="btn btn-q" onclick="toast('Recati in cassa con il tuo QR per saldare','ok')">🏠 In cassa</button>
-      </div>
-      ${hasSumup ? `<div class="sumup-note" style="text-align:left;padding:6px 2px 0">Dopo il pagamento, la cassa confermerà l'iscrizione</div>` : ''}
-      ${!canPayCredit ? `<div class="sumup-note" style="text-align:left;padding:4px 2px 0;color:var(--mut)">Saldo insufficiente per pagare con credito (${eur(_userBalance)} disponibili)</div>` : ''}
-    </div>`;}).join('');
+    evs.map(e => `<button class="ev-row" onclick="openEventDetail('${e.event_id}')">
+      <span class="ev-row-date">${_evShortDate(e.event_date)}</span>
+      <span class="ev-row-main">
+        <span class="ev-row-ttl">${_esc(e.evento || 'Evento')}</span>
+        <span class="ev-row-sub">Quota da saldare · ${eur(e.amount)}</span>
+      </span>
+      <span class="pb pb-wait">Da saldare</span>
+      <span class="ev-row-chev">›</span>
+    </button>`).join('');
 }
 async function userPayEventCredit(regId, eventName, amount) {
   modalConfirm(`Pagare "${eventName}" (${eur(amount)}) con il tuo credito?`, async () => {
@@ -1544,165 +1947,16 @@ function _promoBonusToast(keysBefore) {
     toast(`🌴 Bonus Promo accreditato! +${eur(bonus)}`, 'ok');
   }, 1500);
 }
-// ── ISCRIZIONE EVENTO: CHI PARTECIPA + METODI DI PAGAMENTO ───────────
-const _PAY_OPTS = `<option value="">Da decidere</option><option value="credito">Credito socio</option><option value="sumup">SumUp</option><option value="cassa">Cassa</option>`;
-let _regEv = null;
-function openRegEvModal(eventId) {
-  const ev = _eventsCache.find(e => e.id === eventId);
-  if (!ev) return toast('Evento non disponibile');
-  _regEv = ev;
-  const paid = (ev.price || 0) > 0;
-  document.getElementById('regev-sub').textContent =
-    `${ev.title}${ev.event_date ? ' · ' + fdt(ev.event_date) : ''}${paid ? ' · ' + eur(ev.price) + ' a persona' : ' · Gratuito'}`;
-  document.getElementById('regev-self').innerHTML = `
-    <div class="card" style="padding:12px">
-      <div class="pr-name" style="font-weight:600">Tu — ${_esc(currentUser.display_name)}</div>
-      ${paid ? `<div class="fg" style="margin:8px 0 0"><label>Metodo pagamento</label>
-        <select id="regev-self-pay" onchange="updateRegEvTotal()">${_PAY_OPTS}</select></div>` : ''}
-    </div>`;
-  document.getElementById('regev-list').innerHTML = '';
-  updateRegEvTotal();
-  document.getElementById('regev-bg').classList.add('open');
-}
-function closeRegEvModal() { document.getElementById('regev-bg').classList.remove('open'); }
-function regevAddRow() {
-  const paid = (_regEv && _regEv.price > 0);
-  const div = document.createElement('div');
-  div.className = 'card regev-row';
-  div.style.cssText = 'padding:12px;margin-bottom:8px';
-  div.innerHTML = `
-    <div style="display:flex;gap:8px;align-items:center">
-      <input type="text" class="rg-nome" placeholder="Nome" style="flex:1;min-width:0">
-      <input type="text" class="rg-cognome" placeholder="Cognome" style="flex:1;min-width:0">
-      <button class="btn-sm" style="color:var(--neg);flex-shrink:0;padding:6px 9px" title="Rimuovi"
-        onclick="this.closest('.regev-row').remove();updateRegEvTotal()">✕</button>
-    </div>
-    ${paid ? `<div class="fg" style="margin:8px 0 0"><label>Metodo pagamento</label>
-      <select class="rg-pay" onchange="updateRegEvTotal()">${_PAY_OPTS}</select></div>` : ''}`;
-  document.getElementById('regev-list').appendChild(div);
-  updateRegEvTotal();
-}
-function _regevCollect() {
-  const rows = Array.from(document.querySelectorAll('#regev-list .regev-row'));
-  return rows.map(r => ({
-    nome:    r.querySelector('.rg-nome').value.trim(),
-    cognome: r.querySelector('.rg-cognome').value.trim(),
-    pay:     r.querySelector('.rg-pay') ? r.querySelector('.rg-pay').value : ''
-  }));
-}
-function updateRegEvTotal() {
-  if (!_regEv) return;
-  const comps = _regevCollect();
-  const n = 1 + comps.length;
-  const price = _regEv.price || 0;
-  const el = document.getElementById('regev-total');
-  if (price <= 0) { el.textContent = `${n} ${n === 1 ? 'partecipante' : 'partecipanti'} · Evento gratuito`; return; }
-  const selfPay = document.getElementById('regev-self-pay')?.value || '';
-  const cnt = m => (selfPay === m ? 1 : 0) + comps.filter(c => c.pay === m).length;
-  const parts = [];
-  if (cnt('credito')) parts.push(`💳 credito ${eur(price * cnt('credito'))}`);
-  if (cnt('sumup'))   parts.push(`📱 SumUp ${eur(price * cnt('sumup'))}`);
-  if (cnt('cassa'))   parts.push(`💵 cassa ${eur(price * cnt('cassa'))}`);
-  if (cnt(''))        parts.push(`⏳ da decidere ${eur(price * cnt(''))}`);
-  el.innerHTML = `${n} ${n === 1 ? 'persona' : 'persone'} × ${eur(price)} = <strong>${eur(price * n)}</strong>` +
-    (parts.length ? `<div style="font-size:11px;color:var(--mut);font-weight:400;margin-top:4px">${parts.join(' · ')}</div>` : '');
-}
-async function confirmRegEvent() {
-  if (!_regEv) return;
-  const comps = _regevCollect();
-  if (comps.some(c => !c.nome || !c.cognome)) return toast('Nome e cognome obbligatori per ogni persona');
-  const selfPay = document.getElementById('regev-self-pay')?.value || '';
-  const ev = _regEv;
-  const price = ev.price || 0;
-  const nCred = (selfPay === 'credito' ? 1 : 0) + comps.filter(c => c.pay === 'credito').length;
-  const nSum  = (selfPay === 'sumup'   ? 1 : 0) + comps.filter(c => c.pay === 'sumup').length;
-  closeRegEvModal();
-  const run = () => _execRegEvent(ev, comps, selfPay);
-  if (price > 0 && (nCred || nSum)) {
-    let msg = `Confermi l'iscrizione a "${ev.title}"?\n\nPersone: ${1 + comps.length} × ${eur(price)} = ${eur(price * (1 + comps.length))}`;
-    if (nCred) msg += `\n💳 Addebito immediato sul credito: ${eur(price * nCred)}`;
-    if (nSum)  msg += `\n📱 SumUp: ${eur(price * nSum)} (in attesa conferma staff)`;
-    modalConfirm(msg, run);
-  } else {
-    await run();
-  }
-}
-function _norm(s) { return String(s || '').trim().toLowerCase(); }
-async function _findRegistrationId(eventId) {
-  const {data} = await db.rpc('get_user_state', {p_user_id: currentUser.id});
-  if (!data) return null;
-  const regs = data.event_registrations || data.my_event_regs || [];
-  const r = regs.find(x => x.event_id === eventId);
-  if (r) return r.registration_id || r.id || null;
-  const p = (data.pending_events || []).find(x => x.event_id === eventId);
-  return p ? p.registration_id : null;
-}
 function _openSumup(link) {
   if (!link) return;
   const w = window.open(link, '_blank', 'noopener');
   if (!w) modalInfo(`📱 Completa il pagamento SumUp\n\nApri questo link dal tuo browser:\n${link}`);
 }
-async function _execRegEvent(ev, comps, selfPay) {
-  const done = [];
-  const {data: reg, error} = await db.rpc('user_register_event', {p_user_id: currentUser.id, p_event_id: ev.id});
-  if (error || !reg || !reg.ok) return toast((error && error.message) || (reg && reg.error) || 'Errore iscrizione');
-  done.push('✅ Iscritto');
-  let regId = reg.registration_id || reg.reg_id || null;
-  let created = [];
-  if (comps.length) {
-    if (!regId) regId = await _findRegistrationId(ev.id);
-    if (!regId) {
-      toast('Iscrizione creata, ma non è stato possibile aggiungere gli accompagnatori');
-      await refreshUser(); await loadCatalog(); return;
-    }
-    const {data: cd, error: ce} = await db.rpc('user_add_companions', {
-      p_user_id: currentUser.id, p_registration_id: regId,
-      p_companions: comps.map(c => ({nome: c.nome, cognome: c.cognome}))
-    });
-    if (ce || !cd || !cd.ok) toast((ce && ce.message) || (cd && cd.error) || 'Errore accompagnatori');
-    else { created = cd.companions || []; done.push(`👥 +${comps.length}`); }
-  }
-  if (!regId) regId = await _findRegistrationId(ev.id);
-  const used = new Set();
-  const idFor = c => {
-    const m = created.find(x => !used.has(x.id) && _norm(x.nome) === _norm(c.nome) && _norm(x.cognome) === _norm(c.cognome));
-    if (m) { used.add(m.id); return m.id; }
-    return null;
-  };
-  const credIds = [], sumIds = [], unresolved = [];
-  comps.forEach(c => {
-    if (c.pay !== 'credito' && c.pay !== 'sumup') return;
-    const id = idFor(c);
-    if (id) (c.pay === 'credito' ? credIds : sumIds).push(id);
-    else unresolved.push(`${c.nome} ${c.cognome}`);
-  });
-  const promoBefore = _promoTxKeys();
-  if (regId && (selfPay === 'credito' || credIds.length)) {
-    const {data, error: e2} = await db.rpc('user_pay_event_people', {
-      p_user_id: currentUser.id, p_registration_id: regId,
-      p_targets: {self: selfPay === 'credito', companion_ids: credIds}
-    });
-    if (e2 || !data || !data.ok) toast((e2 && e2.message) || (data && data.error) || 'Errore pagamento credito');
-    else done.push('💳 pagato col credito');
-  }
-  if (regId && (selfPay === 'sumup' || sumIds.length)) {
-    const {data, error: e3} = await db.rpc('user_pay_event_sumup', {
-      p_user_id: currentUser.id, p_registration_id: regId,
-      p_targets: {self: selfPay === 'sumup', companion_ids: sumIds}
-    });
-    if (e3 || !data || !data.ok) toast((e3 && e3.message) || (data && data.error) || 'Errore SumUp');
-    else { _openSumup(data.sumup_link); done.push('📱 SumUp: in attesa conferma staff'); }
-  }
-  toast(done.join(' · '), 'ok');
-  await refreshUser();
-  await loadCatalog();
-  _promoBonusToast(promoBefore);
-  if (unresolved.length) {
-    modalInfo(`⚠️ Pagamento da completare\n\nNon è stato possibile registrare il pagamento di: ${unresolved.join(', ')}.\nApri "Le mie iscrizioni" e scegli il metodo di pagamento per queste persone.`);
-  }
-}
 
-// ── LE MIE ISCRIZIONI ────────────────────────────────────────────────
+// ── LE MIE ISCRIZIONI (legacy) ───────────────────────────────────────
+// Vecchie card iscrizione del socio: non più disegnate (le sostituisce la lista
+// compatta + openEventDetail). Restano solo le utility ancora usate altrove
+// (payBadge, _refundRoute, _refundToast); il resto è da rimuovere a Fase 2 conclusa.
 const _PAY_BADGE = {
   da_saldare:       ['🟡 Da saldare',        'pb-wait'],
   sumup_in_attesa:  ['🟠 In attesa conferma','pb-wait'],
@@ -1748,12 +2002,12 @@ function evMethodPill(method) {
   const cfg = _EV_PM[method];
   return cfg ? `<span class="pm-pill ${cfg[1]}">${cfg[0]}</span>` : '';
 }
+// Superata dalla lista compatta: "Le mie iscrizioni" è una sezione di
+// renderUserEvents() e il dettaglio della singola iscrizione vive in
+// openEventDetail(). Resta solo per svuotare il vecchio contenitore.
 function renderMyRegistrations() {
   const el = document.getElementById('u-my-regs');
-  if (!el) return;
-  const regs = _myRegs.filter(r => (r.status || '') !== 'annullato' && (_selfIncluded(r) || _activeComps(r).length));
-  if (!regs.length) { el.innerHTML = ''; return; }
-  el.innerHTML = `<div class="sec-title" style="margin-bottom:8px">Le mie iscrizioni</div>` + regs.map(_myRegCard).join('');
+  if (el) el.innerHTML = '';
 }
 const _PAY_BLOCKS = {
   credito: {cls: 'pay-credito', title: '💳 Paga col credito', btn: 'Paga col credito'},
@@ -4318,25 +4572,20 @@ const _GUIDE = {
 • Consulta lo storico di tutte le tue transazioni<br>
 • Filtra per tipo (ricarica, spesa, evento) e periodo</p>
 <p><strong>🎪 EVENTI</strong><br>
-• Sfoglia gli eventi del Rione<br>
-• Clicca "Iscriviti" per prenotare il tuo posto<br>
-• Dopo l'iscrizione scegli come pagare:<br>
-&nbsp;&nbsp;- 💳 Credito: paga subito col saldo della card<br>
-&nbsp;&nbsp;- 📱 SumUp: paga online (lo staff confermerà)<br>
-&nbsp;&nbsp;- 🏠 In cassa: paghi di persona alla cassa<br>
-• Gli eventi gratuiti si prenotano con un click<br>
-• Quando ti iscrivi si apre "👥 Chi partecipa?": aggiungi le persone che vengono con te e scegli per ognuna il metodo di pagamento (Da decidere / Credito socio / SumUp / Cassa)<br>
-• Con SumUp si apre il link di pagamento: la quota resta "🟠 In attesa conferma" finché lo staff non conferma<br>
-• Dopo l'iscrizione usa "👥 Gestisci gruppo" per aggiungere accompagnatori con nome e cognome<br>
-• Puoi rimuovere un accompagnatore solo prima del pagamento</p>
-<p><strong>🎟️ LE MIE ISCRIZIONI</strong><br>
-• Nella sezione Catalogo → Eventi trovi tutte le tue iscrizioni con lo stato di ogni persona<br>
-• 🟡 Da saldare · 🟠 In attesa conferma · 🟢 Pagato (credito / SumUp / cassa)<br>
+• In Catalogo → Eventi trovi due elenchi: <strong>Le mie iscrizioni</strong> e <strong>Prossimi eventi</strong><br>
+• Tocca una riga per aprire l'evento: locandina, data, luogo, descrizione e fasce di prezzo<br>
+• "Iscriviti" apre la composizione del gruppo: scegli la <strong>fascia</strong> per te e aggiungi le persone che vengono con te (nome, cognome e fascia di ognuna)<br>
+• Le fasce sono i prezzi per età decisi dal Rione (es. Adulto, Ragazz*, 0-3 gratuito): chi rientra in una fascia gratuita non paga nulla<br>
+• Il totale si aggiorna mentre scegli le fasce</p>
+<p><strong>🎟️ PAGARE LE QUOTE (una persona alla volta)</strong><br>
+• Dentro l'evento vedi la quota di ogni persona con il suo stato: 🟡 Da saldare · 🟠 In attesa conferma staff · 🟢 Saldato / Gratuito<br>
+• Spunta chi vuoi pagare tu (o "Pago io per tutti") e scegli il metodo:<br>
+&nbsp;&nbsp;- 💳 Credito: addebito immediato sul saldo della card<br>
+&nbsp;&nbsp;- 💵 Cassa: paghi di persona, il cassiere conferma<br>
+&nbsp;&nbsp;- 📱 SumUp: apri il link dell'importo giusto, poi segnala allo staff<br>
+• Chi non selezioni resta "Da saldare" e potrà pagare per conto suo più avanti<br>
 • "➕ Aggiungi persone" per allargare il gruppo in qualsiasi momento<br>
-• Seleziona chi vuoi pagare e usa il blocco del metodo che preferisci<br>
-• ✏️ accanto a una quota da saldare: cambia il metodo dichiarato (Credito / SumUp / Cassa)<br>
-• 🗑 accanto a una persona: la togli dall'iscrizione. Se aveva già pagato col credito il rimborso è immediato; se aveva pagato in contanti o con SumUp lo gestisce lo staff<br>
-• Se togli te stesso resti con il gruppo iscritto e puoi <strong>Ripartecipare</strong> finché ci sono posti<br>
+• 🗑 accanto a una persona non ancora saldata: la togli dall'iscrizione<br>
 • "🗑 Annulla tutta l'iscrizione" rimuove tutti e avvia i rimborsi<br>
 • Dopo la data dell'evento le modifiche non sono più possibili</p>
 <p><strong>🛍️ GADGET</strong><br>
@@ -4346,9 +4595,10 @@ const _GUIDE = {
 • Taglia esaurita? Puoi comunque prenotare: finisci in lista d'attesa e verrai avvisato quando arriva l'ordine<br>
 • In "Le mie prenotazioni gadget" puoi ✏️ modificare taglia, quantità e metodo di pagamento, oppure 🗑 annullare<br>
 • Alla consegna vedrai la riga con ✅ Consegnato e la taglia effettivamente ritirata</p>
-<p><strong>💳 SUMUP</strong><br>
-• Trovi i link SumUp per ricariche e servizi nella sezione Catalogo → SumUp<br>
-• Dopo il pagamento online, segnala allo staff per l'accredito</p>
+<p><strong>💳 RICARICA TESSERA (SumUp)</strong><br>
+• In fondo al Catalogo trovi i link SumUp per <strong>ricaricare il saldo</strong> della tessera<br>
+• Dopo il pagamento online, segnala allo staff per l'accredito<br>
+• Le quote degli eventi non si pagano da qui: si pagano dentro l'evento, persona per persona</p>
 <p><strong>👤 PROFILO</strong><br>
 • Vedi i tuoi dati, la tessera e il QR<br>
 • Cambia il PIN<br>

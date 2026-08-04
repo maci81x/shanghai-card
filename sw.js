@@ -1,4 +1,4 @@
-const CACHE_NAME = 'shanghai-card-v35';
+const CACHE_NAME = 'shanghai-card-v36';
 const ASSETS = [
   '/shanghai-card/',
   '/shanghai-card/index.html',
