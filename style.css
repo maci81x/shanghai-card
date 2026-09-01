@@ -96,6 +96,7 @@ button{cursor:pointer;font-family:inherit;transition:opacity .2s}
 .tx-dt{font-size:11px;color:var(--mut)}
 .tx-amt{font-weight:700;font-size:14px;white-space:nowrap;font-family:monospace}
 .pos{color:var(--grn)}
+.neg{color:var(--neg);font-weight:700}
 .neg-c{color:var(--neg)}
 
 /* TABS */

@@ -270,7 +270,7 @@ function _richText(s) {
   h = h.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
   return h.replace(/\r\n|\r|\n/g, '<br>');
 }
-function modalConfirm(msg, cb) {
+function modalConfirm(msg, cb, okLabel) {
   const parts = msg.split('\n\n');
   document.getElementById('modal-title').textContent = parts[0];
   const det = document.getElementById('modal-detail');
@@ -281,6 +281,7 @@ function modalConfirm(msg, cb) {
     det.style.display = 'none';
   }
   document.getElementById('modal').classList.add('open');
+  document.getElementById('modal-ok').textContent = okLabel || 'Conferma';
   window._mcb = cb;
 }
 function modalCancel() {
@@ -2635,7 +2636,7 @@ async function staffLookup() {
   staffTarget = u;
   document.getElementById('s-res-name').textContent = u.display_name;
   document.getElementById('s-res-card').textContent = u.card_id;
-  document.getElementById('s-res-bal').textContent  = eur(u.balance);
+  _setBal('s-res-bal', u.balance);
   document.getElementById('s-result').style.display = 'block';
   _renderEventRegs('s', data.event_registrations || u.event_registrations || []);
   if (Array.isArray(data.transactions) && data.transactions.length) {
@@ -2876,7 +2877,7 @@ async function staffPayEvent(regId, method, eventName, amount) {
     });
     if (error||!data.ok) return toast((error&&error.message)||data.error);
     toast(`✓ ${data.message}`, 'ok');
-    document.getElementById('s-res-bal').textContent = eur(data.new_balance);
+    _setBal('s-res-bal', data.new_balance);
     if (staffTarget) staffTarget.balance = data.new_balance;
     await loadStaffPendingEvents(staffTarget.card_id);
     addSOp({type:'event', card:staffTarget.card_id, name:staffTarget.display_name, amount:-amount, nb:data.new_balance, desc:`Evento: ${eventName} (${label})`});
@@ -2891,7 +2892,7 @@ async function staffRecharge(amount) {
     const {data, error} = await db.rpc('staff_recharge', {p_operator_id:currentUser.id, p_card_id:staffTarget.card_id, p_amount:amount, p_payment_method: pm});
     if (error||!data.ok) return toast((error&&error.message)||data.error);
     toast(`Ricarica ok! ${eur(staffTarget.balance)} → ${eur(data.new_balance)}`, 'ok');
-    document.getElementById('s-res-bal').textContent = eur(data.new_balance);
+    _setBal('s-res-bal', data.new_balance);
     staffTarget.balance = data.new_balance;
     addSOp({type:'recharge', card:staffTarget.card_id, name:staffTarget.display_name, amount, nb:data.new_balance});
   });
@@ -2902,6 +2903,36 @@ async function staffRechargeCustom() {
   await staffRecharge(v);
   document.getElementById('s-custom').value = '';
 }
+// Saldo mostrato a staff/admin: sotto zero va in rosso, così chi è in rosso si vede.
+function _setBal(id, v) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = eur(v);
+  const neg = Number(v || 0) < 0;
+  el.style.color = neg ? 'var(--neg)' : '';
+  el.style.textShadow = neg ? 'none' : '';
+}
+// Addebito staff/admin. A saldo insufficiente non blocca: propone di autorizzare
+// il negativo e richiama la STESSA RPC con p_allow_negative. onOk riceve i dati
+// della chiamata riuscita (con went_negative quando il saldo è andato sotto zero).
+async function _chargeOrAskNegative(fn, args, nome, onOk) {
+  const fallita = r => {
+    toast((r.error && r.error.message) || (r.data && r.data.error) || 'Errore addebito');
+  };
+  const first = await db.rpc(fn, args);
+  if (!first.error && first.data && first.data.ok) return onOk(first.data);
+  if (first.error || !first.data || first.data.error !== 'insufficient_balance') return fallita(first);
+  const {balance, required} = first.data;
+  modalConfirm(
+    `⚠️ Saldo insufficiente\n\n${nome} ha ${eur(balance)} ma servono ${eur(required)}.\n\nVuoi procedere comunque portando il saldo in negativo?`,
+    async () => {
+      const retry = await db.rpc(fn, {...args, p_allow_negative: true});
+      if (retry.error || !retry.data || !retry.data.ok) return fallita(retry);
+      onOk(retry.data);
+    },
+    'Addebita comunque');
+}
+
 async function staffCharge() {
   if (!staffTarget) return toast('Cerca prima una tessera');
   const v    = parseFloat(document.getElementById('s-charge-amt').value);
@@ -2915,18 +2946,21 @@ async function staffCharge() {
     ? `\n\n⚡ Promo [${pv.promo_code}] attiva: -${eur(pv.promo_discount)}\nImporto originale: ${eur(v)} → Addebito finale: ${eur(pv.final_amount)} (sconto ${eur(pv.promo_discount)})`
     : '';
   modalConfirm(`Addebitare ${eur(v)} a ${staffTarget.display_name}?\n\nCategoria: ${catLabel}${promoLine}`, async () => {
-    const {data, error} = await db.rpc('staff_charge', {p_operator_id:currentUser.id, p_card_id:staffTarget.card_id, p_amount:v, p_description:desc, p_category:cat});
-    if (error||!data.ok) return toast((error&&error.message)||data.error);
-    if (data.promo_code) {
-      toast(`Promo ${data.promo_code}! Originale: ${eur(data.original_amount)} → Sconto: -${eur(data.discount)} → Addebitato: ${eur(data.charged)}`, 'ok');
-    } else {
-      toast(`Addebito ok! ${eur(data.old_balance)} → ${eur(data.new_balance)}`, 'ok');
-    }
-    document.getElementById('s-res-bal').textContent = eur(data.new_balance);
-    staffTarget.balance = data.new_balance;
-    document.getElementById('s-charge-amt').value = '';
-    document.getElementById('s-charge-desc').value = '';
-    addSOp({type:'charge', card:staffTarget.card_id, name:staffTarget.display_name, amount:-v, nb:data.new_balance, desc});
+    const args = {p_operator_id:currentUser.id, p_card_id:staffTarget.card_id, p_amount:v, p_description:desc, p_category:cat};
+    await _chargeOrAskNegative('staff_charge', args, staffTarget.display_name, data => {
+      if (data.went_negative) {
+        toast(`✓ Addebitato ${eur(data.charged != null ? data.charged : v)} · saldo ${eur(data.new_balance)} (negativo autorizzato)`, 'ok');
+      } else if (data.promo_code) {
+        toast(`Promo ${data.promo_code}! Originale: ${eur(data.original_amount)} → Sconto: -${eur(data.discount)} → Addebitato: ${eur(data.charged)}`, 'ok');
+      } else {
+        toast(`Addebito ok! ${eur(data.old_balance)} → ${eur(data.new_balance)}`, 'ok');
+      }
+      _setBal('s-res-bal', data.new_balance);
+      staffTarget.balance = data.new_balance;
+      document.getElementById('s-charge-amt').value = '';
+      document.getElementById('s-charge-desc').value = '';
+      addSOp({type:'charge', card:staffTarget.card_id, name:staffTarget.display_name, amount:-v, nb:data.new_balance, desc});
+    });
   });
 }
 function addSOp(op) {
@@ -3089,7 +3123,7 @@ async function adminCassaLookup() {
   staffTarget = u;
   document.getElementById('ac-res-name').textContent = u.display_name;
   document.getElementById('ac-res-card').textContent = u.card_id;
-  document.getElementById('ac-res-bal').textContent  = eur(u.balance);
+  _setBal('ac-res-bal', u.balance);
   document.getElementById('ac-result').style.display = 'block';
   _renderEventRegs('ac', data.event_registrations || u.event_registrations || []);
   if (Array.isArray(data.transactions) && data.transactions.length) {
@@ -3203,7 +3237,7 @@ async function adminCassaRecharge(amount) {
       if (error||!data.ok) { console.error('admin_recharge', error, data); return toast((error&&error.message)||(data&&data.error)||'Errore ricarica'); }
       toast(`Ricarica ok! ${eur(staffTarget.balance)} → ${eur(data.new_balance)}`, 'ok');
       staffTarget.balance = data.new_balance;
-      document.getElementById('ac-res-bal').textContent = eur(data.new_balance);
+      _setBal('ac-res-bal', data.new_balance);
     } catch (e) {
       console.error('adminCassaRecharge', e);
       toast('Errore ricarica: ' + (e.message||e));
@@ -3229,16 +3263,18 @@ async function adminCassaCharge() {
     ? `\n\n⚡ Promo [${pv.promo_code}] attiva: -${eur(pv.promo_discount)}\nImporto originale: ${eur(v)} → Addebito finale: ${eur(pv.final_amount)} (sconto ${eur(pv.promo_discount)})`
     : '';
   modalConfirm(`Addebitare ${eur(v)} a ${staffTarget.display_name}?\n\nCategoria: ${catLabel}${promoLine}`, async () => {
-    const {data, error} = await db.rpc('admin_charge', {p_admin_id: currentUser.id, p_card_id: staffTarget.card_id, p_amount: v, p_description: desc, p_category: cat});
-    if (error||!data.ok) {
-      if (data?.error === 'insufficient_balance') return toast(`Saldo insufficiente (${eur(data.balance)})`);
-      return toast((error&&error.message)||data.error);
-    }
-    toast(`Addebito ok! ${eur(staffTarget.balance)} → ${eur(data.new_balance)}`, 'ok');
-    staffTarget.balance = data.new_balance;
-    document.getElementById('ac-res-bal').textContent = eur(data.new_balance);
-    document.getElementById('ac-charge-amt').value = '';
-    document.getElementById('ac-charge-desc').value = '';
+    const args = {p_admin_id: currentUser.id, p_card_id: staffTarget.card_id, p_amount: v, p_description: desc, p_category: cat};
+    await _chargeOrAskNegative('admin_charge', args, staffTarget.display_name, data => {
+      if (data.went_negative) {
+        toast(`✓ Addebitato ${eur(data.charged != null ? data.charged : v)} · saldo ${eur(data.new_balance)} (negativo autorizzato)`, 'ok');
+      } else {
+        toast(`Addebito ok! ${eur(staffTarget.balance)} → ${eur(data.new_balance)}`, 'ok');
+      }
+      staffTarget.balance = data.new_balance;
+      _setBal('ac-res-bal', data.new_balance);
+      document.getElementById('ac-charge-amt').value = '';
+      document.getElementById('ac-charge-desc').value = '';
+    });
   });
 }
 async function adminCassaPayEvent(regId, method, eventName, amount) {
@@ -3248,7 +3284,7 @@ async function adminCassaPayEvent(regId, method, eventName, amount) {
     if (error||!data.ok) return toast((error&&error.message)||data.error);
     toast(`✓ ${data.message}`, 'ok');
     staffTarget.balance = data.new_balance;
-    document.getElementById('ac-res-bal').textContent = eur(data.new_balance);
+    _setBal('ac-res-bal', data.new_balance);
     await loadAcPendingEvents(staffTarget.card_id);
   });
 }
@@ -3413,7 +3449,7 @@ function renderAUsers(role) {
         <td style="white-space:nowrap">
           <span class="role-badge r${u.role[0]}">${u.role}</span>${u.is_staff ? ' <span class="role-badge rs" title="Puo\' operare come staff">staff</span>' : ''}
         </td>
-        <td class="${u.balance>0?'pos':''}">${eur(u.balance)}</td>
+        <td class="${u.balance>0?'pos':(u.balance<0?'neg':'')}">${eur(u.balance)}</td>
         <td style="font-size:11px;color:${u.active?'var(--grn)':'var(--neg)'}">${u.active?'attivo':'disattivo'}</td>
         <td style="white-space:nowrap">
           <button class="btn-sm" title="Reset PIN" onclick="openPinModal('${u.card_id}')">🔑</button>
@@ -5941,8 +5977,8 @@ async function confirmDeliv() {
       const nu = u && (u.user || u);
       if (nu && nu.balance != null) {
         staffTarget = nu;
-        const b1 = document.getElementById('s-res-bal'); if (b1) b1.textContent = eur(nu.balance);
-        const b2 = document.getElementById('ac-res-bal'); if (b2) b2.textContent = eur(nu.balance);
+        _setBal('s-res-bal', nu.balance);
+        _setBal('ac-res-bal', nu.balance);
       }
     }
     if (from === 'cassa-staff')      await loadStaffGadgetReservationsForUser(userId);
