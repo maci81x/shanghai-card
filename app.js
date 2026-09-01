@@ -3735,7 +3735,7 @@ async function adminDeleteSumupLink(id, label) {
 // events.price resta il prezzo unico di default. Se un evento ha almeno una fascia
 // attiva, le fasce SOSTITUISCONO il prezzo nella vetrina socio (card home + dettaglio).
 // Pagamenti, totali iscrizione e bonus promo restano su events.price (Fase 2).
-const TIER_MAX = 5;
+const TIER_MAX = 8;
 // Bozza righe in editing nei form admin, per prefisso DOM: 'fe' = crea, 'eve' = modifica.
 // Riga: { id: uuid|null, label, price, sort_order, _dirty, _deleted }
 let _tierDraft = { fe: [], eve: [] };
