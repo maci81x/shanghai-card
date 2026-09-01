@@ -928,6 +928,7 @@ let _evdMode = 'view';     // 'view' | 'compose' (nuova iscrizione) | 'add' (agg
 let _evdRows = [];         // righe persona in composizione: {key, nome, cognome, tier_id}
 let _evdRowSeq = 0;
 let _evdSelfTier = '';     // fascia scelta per me in fase di iscrizione
+let _evdQty = {};          // { [tier_id]: quantità } → menù di gruppo, numero indicativo
 let _evdSel = {};          // { [unitKey]: true } → persone selezionate da saldare
 let _evdSumupOpen = false; // pannello link SumUp aperto
 
@@ -946,7 +947,7 @@ async function openEventDetail(eventId) {
   if (!ev) { await loadUserEvents(); ev = _evList.find(e => e.id === eventId); }
   if (!ev) ev = _evFallback(eventId);
   if (!ev) return toast('Evento non disponibile');
-  _evdMode = 'view'; _evdRows = []; _evdSelfTier = ''; _evdSel = {}; _evdSumupOpen = false;
+  _evdMode = 'view'; _evdRows = []; _evdSelfTier = ''; _evdSel = {}; _evdSumupOpen = false; _evdQty = {};
   document.getElementById('evd-title').textContent = ev.title || 'Evento';
   document.getElementById('evd-body').innerHTML = '<div class="empty">⏳ Carico l\'evento…</div>';
   document.getElementById('evd-bg').classList.add('open');
@@ -980,8 +981,10 @@ async function _evdLoad(evArg) {
     tiers: Array.isArray(t.data) ? t.data : [],
     reg:   r.data,
     sumup: Array.isArray(s.data) ? s.data : [],
-    menu:  menu || {common: [], by_tier: []}
+    menu:  menu || {common: [], by_tier: []},
+    prefs: {}
   };
+  _evd.prefs = await _evdLoadPrefs();
   _evdSel = {};             // la selezione riparte dalla verità del server
   _evdSumupOpen = false;
   renderEventDetail();
@@ -993,6 +996,116 @@ function _evdRegId()      { return (_evd && _evd.reg && _evd.reg.registration) ?
 function _evdCanEdit() {
   const d = _evd && _evd.ev && _evd.ev.event_date;
   return d ? new Date(d) > new Date() : true;
+}
+
+// ── MENÙ DI GRUPPO CON QUANTITÀ ──────────────────────────────────────
+// Eventi "alla carta": invece di una fascia per persona, il socio indica quante
+// porzioni di ogni voce servono al gruppo. Numero indicativo per la cucina,
+// nessun pagamento coinvolto (si salda tutto alla cassa in loco).
+// Il backend segnala la modalità con menu_mode = 'group_quantities'.
+function _evdMenuMode() {
+  if (!_evd) return 'per_person';
+  const r = _evd.reg || {}, reg = r.registration || {}, e = _evd.ev || {};
+  return r.event_menu_mode || r.menu_mode || reg.event_menu_mode || reg.menu_mode
+      || e.event_menu_mode || e.menu_mode || 'per_person';
+}
+function _evdGroupMenu() { return _evdMenuMode() === 'group_quantities' && _evdHasTiers(); }
+// Le fasce restano per-persona in ogni altro caso: questo flag governa solo il menù di gruppo.
+function _evdPerPersonTiers() { return _evdHasTiers() && !_evdGroupMenu(); }
+function _prefsMap(arr) {
+  const o = {};
+  (arr || []).forEach(x => { o[String(x.tier_id)] = Number(x.quantity || 0); });
+  return o;
+}
+// Le preferenze arrivano dall'iscrizione se il backend le espone, altrimenti si
+// leggono dalla tabella: senza di esse un salvataggio successivo le azzererebbe.
+async function _evdLoadPrefs() {
+  if (!_evdGroupMenu() || !_evdRegistered()) return {};
+  const r = _evd.reg || {}, reg = r.registration || {};
+  const arr = r.menu_preferences || reg.menu_preferences;
+  if (Array.isArray(arr)) return _prefsMap(arr);
+  const regId = _evdRegId();
+  if (!regId) return {};
+  const {data, error} = await db.from('event_menu_preferences')
+    .select('tier_id,quantity').eq('registration_id', regId);
+  if (error) { console.warn('event_menu_preferences:', error.message); return {}; }
+  return _prefsMap(data);
+}
+async function _evdSavePrefs(map, silent) {
+  const regId = _evdRegId();
+  if (!regId) { toast('Iscrizione non trovata'); return false; }
+  const prefs = Object.keys(map)
+    .filter(k => Number(map[k]) > 0)
+    .map(k => ({tier_id: k, quantity: Number(map[k])}));
+  const {data, error} = await db.rpc('user_set_menu_preferences', {
+    p_user_id: currentUser.id, p_registration_id: regId, p_prefs: prefs
+  });
+  if (error || !data || !data.ok) {
+    toast((error && error.message) || (data && data.error) || 'Preferenze menù non salvate');
+    return false;
+  }
+  if (_evd) _evd.prefs = {...map};
+  if (!silent) toast('✅ Preferenze menù salvate', 'ok');
+  return true;
+}
+function evdQty(tierId, delta) {
+  const n = Math.max(0, Number(_evdQty[tierId] || 0) + delta);
+  _evdQty = {..._evdQty, [tierId]: n};
+  const el = document.getElementById('evd-qty-rows');
+  if (el) el.innerHTML = _evdQtyRowsHtml(); else renderEventDetail();
+}
+function _evdQtyRowsHtml() {
+  return (_evd ? _evd.tiers : []).map(t => {
+    const n = Number(_evdQty[t.id] || 0);
+    return `<div class="tier-list-row">
+      <span class="tier-list-name">${_esc(t.label || '')}</span>
+      <span class="qty-ctl">
+        <button class="qty-btn" ${n <= 0 ? 'disabled' : ''} onclick="evdQty('${t.id}',-1)">−</button>
+        <span class="qty-n">${n}</span>
+        <button class="qty-btn" onclick="evdQty('${t.id}',1)">+</button>
+      </span>
+    </div>`;
+  }).join('');
+}
+function _evdQtyBlockHtml() {
+  return `<div class="tier-list" style="margin-top:14px">
+    <div class="tier-list-lbl">🍽️ Preferenze menù</div>
+    <div class="evd-hint" style="margin:0 0 6px">Numero indicativo, non vincolante: serve solo alla cucina. Si paga tutto alla cassa.</div>
+    <div id="evd-qty-rows">${_evdQtyRowsHtml()}</div>
+  </div>`;
+}
+function evdStartMenuPrefs() {
+  _evdQty = {...((_evd && _evd.prefs) || {})};
+  _evdMode = 'menu';
+  renderEventDetail();
+}
+async function evdSaveMenuPrefs() {
+  if (!await _evdSavePrefs(_evdQty)) return;
+  _evdMode = 'view';
+  renderEventDetail();
+}
+function _evdMenuPrefsHtml() {
+  return `<div class="evd-sec">
+    ${_evdQtyBlockHtml()}
+    <div class="evd-actions">
+      <button class="btn btn-q" onclick="evdCancelCompose()">Annulla</button>
+      <button class="btn btn-p" style="flex:2" onclick="evdSaveMenuPrefs()">Salva</button>
+    </div>
+  </div>`;
+}
+// Riepilogo nel pannello iscritti, con accesso alla modifica.
+function _evdPrefsPanelHtml() {
+  const p = (_evd && _evd.prefs) || {};
+  const righe = _evd.tiers.filter(t => Number(p[t.id] || 0) > 0)
+    .map(t => `<div class="tier-list-row">
+      <span class="tier-list-name">${_esc(t.label || '')}</span>
+      <span class="tier-list-price">${Number(p[t.id])}</span>
+    </div>`);
+  return `<div class="tier-list" style="margin-top:14px">
+    <div class="tier-list-lbl">🍽️ Preferenze menù</div>
+    ${righe.length ? righe.join('') : '<div class="evd-hint" style="margin:0">Nessuna preferenza indicata.</div>'}
+    ${_evdCanEdit() ? `<button class="btn btn-q w100" style="margin-top:10px" onclick="evdStartMenuPrefs()">Modifica preferenze menù</button>` : ''}
+  </div>`;
 }
 
 // Le "unità" pagabili: io (se ancora incluso) + ogni accompagnatore attivo.
@@ -1053,6 +1166,7 @@ function renderEventDetail() {
     ${_evdTiersHtml()}`;
   let body;
   if (_evdMode === 'compose')    body = _evdComposeHtml();
+  else if (_evdMode === 'menu')  body = _evdMenuPrefsHtml();
   else if (_evdMode === 'add')   body = _evdAddPeopleHtml();
   else if (_evdRegistered())     body = _evdPaymentHtml();
   else if (!_evdCanEdit())       body = `<div class="evd-hint" style="margin-top:16px">Evento passato: iscrizioni chiuse.</div>`;
@@ -1096,7 +1210,8 @@ function _menuPreviewHtml(tierId) {
     _esc(it.section_label || '') + (it.item_detail ? ' — ' + _esc(it.item_detail) : '')).join(' • ')}</div>`;
 }
 function _evdTiersHtml() {
-  if (!_evdHasTiers()) return '';
+  // In modalità menù di gruppo le "fasce" sono voci di menù: le mostra il blocco quantità.
+  if (!_evdPerPersonTiers()) return '';
   return `<div class="tier-list">
     <div class="tier-list-lbl">Fasce di prezzo</div>
     ${_evd.tiers.map(t => `<div class="tier-list-row">
@@ -1107,7 +1222,7 @@ function _evdTiersHtml() {
 }
 
 // ── COMPOSIZIONE GRUPPO (iscrizione e aggiunta persone) ──────────────
-function evdStartCompose()   { _evdMode = 'compose'; _evdRows = []; _evdSelfTier = ''; renderEventDetail(); }
+function evdStartCompose()   { _evdMode = 'compose'; _evdRows = []; _evdSelfTier = ''; _evdQty = {...((_evd && _evd.prefs) || {})}; renderEventDetail(); }
 function evdStartAddPeople() { _evdMode = 'add'; _evdRows = [_evdNewRow()]; renderEventDetail(); }
 function evdCancelCompose()  { _evdMode = 'view'; _evdRows = []; renderEventDetail(); }
 function _evdNewRow() { return {key: 'p' + (++_evdRowSeq), nome: '', cognome: '', tier_id: ''}; }
@@ -1164,8 +1279,8 @@ function _evdRowsHtml() {
       <input type="text" placeholder="Cognome" value="${_escAttr(r.cognome)}" oninput="evdRowField('${r.key}','cognome',this.value)">
       <button class="btn-sm evd-person-x" title="Rimuovi" onclick="evdRemoveRow('${r.key}')">✕</button>
     </div>
-    ${_evdHasTiers() ? `<div class="fg" style="margin:8px 0 0"><label>Fascia</label>${_evdTierSelectHtml(r.tier_id, `evdRowField('${r.key}','tier_id',this.value)`)}</div>` : ''}
-    <div id="mp-${r.key}">${_menuPreviewHtml(_evdHasTiers() ? r.tier_id : null)}</div>
+    ${_evdPerPersonTiers() ? `<div class="fg" style="margin:8px 0 0"><label>Fascia</label>${_evdTierSelectHtml(r.tier_id, `evdRowField('${r.key}','tier_id',this.value)`)}</div>` : ''}
+    <div id="mp-${r.key}">${_menuPreviewHtml(_evdPerPersonTiers() ? r.tier_id : null)}</div>
   </div>`).join('');
 }
 function _evdRenderRows() {
@@ -1175,7 +1290,7 @@ function _evdRenderRows() {
   _evdUpdateTotal();
 }
 function _evdComposeHtml() {
-  const selfTier = _evdHasTiers()
+  const selfTier = _evdPerPersonTiers()
     ? `<div class="fg" style="margin:8px 0 0"><label>La tua fascia</label>${_evdTierSelectHtml(_evdSelfTier, 'evdSetSelfTier(this.value)')}</div>`
     : '';
   return `<div class="evd-sec">
@@ -1183,10 +1298,11 @@ function _evdComposeHtml() {
     <div class="card evd-person">
       <div class="evd-person-name">${_esc((currentUser && currentUser.display_name) || 'Tu')} <span class="evd-you">(tu)</span></div>
       ${selfTier}
-      <div id="mp-self">${_menuPreviewHtml(_evdHasTiers() ? _evdSelfTier : null)}</div>
+      <div id="mp-self">${_menuPreviewHtml(_evdPerPersonTiers() ? _evdSelfTier : null)}</div>
     </div>
     <div id="evd-rows">${_evdRowsHtml()}</div>
     <button class="btn btn-q w100" style="margin-top:8px" onclick="evdAddRow()">➕ Aggiungi persona</button>
+    ${_evdGroupMenu() ? _evdQtyBlockHtml() : ''}
     <div id="evd-total" class="evd-total"></div>
     <div class="evd-actions">
       <button class="btn btn-q" onclick="evdCancelCompose()">Annulla</button>
@@ -1208,7 +1324,7 @@ function _evdAddPeopleHtml() {
 }
 // Validazione lato client speculare a quella del backend (stessi messaggi).
 function _evdCollectCompanions() {
-  const hasTiers = _evdHasTiers();
+  const hasTiers = _evdPerPersonTiers();
   const rows = _evdRows.map(r => ({nome: (r.nome || '').trim(), cognome: (r.cognome || '').trim(), tier_id: r.tier_id}));
   if (rows.some(r => !r.nome || !r.cognome)) { toast('Nome e cognome obbligatori per ogni persona'); return null; }
   if (hasTiers && rows.some(r => !r.tier_id)) { toast('Seleziona una fascia per ogni persona'); return null; }
@@ -1218,7 +1334,9 @@ function _evdCollectCompanions() {
 }
 async function evdSubmitRegister() {
   if (!_evd) return;
-  const hasTiers = _evdHasTiers();
+  const hasTiers = _evdPerPersonTiers();
+  const group = _evdGroupMenu();
+  const qty = {..._evdQty};
   if (hasTiers && !_evdSelfTier) return toast('Seleziona una fascia per te');
   const comps = _evdCollectCompanions();
   if (!comps) return;
@@ -1233,6 +1351,9 @@ async function evdSubmitRegister() {
   toast('✅ Iscrizione confermata', 'ok');
   _evdMode = 'view'; _evdRows = []; _evdSelfTier = '';
   await _evdLoad();       // → schermata di pagamento con le quote appena create
+  // Le preferenze si salvano dopo: il registration_id esiste solo ora. Se falliscono
+  // l'iscrizione resta valida, sono modificabili dal pannello iscritti.
+  if (group) await _evdSavePrefs(qty, true);
   await refreshUser();
 }
 async function evdSubmitAddPeople() {
@@ -1316,6 +1437,7 @@ function _evdPayInner() {
     ${master}
     <div class="evd-units">${units.map(_evdUnitRowHtml).join('')}</div>
     ${metodi}
+    ${_evdGroupMenu() ? _evdPrefsPanelHtml() : ''}
     ${_evdCanEdit() ? `<button class="btn btn-q w100" style="margin-top:14px" onclick="evdStartAddPeople()">➕ Aggiungi persone</button>
       <div style="margin-top:12px;text-align:right"><a href="#" class="link-danger" onclick="evdCancelAll();return false">🗑 Annulla tutta l'iscrizione</a></div>`
       : '<div class="past-note">Evento passato — modifiche non disponibili</div>'}
