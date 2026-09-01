@@ -443,8 +443,8 @@ img{max-width:100%;height:auto}
 .tier-list-name{color:var(--txt);overflow-wrap:anywhere}
 .tier-list-price{font-weight:700;color:var(--gold);white-space:nowrap}
 .qty-ctl{display:flex;align-items:center;gap:10px;flex:0 0 auto}
-.qty-btn{width:30px;height:30px;border-radius:8px;border:1px solid var(--brd);background:var(--bgc);
-  color:var(--txt);font-size:17px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.qty-btn{width:34px;height:34px;border-radius:8px;border:1px solid var(--brd);background:var(--bgc);
+  color:var(--txt);font-size:18px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center}
 .qty-btn:disabled{opacity:.35;cursor:default}
 .qty-n{min-width:20px;text-align:center;font-weight:700;font-variant-numeric:tabular-nums}
 :root.light .tier-list-price{color:#0A0A0A}

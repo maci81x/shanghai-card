@@ -27,9 +27,11 @@ const TIERS = JSON.stringify([
   {id: 't1', label: 'Trippa al piatto', price: 7, sort_order: 1},
   {id: 't2', label: 'Fagioli',          price: 3, sort_order: 2},
 ]);
-const setEvd = (mode, reg) => run(`
+// mode = null → menu_mode non dichiarato dal backend, si attiva il fallback
+const setEvd = (mode, reg, price) => run(`
   _evd = {
-    ev: {id:'e1', title:'Street Food', price:0, event_date:'2099-01-01T18:00:00Z', menu_mode:'${mode}'},
+    ev: {id:'e1', title:'Street Food', price:${price == null ? 0 : price},
+         event_date:'2099-01-01T18:00:00Z'${mode ? `, menu_mode:'${mode}'` : ''}},
     tiers: ${TIERS},
     reg: ${JSON.stringify(reg || {ok: true, registered: false})},
     sumup: [], menu: {common: [], by_tier: []}, prefs: {}
@@ -85,4 +87,32 @@ run('evdStartMenuPrefs()');
 assert.deepStrictEqual(JSON.parse(run('JSON.stringify(_evdQty)')), {t1: 3, t2: 0},
   'modifica: contatori non pre-popolati');
 
-console.log('OK — 7 controlli passati');
+// 7. fallback: senza menu_mode dal backend, prezzo 0 + voci menù = alla carta
+setEvd(null, null, 0);
+assert.strictEqual(run('_evdMenuMode()'), 'group_quantities', 'fallback: alla carta non riconosciuto');
+setEvd(null, null, 15);
+assert.strictEqual(run('_evdMenuMode()'), 'per_person', 'fallback: evento a pagamento resta per_person');
+// il flag esplicito del backend vince sempre sul fallback
+setEvd('per_person', null, 0);
+assert.strictEqual(run('_evdMenuMode()'), 'per_person', 'il menu_mode dichiarato deve prevalere');
+
+// 8. in modalità gruppo il totale resta 0: i prezzi delle quantità non si sommano
+setEvd(null, null, 0);
+run(`_evdMode = 'compose'; _evdRows = [{key:'p1', nome:'Anna', cognome:'Rossi', tier_id:''}];`);
+run(`evdQty('t1', 1); evdQty('t2', 1);`);
+assert.strictEqual(run('_evdComposeTotal(true)'), 0, 'gruppo: il totale deve restare 0');
+setEvd('per_person', null, 0);
+run(`_evdSelfTier = 't1'; _evdRows = [{key:'p1', nome:'Anna', cognome:'Rossi', tier_id:'t2'}];`);
+assert.strictEqual(run('_evdComposeTotal(true)'), 10, 'per_person: il totale deve sommare le fasce');
+
+// 9. badge prezzo: alla carta / gratis / prezzo
+assert.strictEqual(run('_evPriceHint({price: 0, has_tiers: true, min_price: 3})'), 'Alla carta',
+  'badge: evento a 0 con voci menù è "Alla carta"');
+assert.strictEqual(run('_evPriceHint({price: 0, has_tiers: false})'), 'Gratis',
+  'badge: evento a 0 senza fasce resta "Gratis"');
+assert.strictEqual(run('_evPriceHint({price: 12, has_tiers: false})'), '\u20ac\u00a012,00',
+  'badge: prezzo unico invariato');
+assert.strictEqual(run('_evPriceHint({price: 20, has_tiers: true, min_price: 8})'), 'da \u20ac\u00a08,00',
+  'badge: evento a fasce a pagamento invariato');
+
+console.log('OK — 9 controlli passati');

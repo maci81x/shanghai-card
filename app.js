@@ -867,11 +867,13 @@ function _evLongDate(iso) {
     ' · ' + d.toLocaleTimeString('it-IT', {hour: '2-digit', minute: '2-digit'});
 }
 // min_price è il minimo delle fasce a pagamento: 0 solo se l'evento è davvero gratis.
+// Evento "alla carta": prezzo 0 ma con voci di menù. Si paga tutto in cassa, quindi
+// il prezzo non si somma. Stessa regola per il badge e per la modalità menù di gruppo.
+function _isAllaCarta(price, hasTiers) { return Number(price || 0) === 0 && !!hasTiers; }
 function _evPriceHint(e) {
   if (e.has_tiers) {
-    const min = Number(e.min_price || 0);
-    // Fasce tutte a 0 = voci di menù indicative: si paga alla carta in loco, non è gratis.
-    return min > 0 ? 'da ' + eur(min) : 'Alla carta';
+    if (_isAllaCarta(e.price, true)) return 'Alla carta';
+    return 'da ' + eur(e.min_price);
   }
   const p = Number(e.price || 0);
   return p > 0 ? eur(p) : 'Gratis';
@@ -1006,8 +1008,12 @@ function _evdCanEdit() {
 function _evdMenuMode() {
   if (!_evd) return 'per_person';
   const r = _evd.reg || {}, reg = r.registration || {}, e = _evd.ev || {};
-  return r.event_menu_mode || r.menu_mode || reg.event_menu_mode || reg.menu_mode
-      || e.event_menu_mode || e.menu_mode || 'per_person';
+  const dichiarato = r.event_menu_mode || r.menu_mode || reg.event_menu_mode || reg.menu_mode
+                  || e.event_menu_mode || e.menu_mode;
+  if (dichiarato) return dichiarato;
+  // Fallback finché il backend non espone menu_mode nel catalogo: un evento alla
+  // carta non ha fasce da scegliere, ha voci di menù da contare.
+  return _isAllaCarta(e.price, _evdHasTiers()) ? 'group_quantities' : 'per_person';
 }
 function _evdGroupMenu() { return _evdMenuMode() === 'group_quantities' && _evdHasTiers(); }
 // Il prezzo di una voce sta in tier.price: il label non lo contiene.
@@ -1252,6 +1258,7 @@ function _evdTierPrice(tierId) {
 }
 // Totale live: somma delle fasce scelte (le fasce a €0 valgono 0).
 function _evdComposeTotal(includeSelf) {
+  if (_evdGroupMenu()) return 0;   // alla carta: si salda in cassa, niente da addebitare
   const hasTiers = _evdHasTiers();
   const flat = Number((_evd && _evd.ev.price) || 0);
   const quota = r => hasTiers ? _evdTierPrice(r.tier_id) : flat;
@@ -4617,7 +4624,7 @@ async function loadPublicEvent(slug) {
     <div style="font-size:13px;margin-bottom:3px">📅 ${dateStr}</div>
     ${_publicEvent.location?`<div style="font-size:13px;margin-bottom:3px">📍 ${_publicEvent.location}</div>`:''}
     ${_tierListHtml(tiers)}
-    ${!(_publicEvent.price > 0) && !tiers.some(t => Number(t.price || 0) > 0)
+    ${!(_publicEvent.price > 0)
       ? `<div style="font-size:15px;font-weight:700;color:var(--gold);margin-top:10px">${tiers.length ? 'Alla carta' : 'Evento gratuito'}</div>`
       : ''}
     ${spotsHtml}
