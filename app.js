@@ -3350,12 +3350,66 @@ async function loadDash() {
     {ic:'🎫', v:data.total_events,         l:'Eventi attivi'},
     {ic:'✅', v:data.total_registrations,  l:'Iscrizioni tot.'},
   ];
-  document.getElementById('a-kpi').innerHTML = kpis.map(k=>`
+  // La tile dei saldi negativi va per prima: è un avviso, non un contatore.
+  document.getElementById('a-kpi').innerHTML = _negTileHtml(data) + kpis.map(k=>`
     <div class="kpi-card">
       <div class="kpi-ic">${k.ic}</div>
       <div class="kpi-val">${k.v}</div>
       <div class="kpi-lbl">${k.l}</div>
     </div>`).join('');
+}
+
+// ── SOCI IN NEGATIVO ─────────────────────────────────────────────────
+function _negTileHtml(data) {
+  const n = Number(data.negative_count || 0);
+  if (!n) return `<div class="kpi-card kpi-ok">
+      <div class="kpi-ic">✅</div>
+      <div class="kpi-val">0</div>
+      <div class="kpi-lbl">Nessun socio in negativo</div>
+    </div>`;
+  return `<div class="kpi-card kpi-neg" role="button" tabindex="0" onclick="openNegativeBalances()">
+      <div class="kpi-ic">🔴</div>
+      <div class="kpi-val">${n}</div>
+      <div class="kpi-lbl">${n === 1 ? 'Socio in negativo' : 'Soci in negativo'}</div>
+      <div class="kpi-sub">Totale da recuperare: ${eur(Math.abs(Number(data.negative_total || 0)))}</div>
+    </div>`;
+}
+async function openNegativeBalances() {
+  const list = document.getElementById('neg-modal-list');
+  list.innerHTML = '<div class="empty">⏳ Carico…</div>';
+  document.getElementById('neg-modal-bg').classList.add('open');
+  const {data, error} = await db.rpc('admin_list_negative_balances', {p_admin_id: currentUser.id});
+  if (error || !data || !data.ok) {
+    list.innerHTML = '<div class="empty">Impossibile caricare l\'elenco</div>';
+    return toast((error && error.message) || (data && data.error) || 'Errore');
+  }
+  list.innerHTML = _negListHtml(data.results);
+}
+function _negListHtml(rows) {
+  // Il backend ordina già dal più negativo; il riordino qui è una rete di sicurezza.
+  const righe = (rows || []).slice().sort((a, b) => Number(a.balance || 0) - Number(b.balance || 0));
+  if (!righe.length) return '<div class="empty">Nessun socio in negativo</div>';
+  return righe.map(u => {
+    const nome = u.display_name || [u.nome, u.cognome].filter(Boolean).join(' ') || 'Socio';
+    return `<button class="neg-row" onclick="negOpenUser('${_escAttr(u.card_id)}')">
+      <span class="neg-row-main">
+        <span class="neg-row-card mono">${_esc(u.card_id || '')}</span>
+        <span class="neg-row-name">${_esc(nome)}</span>
+      </span>
+      <span class="neg-row-bal">${eur(u.balance)}</span>
+    </button>`;
+  }).join('');
+}
+function closeNegativeBalances() {
+  document.getElementById('neg-modal-bg').classList.remove('open');
+}
+// Stessa strada già usata da adminLookup: tab Cassa + scheda del socio.
+function negOpenUser(cardId) {
+  closeNegativeBalances();
+  const el = document.getElementById('a-lookup');
+  if (!el) return toast('Cassa non disponibile');
+  el.value = cardId;
+  adminLookup();
 }
 async function loadAUsers() {
   const [{data}, {data: incomplete}] = await Promise.all([
