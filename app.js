@@ -870,7 +870,8 @@ function _evLongDate(iso) {
 function _evPriceHint(e) {
   if (e.has_tiers) {
     const min = Number(e.min_price || 0);
-    return min > 0 ? 'da ' + eur(min) : 'Gratis';
+    // Fasce tutte a 0 = voci di menù indicative: si paga alla carta in loco, non è gratis.
+    return min > 0 ? 'da ' + eur(min) : 'Alla carta';
   }
   const p = Number(e.price || 0);
   return p > 0 ? eur(p) : 'Gratis';
@@ -4492,8 +4493,8 @@ async function loadPublicEvent(slug) {
     <div style="font-size:13px;margin-bottom:3px">📅 ${dateStr}</div>
     ${_publicEvent.location?`<div style="font-size:13px;margin-bottom:3px">📍 ${_publicEvent.location}</div>`:''}
     ${_tierListHtml(tiers)}
-    ${!tiers.length && !(_publicEvent.price > 0)
-      ? `<div style="font-size:15px;font-weight:700;color:var(--gold);margin-top:10px">Evento gratuito</div>`
+    ${!(_publicEvent.price > 0) && !tiers.some(t => Number(t.price || 0) > 0)
+      ? `<div style="font-size:15px;font-weight:700;color:var(--gold);margin-top:10px">${tiers.length ? 'Alla carta' : 'Evento gratuito'}</div>`
       : ''}
     ${spotsHtml}
     ${_sumupEventSectionHtml(_publicEvent.id, _publicEvent.sumup_link)}
@@ -5437,7 +5438,10 @@ function openEventPopup(ev, total) {
   if (ev.event_date) meta.push('📅 ' + fdt(ev.event_date));
   if (ev.location)   meta.push('📍 ' + ev.location);
   if (ev.price > 0)  meta.push('💶 ' + eur(ev.price));
-  else if (ev.price === 0) meta.push('🎁 Gratuito');
+  else if (ev.price === 0) {
+    const cat = _evList.find(x => String(x.id) === String(ev.id));
+    meta.push(cat && cat.has_tiers && !(Number(cat.min_price || 0) > 0) ? '💶 Alla carta' : '🎁 Gratuito');
+  }
   document.getElementById('evp-meta').textContent = meta.join(' · ');
   document.getElementById('evp-desc').innerHTML = _richText(ev.description || '');
   const more = document.getElementById('evp-more');
