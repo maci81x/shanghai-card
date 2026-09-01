@@ -1010,6 +1010,8 @@ function _evdMenuMode() {
       || e.event_menu_mode || e.menu_mode || 'per_person';
 }
 function _evdGroupMenu() { return _evdMenuMode() === 'group_quantities' && _evdHasTiers(); }
+// Il prezzo di una voce sta in tier.price: il label non lo contiene.
+function _tierRowLabel(t) { return `${_esc(t.label || '')} — ${eur(t.price)}`; }
 // Le fasce restano per-persona in ogni altro caso: questo flag governa solo il menù di gruppo.
 function _evdPerPersonTiers() { return _evdHasTiers() && !_evdGroupMenu(); }
 function _prefsMap(arr) {
@@ -1058,7 +1060,7 @@ function _evdQtyRowsHtml() {
   return (_evd ? _evd.tiers : []).map(t => {
     const n = Number(_evdQty[t.id] || 0);
     return `<div class="tier-list-row">
-      <span class="tier-list-name">${_esc(t.label || '')}</span>
+      <span class="tier-list-name">${_tierRowLabel(t)}</span>
       <span class="qty-ctl">
         <button class="qty-btn" ${n <= 0 ? 'disabled' : ''} onclick="evdQty('${t.id}',-1)">−</button>
         <span class="qty-n">${n}</span>
@@ -1098,8 +1100,8 @@ function _evdPrefsPanelHtml() {
   const p = (_evd && _evd.prefs) || {};
   const righe = _evd.tiers.filter(t => Number(p[t.id] || 0) > 0)
     .map(t => `<div class="tier-list-row">
-      <span class="tier-list-name">${_esc(t.label || '')}</span>
-      <span class="tier-list-price">${Number(p[t.id])}</span>
+      <span class="tier-list-name">${_tierRowLabel(t)}</span>
+      <span class="tier-list-price">×${Number(p[t.id])}</span>
     </div>`);
   return `<div class="tier-list" style="margin-top:14px">
     <div class="tier-list-lbl">🍽️ Preferenze menù</div>

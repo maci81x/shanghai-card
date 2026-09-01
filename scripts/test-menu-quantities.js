@@ -24,8 +24,8 @@ vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8'), s
 const run = expr => vm.runInContext(expr, sandbox);
 
 const TIERS = JSON.stringify([
-  {id: 't1', label: 'Trippa al piatto (€7)', price: 0, sort_order: 1},
-  {id: 't2', label: 'Fagioli (€3)',          price: 0, sort_order: 2},
+  {id: 't1', label: 'Trippa al piatto', price: 7, sort_order: 1},
+  {id: 't2', label: 'Fagioli',          price: 3, sort_order: 2},
 ]);
 const setEvd = (mode, reg) => run(`
   _evd = {
@@ -35,6 +35,9 @@ const setEvd = (mode, reg) => run(`
     sumup: [], menu: {common: [], by_tier: []}, prefs: {}
   };
   _evdRows = []; _evdSelfTier = ''; _evdQty = {}; _evdSel = {};`);
+
+// 0. il prezzo si legge da tier.price, non dal label
+assert.strictEqual(run('eur(7)'), '\u20ac\u00a07,00', 'formato prezzo errato');
 
 // 1. per_person: comportamento invariato (fascia per me e lista fasce nell'intestazione)
 setEvd('per_person');
@@ -50,7 +53,8 @@ run(`_evdMode = 'compose'`);
 html = run('_evdComposeHtml()');
 assert(!html.includes('La tua fascia'), 'gruppo: la fascia non va mostrata');
 assert(html.includes('Preferenze menù'), 'gruppo: manca il blocco quantità');
-assert(html.includes('Trippa al piatto (€7)') && html.includes('Fagioli (€3)'), 'gruppo: voci menù mancanti');
+assert(html.includes('Trippa al piatto — \u20ac\u00a07,00'), 'gruppo: prezzo voce menù mancante o non formattato');
+assert(html.includes('Fagioli — \u20ac\u00a03,00'), 'gruppo: prezzo voce menù mancante o non formattato');
 assert.strictEqual((html.match(/qty-btn" disabled/g) || []).length, 2, 'gruppo: "−" va disabilitato a 0');
 assert.strictEqual(run('_evdTiersHtml()'), '', 'gruppo: la lista fasce va nascosta');
 
@@ -71,7 +75,8 @@ assert.strictEqual(run('_evdCollectCompanions()'), null, 'per_person: la fascia 
 setEvd('group_quantities', {ok: true, registered: true, registration: {id: 'r1'}, companions: []});
 run(`_evd.prefs = {t1: 3, t2: 0}`);
 const panel = run('_evdPrefsPanelHtml()');
-assert(panel.includes('Trippa al piatto (€7)') && panel.includes('>3<'), 'riepilogo: quantità mancante');
+assert(panel.includes('Trippa al piatto — \u20ac\u00a07,00'), 'riepilogo: prezzo voce mancante');
+assert(panel.includes('>×3<'), 'riepilogo: quantità mancante');
 assert(!panel.includes('Fagioli'), 'riepilogo: le voci a 0 non si mostrano');
 assert(panel.includes('Modifica preferenze menù'), 'riepilogo: manca il pulsante di modifica');
 
@@ -80,4 +85,4 @@ run('evdStartMenuPrefs()');
 assert.deepStrictEqual(JSON.parse(run('JSON.stringify(_evdQty)')), {t1: 3, t2: 0},
   'modifica: contatori non pre-popolati');
 
-console.log('OK — 6 controlli passati');
+console.log('OK — 7 controlli passati');
