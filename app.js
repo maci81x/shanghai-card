@@ -3017,8 +3017,8 @@ async function loadStaffEvents() {
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn-sm" onclick="staffToggleVisibility('${e.id}',${e.visible!==false})">${e.visible===false?'🔓 Mostra':'🔒 Nascondi'}</button>
-        <button class="btn-sm" onclick="toggleStaffEventGuests('${e.id}','${e.title.replace(/'/g,"\\'")}',this)">👥 Iscritti</button>
-        <button class="btn-sm" onclick="exportEventCSV('${e.id}','${e.title.replace(/'/g,"\\'")}')">📥 CSV</button>
+        <button class="btn-sm" onclick="toggleStaffEventGuests('${e.id}',this)">👥 Iscritti</button>
+        <button class="btn-sm" onclick="exportEventCSV('${e.id}')">📥 CSV</button>
       </div>
       <div id="sev-guests-${e.id}" style="display:none;margin-top:10px"></div>
     </div>`).join('');
@@ -3034,7 +3034,7 @@ async function loadStaffEvDash(eventId) {
     <div class="ev-kpi"><span class="ev-kpi-n" style="color:var(--grn)">${data.total_paganti}</span><span class="ev-kpi-l">💰 Paganti</span></div>
     <div class="ev-kpi"><span class="ev-kpi-n" style="color:var(--gold)">${data.total_presenti}</span><span class="ev-kpi-l">✅ Presenti</span></div>`;
 }
-async function toggleStaffEventGuests(eventId, eventTitle, btn) {
+async function toggleStaffEventGuests(eventId, btn) {
   const el = document.getElementById('sev-guests-' + eventId);
   if (el.style.display !== 'none') { el.style.display='none'; btn.textContent='👥 Iscritti'; return; }
   el.style.display = 'block'; btn.textContent = '⏳ Carico…';
@@ -3689,9 +3689,9 @@ async function loadAGest() {
         <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn-sm" onclick="openEditEvent('${e.id}')">✏️ Modifica</button>
           <button class="btn-sm" onclick="adminToggleVisibility('${e.id}',${e.visible!==false})">${e.visible===false?'🔓 Mostra':'🔒 Nascondi'}</button>
-          <button class="btn-sm" onclick="toggleEventGuests('${e.id}','${e.title.replace(/'/g,"\\'")}',this)">👥 Iscritti</button>
-          <button class="btn-sm" onclick="exportEventCSV('${e.id}','${e.title.replace(/'/g,"\\'")}')">📥 CSV</button>
-          <button class="btn-sm" style="color:var(--neg)" data-action="delete-event" data-event-id="${e.id}" data-event-title="${_esc(e.title)}">🗑️ Elimina</button>
+          <button class="btn-sm" onclick="toggleEventGuests('${e.id}',this)">👥 Iscritti</button>
+          <button class="btn-sm" onclick="exportEventCSV('${e.id}')">📥 CSV</button>
+          <button class="btn-sm" style="color:var(--neg)" data-action="delete-event" data-event-id="${e.id}" data-event-title="${_escAttr(e.title)}">🗑️ Elimina</button>
         </div>
         <div id="guests-${e.id}" style="display:none;margin-top:10px"></div>
       </div>`).join('');
@@ -4934,7 +4934,7 @@ async function loadEvDash(eventId) {
     <div class="ev-kpi"><span class="ev-kpi-n" style="color:var(--grn)">${data.total_paganti}</span><span class="ev-kpi-l">💰 Paganti · ${eur(data.incasso_totale)}</span></div>
     <div class="ev-kpi"><span class="ev-kpi-n" style="color:var(--gold)">${data.total_presenti}</span><span class="ev-kpi-l">✅ Presenti</span></div>`;
 }
-async function toggleEventGuests(eventId, eventTitle, btn) {
+async function toggleEventGuests(eventId, btn) {
   const el = document.getElementById('guests-' + eventId);
   if (el.style.display !== 'none') { el.style.display='none'; btn.textContent='👥 Iscritti'; return; }
   el.style.display = 'block';
@@ -5112,27 +5112,40 @@ async function _reloadStaffEventGuests(eventId) {
   const {data} = await db.rpc('admin_list_event_registrations', {p_event_id: eventId});
   if (data) { el.innerHTML = _buildGuestHtml(data, eventId, 'staff'); loadStaffEvDash(eventId); }
 }
-async function exportEventCSV(eventId, eventTitle) {
+// Preferenze menù in una sola colonna testuale: "Trippa al piatto ×2, Fagioli ×1".
+// Una colonna per voce darebbe un CSV sparso e diverso da evento a evento.
+function _prefsCsvText(prefs) {
+  return (prefs || [])
+    .filter(p => Number(p.quantity || 0) > 0)
+    .map(p => `${p.label || ''} ×${Number(p.quantity)}`)
+    .join(', ');
+}
+async function exportEventCSV(eventId) {
   const {data, error} = await db.rpc('admin_export_event_csv', {p_event_id: eventId});
   if (error) return toast(error.message);
   const raw = (data && Array.isArray(data.iscritti)) ? data.iscritti : [];
   if (!raw.length) return toast('Nessun iscritto da esportare');
   const statusLabel = s => ({da_saldare:'Da saldare',saldato_credito:'Credito',saldato_sumup:'SumUp',saldato_contanti:'Contanti',annullato:'Annullato',gratuito:'Gratuito'}[s]||s||'—');
-  const rows = raw.map(r => ({
-    tipo:            r.tipo||'',
-    tessera:         r.card_id||'',
-    nome:            r.nome||'',
-    cognome:         r.cognome||'',
-    telefono:        r.telefono||'',
-    email:           r.email||'',
-    importo:         Number(r.amount||0).toFixed(2),
-    stato_pagamento: statusLabel(r.payment_status),
-    presenza:        r.checked_in ? 'Sì' : 'No',
-    operatore:       r.operatore||''
-  }));
+  // I soci arrivano con display_name e nome/cognome vuoti, gli ospiti il contrario.
+  const gruppo = data.menu_mode === 'group_quantities';
+  const rows = raw.map(r => {
+    const row = {
+      tipo:            r.tipo||'',
+      tessera:         r.card_id||'',
+      nominativo:      r.display_name || `${r.nome||''} ${r.cognome||''}`.trim(),
+      telefono:        r.telefono||'',
+      email:           r.email||'',
+      importo:         Number(r.amount||0).toFixed(2),
+      stato_pagamento: statusLabel(r.payment_status),
+      presenza:        r.checked_in ? 'Sì' : 'No',
+      operatore:       r.operatore||''
+    };
+    if (gruppo) row.preferenze_menu = _prefsCsvText(r.menu_preferences);
+    return row;
+  });
   const today = new Date().toISOString().slice(0,10);
-  const safeName = (eventTitle||'evento').replace(/[^a-zA-Z0-9]/g,'_').toLowerCase();
-  downloadCSV(rows, `iscritti_${safeName}_${today}.csv`);
+  const safeName = (data.evento || 'evento').replace(/[^a-zA-Z0-9]+/g,'_').replace(/^_|_$/g,'').toLowerCase();
+  downloadCSV(rows, `iscritti_${safeName||'evento'}_${today}.csv`);
 }
 
 // ── EXPORT CSV ────────────────────────────────────────────────────────
