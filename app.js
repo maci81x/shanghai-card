@@ -349,6 +349,7 @@ function route(role) {
   else gotoAdmin();
 }
 function logout() {
+  stopUnseenReservationsWatch();
   currentUser = null; staffTarget = null;
   staffOps = []; localStorage.removeItem('s_ops');
   sessionStorage.removeItem('sh_u'); sessionStorage.removeItem('sh_r');
@@ -2546,6 +2547,7 @@ function gotoStaff() {
   const backToggle = document.getElementById('s-socio-toggle');
   if (backToggle) backToggle.style.display = currentUser.is_staff ? '' : 'none';
   renderStaffHist();
+  startUnseenReservationsWatch();
 }
 function switchToStaffMode() {
   if (!currentUser || !currentUser.is_staff) return;
@@ -3327,11 +3329,60 @@ function gotoAdmin() {
   document.getElementById('a-name').textContent = currentUser.display_name;
   showScreen('screen-admin');
   loadDash(); loadAUsers(); loadATx(); loadAGest();
+  startUnseenReservationsWatch();
 }
 function _tabBadge(tabId, count, label) {
   const el = document.getElementById(tabId);
   if (!el) return;
-  el.innerHTML = _esc(label) + (Number(count) > 0 ? `<span class="tab-badge">${Number(count)}</span>` : '');
+  el.innerHTML = _esc(label)
+    + (Number(count) > 0 ? `<span class="tab-badge">${Number(count)}</span>` : '')
+    + _unseenBadgeHtml(tabId);   // il badge rosso sopravvive al ridisegno della label
+}
+
+// ── PRENOTAZIONI GADGET NON VISTE ────────────────────────────────────
+// Badge rosso sul tab delle consegne, staff e admin. Il conteggio gold già
+// presente (giacenze in attesa) resta: sono due informazioni diverse.
+const _RES_TABS = {'s-deliv-tab': '📦 Consegne gadget', 'a-orders-tab': '📦 Consegne gadget'};
+let _unseenRes = 0, _unseenResTimer = null;
+function _unseenBadgeHtml(tabId) {
+  return (_RES_TABS[tabId] && _unseenRes > 0) ? `<span class="tab-badge-new">${_unseenRes}</span>` : '';
+}
+function _renderUnseenBadges() {
+  Object.keys(_RES_TABS).forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    // il badge gold viene riusato così com'è: qui non se ne conosce il conteggio
+    const gold = el.querySelector('.tab-badge');
+    el.innerHTML = _esc(_RES_TABS[id]) + (gold ? gold.outerHTML : '') + _unseenBadgeHtml(id);
+  });
+}
+function _isOperator() {
+  return !!(currentUser && (currentUser.is_staff || currentUser.role === 'admin'));
+}
+async function refreshUnseenReservations() {
+  if (!_isOperator()) return;
+  const {data, error} = await db.rpc('staff_unseen_reservations', {p_staff_id: currentUser.id});
+  if (error || !data || !data.ok) return;      // silenzioso: è solo una notifica
+  _unseenRes = Number(data.unseen_count || 0);
+  _renderUnseenBadges();
+}
+function startUnseenReservationsWatch() {
+  stopUnseenReservationsWatch();
+  refreshUnseenReservations();
+  _unseenResTimer = setInterval(refreshUnseenReservations, 60000);
+}
+function stopUnseenReservationsWatch() {
+  if (_unseenResTimer) clearInterval(_unseenResTimer);
+  _unseenResTimer = null;
+  _unseenRes = 0;
+}
+// Chiamata solo quando la lista viene davvero aperta, mai al login: finché non
+// controlla, lo staff deve continuare a vedere il badge.
+async function markReservationsSeen() {
+  if (!_isOperator() || !_unseenRes) return;
+  _unseenRes = 0;
+  _renderUnseenBadges();
+  await db.rpc('staff_mark_reservations_seen', {p_staff_id: currentUser.id});
 }
 async function loadDash() {
   const {data} = await db.rpc('admin_dashboard');
@@ -5891,6 +5942,7 @@ function setDelivFilter(status) {
 async function loadDeliveries(ctx, status) {
   _delivCtx = ctx || _delivCtx;
   _delivStatus = status || _delivStatus || 'prenotato';
+  markReservationsSeen();
   const ids = _delivIds();
   const el = document.getElementById(ids.list);
   if (!el) return;

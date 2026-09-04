@@ -286,6 +286,9 @@ body.nav-sidebar .screen .hdr{padding-left:80px}
 .tabs-scroll::-webkit-scrollbar{display:none}
 .tabs-scroll .tab{flex:0 0 auto;white-space:nowrap;padding:8px 12px}
 .tab-badge{display:inline-block;min-width:18px;margin-left:5px;padding:0 5px;border-radius:10px;background:var(--gold);color:#0A0A0A;font-size:11px;font-weight:700;line-height:18px;text-align:center}
+.tab-badge-new{display:inline-block;min-width:18px;height:18px;margin-left:5px;padding:0 5px;
+  border-radius:9px;background:var(--neg);color:#fff;font-size:11px;font-weight:700;line-height:18px;
+  text-align:center;box-shadow:0 0 0 2px rgba(0,0,0,.35)}
 
 /* MODALI GENERICHE (stesso look di .modal-bg, riusabili) */
 .modal-ov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:1900;align-items:center;justify-content:center;padding:12px}
